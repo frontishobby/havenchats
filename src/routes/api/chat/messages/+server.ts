@@ -1,5 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { getSession, getMessagePage } from '$lib/server/db/chats';
+import { getSession, getMessagePage, deleteMessage } from '$lib/server/db/chats';
 
 /** 한 번에 가져올 과거 메시지 수(서버 로드 PAGE_SIZE 와 동일). */
 const PAGE_SIZE = 20;
@@ -33,4 +33,23 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 		oldestSeq: page.oldestSeq,
 		hasMore: page.hasMore
 	});
+};
+
+interface DeleteBody {
+	messageId: string;
+}
+
+/** 대화 로그에서 메시지 1건 삭제(소유자만, user/assistant 무관). 실제 DB 행을 제거. */
+export const DELETE: RequestHandler = async ({ request, locals, platform }) => {
+	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
+	const db = platform?.env?.DB;
+	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
+
+	const body = (await request.json()) as DeleteBody;
+	if (!body.messageId) return json({ error: 'missing messageId' }, { status: 400 });
+
+	const ok = await deleteMessage(db, body.messageId, locals.user.id);
+	if (!ok) return json({ error: 'message not found' }, { status: 404 });
+
+	return json({ ok: true });
 };

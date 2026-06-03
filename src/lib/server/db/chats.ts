@@ -160,6 +160,30 @@ export async function deleteSession(
 	return true;
 }
 
+/**
+ * 메시지 1건 삭제(소유권 확인 — 메시지가 속한 세션이 이 유저 것인지). 반환: 실제 삭제 여부.
+ * seq 는 재배열하지 않고 session.message_count 도 줄이지 않는다 → 삭제로 생긴 seq 공백은
+ * getWindow/getMessagePage(둘 다 seq 순서만 사용)·요약 경계(summary_upto_seq)에 무해하고,
+ * 다음 메시지 seq 발급(message_count+1)이 기존 seq 와 충돌하지 않아 안전하다.
+ */
+export async function deleteMessage(
+	db: D1Database,
+	messageId: string,
+	userId: string
+): Promise<boolean> {
+	const owned = await db
+		.prepare(
+			`SELECT m.id FROM chat_messages m
+			 JOIN chat_sessions s ON s.id = m.session_id
+			 WHERE m.id = ? AND s.user_id = ?`
+		)
+		.bind(messageId, userId)
+		.first<{ id: string }>();
+	if (!owned) return false;
+	await db.prepare('DELETE FROM chat_messages WHERE id = ?').bind(messageId).run();
+	return true;
+}
+
 interface MessageRow {
 	id: string;
 	seq: number;
@@ -249,6 +273,8 @@ export async function createSession(
  * model 을 같이 넘기면 세션의 "마지막 사용 모델"을 갱신(요약 시 사용).
  * inputTokens 는 assistant 메시지에서, 그 응답에 들어간 input 토큰 수(실측/추정).
  * cost 는 assistant 메시지에서, 그 응답의 AI Gateway 추론 비용(USD, 실측). 없으면 미기록.
+ * id 를 넘기면 그 값을 메시지 PK 로 사용(클라가 생성한 id 와 DB id 를 일치시켜 삭제 등 동기화).
+ * 없으면 서버가 생성.
  * 반환: 발급된 seq.
  */
 export async function appendMessage(
@@ -258,7 +284,8 @@ export async function appendMessage(
 	content: string,
 	model?: string,
 	inputTokens?: number,
-	cost?: number
+	cost?: number,
+	id?: string
 ): Promise<number> {
 	const now = Date.now();
 	// 단일 유저가 순차 전송하므로 read-then-write 경쟁 위험은 낮다.
@@ -275,7 +302,7 @@ export async function appendMessage(
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			)
 			.bind(
-				crypto.randomUUID(),
+				id ?? crypto.randomUUID(),
 				sessionId,
 				seq,
 				role,

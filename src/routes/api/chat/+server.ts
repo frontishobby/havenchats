@@ -62,6 +62,12 @@ interface ChatRequestBody {
 	maxSentences?: number;
 	/** '나'(사용자) 행동·대사를 AI가 생성하는 정도. 0=금지, 1=적정, 2=풍부. 기본 1. */
 	userActs?: number;
+	/**
+	 * 클라가 생성한 이번 유저/assistant 메시지 id. DB PK 로 그대로 저장해 클라 메시지 ↔ DB 행을
+	 * 일치시킨다(이어가기 전, 라이브 메시지도 id 로 삭제 가능). 없으면 서버가 생성.
+	 */
+	userMsgId?: string;
+	assistantMsgId?: string;
 }
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
@@ -96,6 +102,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const modelId = pickModel(body.model);
 	const maxSentences = clampSentences(body.maxSentences);
 	const userActs = clampUserActs(body.userActs);
+	// 클라가 보낸 메시지 id 가 있으면 DB PK 로 사용(라이브 메시지 삭제 동기화). 없으면 서버 생성.
+	const userMsgId = pickMsgId(body.userMsgId);
+	const assistantMsgId = pickMsgId(body.assistantMsgId);
 
 	// ── 세션 확정: 기존 이어가기 or 새 세션(첫 상황을 seq=1 로 저장) ──
 	let session: ChatSession | null;
@@ -113,7 +122,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 
 	// 유저 메시지 즉시 영속화 (스트림 끊겨도 유실 방지) + 세션 모델 갱신
-	await appendMessage(db, session.id, 'user', text, modelId);
+	await appendMessage(db, session.id, 'user', text, modelId, undefined, undefined, userMsgId);
 
 	// live window(seq > summary_upto_seq) — 방금 넣은 유저 메시지·오프닝 포함
 	const fullWindow = await getWindow(db, session.id, session.summaryUptoSeq);
@@ -165,7 +174,16 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	// 키가 없으면 mock 스트리머로 폴백 (로컬에서 키 없이도 UI 동작)
 	if (!gateway) {
-		return mockStream(db, after, session, character, modelId, inputTokensEst, tokenHeaders);
+		return mockStream(
+			db,
+			after,
+			session,
+			character,
+			modelId,
+			inputTokensEst,
+			assistantMsgId,
+			tokenHeaders
+		);
 	}
 
 	console.log(
@@ -211,7 +229,17 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			const inputTokens = usage?.inputTokens ?? inputTokensEst;
 			const cost = parseGatewayCost(providerMetadata);
 			after(
-				persistAndMaybeSummarize(db, gateway, modelId, session!, window, clean, inputTokens, cost)
+				persistAndMaybeSummarize(
+					db,
+					gateway,
+					modelId,
+					session!,
+					window,
+					clean,
+					inputTokens,
+					assistantMsgId,
+					cost
+				)
 			);
 		}
 	});
@@ -331,6 +359,7 @@ async function persistAndMaybeSummarize(
 	windowBefore: Array<StoredMessage & { tokenEst: number }>,
 	reply: string,
 	inputTokens: number,
+	assistantMsgId: string,
 	cost?: number
 ): Promise<void> {
 	const assistantSeq = await appendMessage(
@@ -340,7 +369,8 @@ async function persistAndMaybeSummarize(
 		reply,
 		modelId,
 		inputTokens,
-		cost
+		cost,
+		assistantMsgId
 	);
 
 	const liveCount = windowBefore.length + 1;
@@ -403,6 +433,13 @@ const SUMMARY_SYSTEM = [
 /** 사용자가 설정에서 선택한 모델을 허용목록으로 검증해 반환. 유효하지 않으면 기본 모델. */
 function pickModel(requested?: string): string {
 	return requested && MODEL_IDS.has(requested) ? requested : DEFAULT_MODEL_ID;
+}
+
+/** 클라가 보낸 메시지 id 검증(비어있지 않은 문자열만 채택). 없으면 새 uuid. */
+function pickMsgId(requested?: string): string {
+	return typeof requested === 'string' && requested.trim() !== ''
+		? requested.trim()
+		: crypto.randomUUID();
 }
 
 /** reasoning 모델이면 출력 예산에 더할 여유 토큰, 아니면 0. */
@@ -558,6 +595,7 @@ function mockStream(
 	character: Character,
 	modelId: string,
 	inputTokensEst: number,
+	assistantMsgId: string,
 	tokenHeaders: Record<string, string>
 ): Response {
 	const reply = mockReply(character.name);
@@ -578,9 +616,16 @@ function mockStream(
 			controller.close();
 			// mock 은 실 usage 가 없으므로 추정치를 input 토큰으로 저장.
 			after(
-				appendMessage(db, session.id, 'assistant', reply, modelId, inputTokensEst).then(
-					() => undefined
-				)
+				appendMessage(
+					db,
+					session.id,
+					'assistant',
+					reply,
+					modelId,
+					inputTokensEst,
+					undefined,
+					assistantMsgId
+				).then(() => undefined)
 			);
 		}
 	});

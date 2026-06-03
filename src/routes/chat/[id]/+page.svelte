@@ -352,12 +352,16 @@
 		input = '';
 		resetTextareaHeight();
 
-		messages.push({ id: crypto.randomUUID(), role: 'user', content: text });
+		// 클라가 메시지 id 를 생성해 서버로 보내고, 서버는 이 id 를 DB PK 로 저장한다 →
+		// 새로고침 전(라이브) 메시지도 같은 id 로 DB 삭제가 가능해진다.
+		const userMsgId = crypto.randomUUID();
+		const assistantMsgId = crypto.randomUUID();
+		messages.push({ id: userMsgId, role: 'user', content: text });
 
 		// assistant placeholder. $state 배열은 push 시 프록시로 감싸므로,
 		// 반드시 messages[idx] (프록시)를 통해 수정해야 반응성이 동작한다.
 		const idx = messages.length;
-		messages.push({ id: crypto.randomUUID(), role: 'assistant', content: '' });
+		messages.push({ id: assistantMsgId, role: 'assistant', content: '' });
 		streaming = true;
 		await scrollToBottom();
 
@@ -373,7 +377,9 @@
 					openingIndex: data.openingIndex,
 					model,
 					maxSentences,
-					userActs
+					userActs,
+					userMsgId,
+					assistantMsgId
 				})
 			});
 
@@ -418,6 +424,37 @@
 			streaming = false;
 			// 새 세션·최신 미리보기가 새로고침 없이 사이드바에 반영되도록 목록만 무효화.
 			invalidate('app:recentChats');
+		}
+	}
+
+	// 메시지(user/assistant 무관) 1건 삭제 — 실제 DB 행을 지우고 화면에서도 제거.
+	// 라이브 메시지는 클라 id == DB id 라 바로 지워진다. 세션/DB 에 아직 없는 메시지(예: 새 세션의
+	// 오프닝, 영속화 직전)는 404 가 나오는데, 그 경우에도 화면에서는 제거한다(낙관적).
+	let deleting = $state<string | null>(null);
+	async function deleteMessage(m: ChatMessage) {
+		if (streaming || deleting) return;
+		if (!confirm('이 메시지를 삭제할까요? 되돌릴 수 없습니다.')) return;
+		deleting = m.id;
+		try {
+			if (sessionId) {
+				const res = await fetch('/api/chat/messages', {
+					method: 'DELETE',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ messageId: m.id })
+				});
+				// 404 = DB 에 아직 없음(라이브/오프닝) → 화면에서만 제거. 그 외 실패는 유지.
+				if (!res.ok && res.status !== 404) {
+					console.error('[haven] 메시지 삭제 실패', res.status);
+					return;
+				}
+			}
+			messages = messages.filter((x) => x.id !== m.id);
+			// 사이드바 최근 미리보기(마지막 메시지)가 바뀔 수 있으니 목록 무효화.
+			invalidate('app:recentChats');
+		} catch (e) {
+			console.error(e);
+		} finally {
+			deleting = null;
 		}
 	}
 
@@ -679,6 +716,17 @@
 			{#each messages as m (m.id)}
 				{#if m.content || (streaming && m === lastMessage)}
 					<div class="para {m.role}">
+						{#if !(streaming && m === lastMessage)}
+							<button
+								class="msg-del"
+								onclick={() => deleteMessage(m)}
+								disabled={deleting === m.id}
+								aria-label="메시지 삭제"
+								title="삭제"
+							>
+								🗑
+							</button>
+						{/if}
 						{@render novelBody(m.content, m.role === 'user')}
 						{#if streaming && m.role === 'assistant' && m === lastMessage}
 							{#if m.content}<span class="cursor"></span>{:else}<span class="typing"
@@ -1075,8 +1123,49 @@
 		letter-spacing: 0.01em;
 	}
 	.para {
+		position: relative;
 		margin: 0 0 1.5em;
 		word-break: break-word;
+	}
+	/* 메시지 삭제 버튼 — 평소 숨김, 문단 hover/focus 시 노출(우상단). */
+	.msg-del {
+		position: absolute;
+		top: -6px;
+		right: -6px;
+		width: 28px;
+		height: 28px;
+		display: grid;
+		place-items: center;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--bg-card);
+		color: var(--text-dim);
+		font-size: 0.8rem;
+		line-height: 1;
+		opacity: 0;
+		transition:
+			opacity 0.12s ease,
+			color 0.12s ease,
+			border-color 0.12s ease;
+		z-index: 2;
+	}
+	.para:hover .msg-del,
+	.msg-del:focus-visible {
+		opacity: 1;
+	}
+	.msg-del:hover {
+		color: var(--danger, #ef4444);
+		border-color: var(--danger, #ef4444);
+	}
+	.msg-del:disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
+	/* 터치 기기(hover 없음)에선 항상 옅게 노출해 접근 가능하게. */
+	@media (hover: none) {
+		.msg-del {
+			opacity: 0.55;
+		}
 	}
 	/* 장면 이미지 */
 	.scene-img {
