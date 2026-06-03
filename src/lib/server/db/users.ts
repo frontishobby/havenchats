@@ -12,9 +12,22 @@ export interface UserProfile {
 	id: string;
 	email: string;
 	name: string | null; // display_name (대화용 이름)
+	avatarUrl: string | null; // 프로필 사진(servable URL) — 없으면 null
 	persona: string | null;
 	preference: Preference | null;
 	profileComplete: boolean; // display_name 설정 여부
+}
+
+/** 다른 유저에게 공개되는 최소 프로필(유저 페이지 헤더용). */
+export interface PublicProfile {
+	id: string;
+	name: string | null;
+	avatarUrl: string | null;
+}
+
+/** avatar_url 컬럼에는 R2 오브젝트 키를 저장한다. servable URL 로 변환. */
+function avatarUrlFromKey(key: string | null): string | null {
+	return key ? `/img/${key}` : null;
 }
 
 /**
@@ -60,12 +73,13 @@ export async function findOrCreateOAuthUser(
 /** 세션 신원으로 전체 프로필 로드. (hooks 에서 매 요청 사용) */
 export async function getUserProfile(db: D1Database, id: string): Promise<UserProfile | null> {
 	const row = await db
-		.prepare('SELECT id, email, display_name, persona, preference FROM users WHERE id = ?')
+		.prepare('SELECT id, email, display_name, avatar_url, persona, preference FROM users WHERE id = ?')
 		.bind(id)
 		.first<{
 			id: string;
 			email: string;
 			display_name: string | null;
+			avatar_url: string | null;
 			persona: string | null;
 			preference: string | null;
 		}>();
@@ -77,10 +91,38 @@ export async function getUserProfile(db: D1Database, id: string): Promise<UserPr
 		id: row.id,
 		email: row.email,
 		name: row.display_name,
+		avatarUrl: avatarUrlFromKey(row.avatar_url),
 		persona: row.persona,
 		preference: pref,
 		profileComplete: !!row.display_name && row.display_name.trim() !== ''
 	};
+}
+
+/** 유저 페이지 헤더용 공개 프로필. 없으면 null. */
+export async function getPublicProfile(db: D1Database, id: string): Promise<PublicProfile | null> {
+	const row = await db
+		.prepare('SELECT id, display_name, avatar_url FROM users WHERE id = ?')
+		.bind(id)
+		.first<{ id: string; display_name: string | null; avatar_url: string | null }>();
+	if (!row) return null;
+	return { id: row.id, name: row.display_name, avatarUrl: avatarUrlFromKey(row.avatar_url) };
+}
+
+/** 프로필 사진 R2 키 갱신. 기존 키(있으면) 반환 → 호출부가 옛 오브젝트 정리. */
+export async function updateAvatarKey(
+	db: D1Database,
+	id: string,
+	key: string
+): Promise<string | null> {
+	const prev = await db
+		.prepare('SELECT avatar_url FROM users WHERE id = ?')
+		.bind(id)
+		.first<{ avatar_url: string | null }>();
+	await db
+		.prepare('UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?')
+		.bind(key, Date.now(), id)
+		.run();
+	return prev?.avatar_url ?? null;
 }
 
 /**

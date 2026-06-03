@@ -53,7 +53,6 @@
 			</a>
 		</div>
 		<nav>
-			<a href="/" class="nav-link">탐색</a>
 			{#if data.user}
 				<div class="user-menu" bind:this={menuRef}>
 					<button
@@ -64,25 +63,29 @@
 						aria-expanded={menuOpen}
 						title="메뉴"
 					>
-						<span class="user-fallback">
-							{(data.user.name ?? data.user.email).charAt(0).toUpperCase()}
-						</span>
+						{#if data.user.avatarUrl}
+							<img class="user-avatar" src={data.user.avatarUrl} alt="" />
+						{:else}
+							<span class="user-fallback">
+								{(data.user.name ?? data.user.email).charAt(0).toUpperCase()}
+							</span>
+						{/if}
 						<span class="user-name">{data.user.name ?? '프로필 설정'}</span>
 						<span class="chev">▾</span>
 					</button>
 					{#if menuOpen}
 						<div class="menu" role="menu">
-							<button class="menu-item" role="menuitem" onclick={openProfileSettings}>
-								프로필 설정
-							</button>
 							<a
 								class="menu-item"
 								role="menuitem"
-								href="/characters"
+								href="/user/{data.user.id}"
 								onclick={() => (menuOpen = false)}
 							>
-								캐릭터 관리
+								내 프로필
 							</a>
+							<button class="menu-item" role="menuitem" onclick={openProfileSettings}>
+								프로필 설정
+							</button>
 							<div class="menu-sep"></div>
 							<a
 								class="menu-item danger"
@@ -177,14 +180,6 @@
 		align-items: center;
 		gap: 16px;
 	}
-	.nav-link {
-		color: var(--text-dim);
-		font-size: 0.9rem;
-		font-weight: 500;
-	}
-	.nav-link:hover {
-		color: var(--text);
-	}
 	.login-btn {
 		display: inline-block;
 		background: var(--accent);
@@ -272,6 +267,13 @@
 		color: #fff;
 		font-weight: 700;
 		font-size: 0.8rem;
+	}
+	.user-avatar {
+		width: 28px;
+		height: 28px;
+		border-radius: 50%;
+		flex-shrink: 0;
+		object-fit: cover;
 	}
 	.user-name {
 		font-size: 0.88rem;

@@ -28,11 +28,17 @@
 	let {
 		mode,
 		characterId,
-		initial
+		initial,
+		returnTo = '/',
+		returnLabel = '탐색으로'
 	}: {
 		mode: 'create' | 'edit';
 		characterId?: string;
 		initial?: CharacterFormInitial;
+		/** 뒤로/저장 후 이동 대상. 수정 모드에선 보통 제작자 프로필 페이지. */
+		returnTo?: string;
+		/** 뒤로 가기 링크 라벨. */
+		returnLabel?: string;
 	} = $props();
 
 	const NAME_MAX = 15;
@@ -236,8 +242,8 @@
 			if (!res.ok || !data.id) {
 				throw new Error(data.error ?? '저장에 실패했어요.');
 			}
-			// 생성 → 바로 대화, 수정 → 관리 목록으로.
-			await goto(isEdit ? '/characters' : `/chat/${data.id}`);
+			// 생성 → 바로 대화, 수정 → 제작자 프로필로.
+			await goto(isEdit ? returnTo : `/chat/${data.id}`);
 		} catch (e) {
 			error = e instanceof Error ? e.message : '저장에 실패했어요.';
 			submitting = false;
@@ -246,7 +252,7 @@
 </script>
 
 <div class="create">
-	<a class="back" href={isEdit ? '/characters' : '/'}>← {isEdit ? '캐릭터 관리' : '탐색으로'}</a>
+	<a class="back" href={isEdit ? returnTo : '/'}>← {isEdit ? returnLabel : '탐색으로'}</a>
 
 	<header class="head">
 		<span class="logo">✦</span>

@@ -6,12 +6,50 @@
 
 	const dismissable = $derived(!!user?.profileComplete);
 
+	const ACCEPT = ['image/webp', 'image/avif'];
+	const AVATAR_MAX_BYTES = 3 * 1024 * 1024;
+
 	let name = $state('');
 	let persona = $state('');
 	let preference = $state<'male' | 'female' | null>(null);
 	let saving = $state(false);
 	let error = $state('');
 	let initialized = $state(false);
+
+	// 프로필 사진
+	let avatarFile = $state<File | null>(null);
+	let avatarPreview = $state<string | null>(null);
+	let fileInput = $state<HTMLInputElement | null>(null);
+
+	// 새로 고른 사진 > 기존 프로필 사진 > 없음(이니셜 폴백)
+	const displayAvatar = $derived(avatarPreview ?? user?.avatarUrl ?? null);
+
+	function resetAvatar() {
+		if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+		avatarFile = null;
+		avatarPreview = null;
+		if (fileInput) fileInput.value = '';
+	}
+
+	function setAvatar(file: File | undefined | null) {
+		if (!file) return;
+		if (!ACCEPT.includes(file.type)) {
+			error = '프로필 사진은 webp 또는 avif 이미지만 가능해요.';
+			return;
+		}
+		if (file.size > AVATAR_MAX_BYTES) {
+			error = '이미지 용량이 너무 커요 (최대 3MB).';
+			return;
+		}
+		error = '';
+		if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+		avatarFile = file;
+		avatarPreview = URL.createObjectURL(file);
+	}
+
+	function onAvatarChange(e: Event) {
+		setAvatar((e.target as HTMLInputElement).files?.[0]);
+	}
 
 	// 모달이 열릴 때 현재 프로필로 폼 초기화
 	$effect(() => {
@@ -20,8 +58,10 @@
 			persona = user?.persona ?? '';
 			preference = user?.preference ?? null;
 			error = '';
+			resetAvatar();
 			initialized = true;
 		} else if (!profileModal.open && initialized) {
+			resetAvatar();
 			initialized = false;
 		}
 	});
@@ -40,11 +80,12 @@
 		saving = true;
 		error = '';
 		try {
-			const res = await fetch('/api/profile', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ name: name.trim(), persona: persona.trim(), preference })
-			});
+			const fd = new FormData();
+			fd.set('name', name.trim());
+			fd.set('persona', persona.trim());
+			if (preference) fd.set('preference', preference);
+			if (avatarFile) fd.set('avatar', avatarFile);
+			const res = await fetch('/api/profile', { method: 'POST', body: fd });
 			if (!res.ok) {
 				const j = (await res.json().catch(() => ({}))) as { error?: string };
 				throw new Error(j.error ?? '저장에 실패했어요.');
@@ -79,6 +120,32 @@
 			<div class="head">
 				<h2>{dismissable ? '프로필 수정' : '프로필 설정'}</h2>
 				<p class="sub">대화에 사용할 정보를 설정해 주세요.</p>
+			</div>
+
+			<div class="avatar-field">
+				<button
+					type="button"
+					class="avatar-pick"
+					onclick={() => fileInput?.click()}
+					aria-label="프로필 사진 선택"
+				>
+					{#if displayAvatar}
+						<img src={displayAvatar} alt="프로필 사진" />
+					{:else}
+						<span class="avatar-fallback">
+							{(name || user?.email || '?').charAt(0).toUpperCase()}
+						</span>
+					{/if}
+					<span class="avatar-cam">📷</span>
+				</button>
+				<span class="avatar-hint">프로필 사진 <span class="opt">(webp · avif, 선택)</span></span>
+				<input
+					bind:this={fileInput}
+					type="file"
+					accept="image/webp,image/avif"
+					class="hidden-input"
+					onchange={onAvatarChange}
+				/>
 			</div>
 
 			<div class="field">
@@ -183,6 +250,64 @@
 		margin: 0 0 20px;
 		font-size: 0.85rem;
 		color: var(--text-dim);
+	}
+	.avatar-field {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 20px;
+	}
+	.avatar-pick {
+		position: relative;
+		width: 84px;
+		height: 84px;
+		border-radius: 50%;
+		border: 1px solid var(--border);
+		background: var(--bg-elev);
+		padding: 0;
+		overflow: hidden;
+		cursor: pointer;
+		transition: border-color 0.15s ease;
+	}
+	.avatar-pick:hover {
+		border-color: var(--accent);
+	}
+	.avatar-pick img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+	.avatar-fallback {
+		width: 100%;
+		height: 100%;
+		display: grid;
+		place-items: center;
+		font-size: 2rem;
+		font-weight: 700;
+		color: #fff;
+		background: linear-gradient(135deg, var(--accent), var(--nsfw));
+	}
+	.avatar-cam {
+		position: absolute;
+		right: 2px;
+		bottom: 2px;
+		width: 26px;
+		height: 26px;
+		display: grid;
+		place-items: center;
+		font-size: 0.8rem;
+		border-radius: 50%;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+	}
+	.avatar-hint {
+		font-size: 0.78rem;
+		color: var(--text-dim);
+	}
+	.hidden-input {
+		display: none;
 	}
 	.field {
 		margin-bottom: 16px;

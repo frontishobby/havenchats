@@ -8,6 +8,7 @@ declare global {
 				id: string;
 				email: string;
 				name: string | null; // 대화용 이름(display_name)
+				avatarUrl: string | null; // 프로필 사진(servable URL) — 없으면 null
 				persona: string | null;
 				preference: 'male' | 'female' | null;
 				profileComplete: boolean;

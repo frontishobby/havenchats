@@ -16,5 +16,5 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 	const character = await getCharacterById(db, params.id);
 	if (!character) error(404, '캐릭터를 찾을 수 없어요.');
 
-	return { character };
+	return { character, ownerId: locals.user.id };
 };

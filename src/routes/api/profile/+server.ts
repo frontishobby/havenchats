@@ -1,11 +1,12 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { updateProfile, type Preference } from '$lib/server/db/users';
+import { updateAvatarKey, updateProfile, type Preference } from '$lib/server/db/users';
 
-interface ProfileBody {
-	name?: string;
-	persona?: string;
-	preference?: string;
-}
+/** 허용 이미지 타입 → 확장자. (webp/avif 만) */
+const ALLOWED_AVATAR: Record<string, string> = {
+	'image/webp': 'webp',
+	'image/avif': 'avif'
+};
+const MAX_AVATAR_BYTES = 3 * 1024 * 1024; // 3MB
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) {
@@ -16,15 +17,40 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		return json({ error: 'db unavailable' }, { status: 500 });
 	}
 
-	const body = (await request.json()) as ProfileBody;
-	const name = String(body.name ?? '').trim().slice(0, 40);
+	const form = await request.formData();
+
+	const name = String(form.get('name') ?? '').trim().slice(0, 40);
 	if (!name) {
 		return json({ error: '이름을 입력해 주세요.' }, { status: 400 });
 	}
 
+	const prefRaw = String(form.get('preference') ?? '');
 	const preference: Preference | null =
-		body.preference === 'male' || body.preference === 'female' ? body.preference : null;
-	const persona = String(body.persona ?? '').trim().slice(0, 2000) || null;
+		prefRaw === 'male' || prefRaw === 'female' ? prefRaw : null;
+	const persona = String(form.get('persona') ?? '').trim().slice(0, 2000) || null;
+
+	// ── 프로필 사진(선택) ──
+	const avatar = form.get('avatar');
+	if (avatar instanceof File && avatar.size > 0) {
+		const bucket = platform?.env?.IMAGES;
+		if (!bucket) {
+			return json({ error: 'storage unavailable' }, { status: 500 });
+		}
+		const ext = ALLOWED_AVATAR[avatar.type];
+		if (!ext) {
+			return json({ error: '프로필 사진은 webp 또는 avif 이미지만 가능해요.' }, { status: 400 });
+		}
+		if (avatar.size > MAX_AVATAR_BYTES) {
+			return json({ error: '이미지 용량이 너무 커요 (최대 3MB).' }, { status: 400 });
+		}
+		const key = `avatar/${locals.user.id}.${ext}`;
+		await bucket.put(key, await avatar.arrayBuffer(), {
+			httpMetadata: { contentType: avatar.type }
+		});
+		const prevKey = await updateAvatarKey(db, locals.user.id, key);
+		// 확장자가 바뀌어 키가 달라지면 옛 오브젝트 정리(같은 키면 덮어쓰여 정리 불필요).
+		if (prevKey && prevKey !== key) await bucket.delete(prevKey).catch(() => {});
+	}
 
 	await updateProfile(db, locals.user.id, locals.user.email, { name, persona, preference });
 	return json({ ok: true });
