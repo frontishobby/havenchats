@@ -165,8 +165,10 @@ function rowToCharacter(row: CharacterRow): Character {
 }
 
 // 제작자(users) 를 LEFT JOIN 해 프로필 사진·이름을 함께 읽는다. id 가 양쪽에 있어 컬럼은 모두 c./u. 로 한정.
+// chats = 이 캐릭터의 모든 세션에 실제로 남아있는 메시지 행 수 합(개별 삭제 반영).
+// characters.chats 컬럼은 더 이상 증가시키지 않으므로 실측 서브쿼리로 대체.
 const SELECT_COLS =
-	'c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key';
+	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key";
 const FROM_JOIN = 'FROM characters c LEFT JOIN users u ON u.id = c.creator_id';
 
 /** 공개(public) 유저 캐릭터 전체 (최신순). 비공개는 제외. */
