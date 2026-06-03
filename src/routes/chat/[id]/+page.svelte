@@ -706,10 +706,8 @@
 							maxlength={MAX_MEMORY_CHARS}
 							placeholder="예: 나를 '주인님'이라 부른다. 존댓말 사용."
 						></textarea>
-						<div class="summary-actions">
-							{#if !sessionId}
-								<span class="summary-note">첫 메시지를 보낼 때 함께 저장돼요</span>
-							{:else}
+						{#if sessionId}
+							<div class="summary-actions">
 								{#if memorySaved && !memoryDirty}
 									<span class="summary-note">저장됨</span>
 								{/if}
@@ -720,8 +718,8 @@
 								>
 									{memorySaving ? '저장 중…' : '저장'}
 								</button>
-							{/if}
-						</div>
+							</div>
+						{/if}
 					{/if}
 				</div>
 
