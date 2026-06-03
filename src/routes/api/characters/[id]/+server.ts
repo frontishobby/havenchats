@@ -1,10 +1,12 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import {
 	deleteCharacter,
+	getCharacterById,
 	getCharacterOwnership,
 	updateCharacter
 } from '$lib/server/db/characters';
-import { ALLOWED_IMAGE, parseCharacterForm } from '$lib/server/characterForm';
+import { ALLOWED_IMAGE, parseCharacterForm, parseImageSet } from '$lib/server/characterForm';
+import { commitImageSet, deleteAllSceneImages, deleteKeys } from '$lib/server/imageStore';
 
 /** 빌트인(목) 캐릭터는 슬러그 id → uuid 가 아니면 편집 대상이 아님. */
 function isUserCharacterId(id: string): boolean {
@@ -42,6 +44,15 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 	}
 	const c = parsed.data;
 
+	const imgParsed = parseImageSet(form);
+	if (!imgParsed.ok) {
+		return json({ error: imgParsed.error }, { status: 400 });
+	}
+
+	// 기존 장면 세트(키 diff·정리에 필요).
+	const existing = await getCharacterById(db, id);
+	const oldSet = existing?.imageSet ?? null;
+
 	// 새 이미지가 있으면 교체, 없으면 기존 썸네일 유지.
 	let newKey: string | undefined;
 	if (c.image) {
@@ -51,6 +62,14 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 			httpMetadata: { contentType: c.image.type }
 		});
 	}
+
+	// 장면 이미지 업로드/keep. 실패 시 방금 올린 썸네일 정리.
+	const committed = await commitImageSet(bucket, id, imgParsed.data, oldSet);
+	if (!committed.ok) {
+		if (newKey) await bucket.delete(newKey).catch(() => {});
+		return json({ error: committed.error }, { status: 400 });
+	}
+	const { imageSet, uploadedKeys, staleKeys } = committed.result;
 
 	try {
 		await updateCharacter(db, id, {
@@ -62,11 +81,13 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 			contentRating: c.contentRating,
 			tags: c.tags,
 			greetings: c.greetings,
+			imageSet,
 			thumbnailKey: newKey
 		});
 	} catch (e) {
-		// DB 실패 시 새로 올린 이미지는 정리.
+		// DB 실패 시 새로 올린 이미지(썸네일·장면)는 정리.
 		if (newKey) await bucket.delete(newKey).catch(() => {});
+		await deleteKeys(bucket, uploadedKeys);
 		console.error('[update] character update failed:', e);
 		return json({ error: '캐릭터 저장에 실패했어요. 잠시 후 다시 시도해 주세요.' }, { status: 500 });
 	}
@@ -75,6 +96,8 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 	if (newKey && owner.thumbnailKey && owner.thumbnailKey !== newKey) {
 		await bucket.delete(owner.thumbnailKey).catch(() => {});
 	}
+	// DB 성공 후 더 이상 참조되지 않는 옛 장면 이미지 정리.
+	await deleteKeys(bucket, staleKeys);
 
 	return json({ id });
 };
@@ -101,6 +124,8 @@ export const DELETE: RequestHandler = async ({ params, locals, platform }) => {
 
 	await deleteCharacter(db, id);
 	if (owner.thumbnailKey) await bucket?.delete(owner.thumbnailKey).catch(() => {});
+	// 장면 이미지(charimg/<id>/*) 전부 정리.
+	if (bucket) await deleteAllSceneImages(bucket, id);
 
 	return json({ ok: true });
 };

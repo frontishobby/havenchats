@@ -1,4 +1,5 @@
-import type { Audience, ContentRating, Opening } from '$lib/types';
+import type { Audience, ContentRating, ImageAxis, Opening } from '$lib/types';
+import { IMAGE_LIMITS, comboToCode } from '$lib/imageCodes';
 
 /** 허용 이미지 타입 → 확장자. (webp/avif 만) */
 export const ALLOWED_IMAGE: Record<string, string> = {
@@ -116,4 +117,130 @@ export function parseCharacterForm(form: FormData): ParseResult {
 		ok: true,
 		data: { name, tagline, intro, description, audience, contentRating, tags: tagsClean, greetings, image }
 	};
+}
+
+// ─────────────────────────────────────────────────────────────
+// 장면 이미지 세트 파싱
+// ─────────────────────────────────────────────────────────────
+
+/** 파싱된 조합(행) 하나. file 이 있으면 신규 업로드, 없으면 ext 로 기존 이미지 유지. */
+export interface ParsedImageEntry {
+	id: string;
+	combo: number[];
+	/** 새 업로드 파일(타입·용량 검증 완료). 없으면 null. */
+	file: File | null;
+	/** 기존 이미지 확장자(file 이 null 일 때). 없으면 null. */
+	ext: string | null;
+}
+
+export interface ParsedImageSet {
+	axes: ImageAxis[];
+	entries: ParsedImageEntry[];
+}
+
+type ImageSetResult =
+	| { ok: true; data: ParsedImageSet | null }
+	| { ok: false; error: string };
+
+/**
+ * 폼의 imageSet(JSON) + imageEntry:<id>(파일들)을 파싱·검증한다.
+ * - imageSet 필드가 없거나 비면 data=null(장면 이미지 미사용).
+ * - 신규/교체 이미지는 imageEntry:<entryId> 파일 필드로 들어온다.
+ * - 기존 이미지를 유지하는 엔트리는 JSON 에 ext 를 담고 파일은 없다(수정 시).
+ * 생성 시 "모든 엔트리에 파일 필수" 같은 모드별 규칙은 호출부에서 검사한다.
+ */
+export function parseImageSet(form: FormData): ImageSetResult {
+	const raw = form.get('imageSet');
+	if (typeof raw !== 'string' || raw.trim() === '') return { ok: true, data: null };
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return { ok: false, error: '이미지 세트 형식이 올바르지 않습니다.' };
+	}
+	const obj = (parsed ?? {}) as { axes?: unknown; entries?: unknown };
+	const axesRaw = Array.isArray(obj.axes) ? obj.axes : [];
+	const entriesRaw = Array.isArray(obj.entries) ? obj.entries : [];
+
+	// 축이 없으면 장면 이미지 미사용으로 간주.
+	if (axesRaw.length === 0) return { ok: true, data: null };
+	if (axesRaw.length > IMAGE_LIMITS.MAX_AXES)
+		return { ok: false, error: `축은 최대 ${IMAGE_LIMITS.MAX_AXES}개까지 가능합니다.` };
+
+	// ── 축·값 검증 ──
+	const axes: ImageAxis[] = [];
+	for (const a of axesRaw) {
+		const o = (a ?? {}) as { label?: unknown; values?: unknown };
+		const label = (typeof o.label === 'string' ? o.label : '').trim();
+		if (!label) return { ok: false, error: '축 이름을 입력해 주세요.' };
+		if (label.length > IMAGE_LIMITS.AXIS_LABEL_MAX)
+			return { ok: false, error: `축 이름은 ${IMAGE_LIMITS.AXIS_LABEL_MAX}자 이내로 입력해 주세요.` };
+		const valuesRaw = Array.isArray(o.values) ? o.values : [];
+		const values = valuesRaw
+			.map((v) => (typeof v === 'string' ? v.trim() : ''))
+			.filter(Boolean);
+		if (values.length === 0)
+			return { ok: false, error: `"${label}" 축에 값을 1개 이상 추가해 주세요.` };
+		if (values.length > IMAGE_LIMITS.MAX_AXIS_VALUES)
+			return {
+				ok: false,
+				error: `"${label}" 축의 값은 최대 ${IMAGE_LIMITS.MAX_AXIS_VALUES}개까지 가능합니다.`
+			};
+		if (values.some((v) => v.length > IMAGE_LIMITS.VALUE_LABEL_MAX))
+			return {
+				ok: false,
+				error: `값 이름은 ${IMAGE_LIMITS.VALUE_LABEL_MAX}자 이내로 입력해 주세요.`
+			};
+		axes.push({ label, values });
+	}
+
+	// ── 조합(행) 검증 ──
+	if (entriesRaw.length > IMAGE_LIMITS.MAX_ENTRIES)
+		return { ok: false, error: `조합은 최대 ${IMAGE_LIMITS.MAX_ENTRIES}개까지 가능합니다.` };
+
+	const entries: ParsedImageEntry[] = [];
+	const seenCombo = new Set<string>();
+	const seenId = new Set<string>();
+	for (const e of entriesRaw) {
+		const o = (e ?? {}) as { id?: unknown; combo?: unknown; ext?: unknown };
+		const id = typeof o.id === 'string' ? o.id : '';
+		if (!id || seenId.has(id))
+			return { ok: false, error: '조합 식별자가 올바르지 않습니다.' };
+		seenId.add(id);
+
+		const comboRaw = Array.isArray(o.combo) ? o.combo : [];
+		if (comboRaw.length !== axes.length)
+			return { ok: false, error: '각 조합은 모든 축의 값을 선택해야 합니다.' };
+		const combo: number[] = [];
+		for (let ai = 0; ai < axes.length; ai++) {
+			const vi = comboRaw[ai];
+			if (typeof vi !== 'number' || vi < 0 || vi >= axes[ai].values.length)
+				return { ok: false, error: '조합에 올바르지 않은 값이 있습니다.' };
+			combo.push(vi);
+		}
+		const comboKey = combo.join(',');
+		if (seenCombo.has(comboKey))
+			return { ok: false, error: `중복된 조합이 있습니다: {${comboToCode(combo)}}` };
+		seenCombo.add(comboKey);
+
+		// 파일(신규/교체) 또는 기존 ext(유지) 중 하나.
+		const fileRaw = form.get(`imageEntry:${id}`);
+		let file: File | null = null;
+		let ext: string | null = null;
+		if (fileRaw instanceof File && fileRaw.size > 0) {
+			if (!ALLOWED_IMAGE[fileRaw.type])
+				return { ok: false, error: '장면 이미지는 webp 또는 avif 만 가능합니다.' };
+			if (fileRaw.size > MAX_IMAGE_BYTES)
+				return { ok: false, error: '장면 이미지 용량이 너무 큽니다 (최대 3MB).' };
+			file = fileRaw;
+		} else {
+			const keepExt = typeof o.ext === 'string' ? o.ext : '';
+			if (keepExt === 'webp' || keepExt === 'avif') ext = keepExt;
+		}
+
+		entries.push({ id, combo, file, ext });
+	}
+
+	return { ok: true, data: { axes, entries } };
 }

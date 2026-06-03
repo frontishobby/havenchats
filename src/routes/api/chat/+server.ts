@@ -13,6 +13,7 @@ import {
 	estimateTokens
 } from '$lib/server/db/chats';
 import type { Character, ChatSession, StoredMessage } from '$lib/types';
+import { buildImageCatalog, pinSceneCodes } from '$lib/imageCodes';
 
 /** live window 토큰 예산 — 이 이상이면 요약 트리거. */
 const WINDOW_TOKEN_BUDGET = 6000;
@@ -173,7 +174,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			console.error(`[chat] streamText error (model=${modelId}):`, error);
 		},
 		onFinish: ({ text: reply, usage }) => {
-			const clean = reply.trim();
+			// 저장 직전 위치코드 {AAB} → 불변 토큰 {#id} 로 고정(이후 제작자 수정에 안 흔들림).
+			const clean = pinSceneCodes(reply.trim(), character.imageSet);
 			if (!clean) return; // 에러/빈 응답은 저장하지 않음(유저 메시지는 이미 저장됨)
 			const inputTokens = usage?.inputTokens ?? inputTokensEst;
 			after(persistAndMaybeSummarize(db, gateway, modelId, session!, window, clean, inputTokens));
@@ -337,6 +339,10 @@ function buildSystemPrompt(
 
 	// ① 제작자가 작성한 프롬프트 (전체 프레이밍·설정·형식)
 	const lines: string[] = [character.description.trim(), ``];
+
+	// ①-b 장면 이미지 카탈로그 — 캐릭터 단위로 고정 → prefix 캐시 유지.
+	const catalog = buildImageCatalog(character.imageSet);
+	if (catalog) lines.push(catalog, ``);
 
 	// ② 상대(사용자) 정보 — 런타임 정보라 공통으로 주입
 	lines.push(

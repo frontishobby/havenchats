@@ -1,6 +1,7 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { createCharacter } from '$lib/server/db/characters';
-import { ALLOWED_IMAGE, parseCharacterForm } from '$lib/server/characterForm';
+import { ALLOWED_IMAGE, parseCharacterForm, parseImageSet } from '$lib/server/characterForm';
+import { commitImageSet, deleteKeys } from '$lib/server/imageStore';
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	// 캐릭터 만들기는 로그인 필수
@@ -26,6 +27,12 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		return json({ error: '썸네일 이미지를 추가해 주세요.' }, { status: 400 });
 	}
 
+	// 장면 이미지 세트(선택). 생성이므로 기존 세트는 없음.
+	const imgParsed = parseImageSet(form);
+	if (!imgParsed.ok) {
+		return json({ error: imgParsed.error }, { status: 400 });
+	}
+
 	// ── 저장 ──
 	const id = crypto.randomUUID();
 	const ext = ALLOWED_IMAGE[c.image.type];
@@ -34,6 +41,14 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	await bucket.put(key, await c.image.arrayBuffer(), {
 		httpMetadata: { contentType: c.image.type }
 	});
+
+	// 장면 이미지 업로드(있으면). 실패 시 썸네일도 함께 정리.
+	const committed = await commitImageSet(bucket, id, imgParsed.data, null);
+	if (!committed.ok) {
+		await bucket.delete(key).catch(() => {});
+		return json({ error: committed.error }, { status: 400 });
+	}
+	const { imageSet, uploadedKeys } = committed.result;
 
 	try {
 		await createCharacter(db, {
@@ -47,11 +62,13 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			audience: c.audience,
 			contentRating: c.contentRating,
 			tags: c.tags,
-			greetings: c.greetings
+			greetings: c.greetings,
+			imageSet
 		});
 	} catch (e) {
-		// DB 실패 시 업로드한 이미지는 정리 (고아 오브젝트 방지)
+		// DB 실패 시 업로드한 이미지는 모두 정리 (고아 오브젝트 방지)
 		await bucket.delete(key).catch(() => {});
+		await deleteKeys(bucket, uploadedKeys);
 		console.error('[create] character insert failed:', e);
 		return json({ error: '캐릭터 저장에 실패했어요. 잠시 후 다시 시도해 주세요.' }, { status: 500 });
 	}

@@ -48,7 +48,8 @@ export const characters: Character[] = [
 		contentRating: 'sfw',
 		audience: 'male',
 		creator: '@haven',
-		chats: 203400
+		chats: 203400,
+		imageSet: null
 	},
 	{
 		id: 'se-ra',
@@ -76,7 +77,8 @@ export const characters: Character[] = [
 		contentRating: 'nsfw',
 		audience: 'male',
 		creator: '@haven',
-		chats: 67800
+		chats: 67800,
+		imageSet: null
 	}
 ];
 

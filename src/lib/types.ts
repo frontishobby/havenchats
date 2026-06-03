@@ -39,6 +39,34 @@ export interface Character {
 	creator: string;
 	/** 인기도(누적 대화 수) */
 	chats: number;
+	/** 장면 이미지 세트(축×조합). 없으면 null. */
+	imageSet: CharacterImageSet | null;
+}
+
+/**
+ * 장면 이미지 — 축(열) 하나. label=축 이름(예: "표정"), values=구분값 라벨 목록.
+ * values 의 순서가 곧 코드 글자(0→A, 1→B …). 축당 최대 26개.
+ */
+export interface ImageAxis {
+	label: string;
+	values: string[];
+}
+
+/**
+ * 장면 이미지 조합(행) 하나. id=불변 식별자(R2 키·메시지 고정에 사용),
+ * combo=축별 value index(축 순서대로), ext=R2 오브젝트 확장자(webp|avif).
+ * 위치코드(AAB)는 combo 에서 파생하며 저장하지 않는다.
+ */
+export interface ImageEntry {
+	id: string;
+	combo: number[];
+	ext: string;
+}
+
+/** 캐릭터의 장면 이미지 세트. 없으면 null. */
+export interface CharacterImageSet {
+	axes: ImageAxis[];
+	entries: ImageEntry[];
 }
 
 export type Role = 'user' | 'assistant';

@@ -3,6 +3,7 @@
 	import { MODELS, DEFAULT_MODEL_ID, getModel } from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
+	import { resolveSceneLine, looksLikeSceneToken } from '$lib/imageCodes';
 	import type { ChatMessage } from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -520,15 +521,23 @@
 
 	{#snippet novelBody(content: string, isUser: boolean)}
 		{#each toLines(content) as line, i (i)}
-			{@const sp = parseSpeaker(line)}
-			<span class="line" class:dialogue={!!sp} class:narration={!sp}>
-				{#if sp}<b class="speaker">{sp.speaker}</b>{' '}{/if}
-				<!-- 유저 입력은 친 그대로(정자체) 두고, 명시한 ( )/*..* 만 기울임.
-				     캐릭터 서술은 줄 전체를 소설체(기울임)로. -->
-				{#each sp || isUser ? parseInline(sp ? sp.rest : line) : parseNarration(line) as seg, j (j)}
-					{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
-				{/each}
-			</span>
+			{@const scene = resolveSceneLine(line, character.id, character.imageSet)}
+			{#if scene}
+				<!-- 장면 이미지 토큰({AAB}/{#id}) → 이미지 블록 -->
+				<img class="scene-img" src={scene.url} alt={scene.alt} title={scene.alt} loading="lazy" />
+			{:else if looksLikeSceneToken(line)}
+				<!-- 알 수 없거나 스트리밍 중 미완성 토큰 → 숨김(원문 노출 방지) -->
+			{:else}
+				{@const sp = parseSpeaker(line)}
+				<span class="line" class:dialogue={!!sp} class:narration={!sp}>
+					{#if sp}<b class="speaker">{sp.speaker}</b>{' '}{/if}
+					<!-- 유저 입력은 친 그대로(정자체) 두고, 명시한 ( )/*..* 만 기울임.
+					     캐릭터 서술은 줄 전체를 소설체(기울임)로. -->
+					{#each sp || isUser ? parseInline(sp ? sp.rest : line) : parseNarration(line) as seg, j (j)}
+						{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
+					{/each}
+				</span>
+			{/if}
 		{/each}
 	{/snippet}
 
@@ -926,6 +935,17 @@
 	.para {
 		margin: 0 0 1.5em;
 		word-break: break-word;
+	}
+	/* 장면 이미지 */
+	.scene-img {
+		display: block;
+		max-width: min(100%, 420px);
+		max-height: 60vh;
+		margin: 0.8em auto;
+		border-radius: var(--radius);
+		border: 1px solid var(--border);
+		object-fit: contain;
+		background: var(--bg-elev);
 	}
 	/* 줄 단위(대사/지시문) */
 	.line {

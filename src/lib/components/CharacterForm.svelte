@@ -3,7 +3,12 @@
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import PromptGuideModal from '$lib/components/PromptGuideModal.svelte';
 	import TextReplaceModal from '$lib/components/TextReplaceModal.svelte';
-	import type { Audience, ContentRating, Opening } from '$lib/types';
+	import CharacterImagesModal, {
+		type SceneAxisDraft,
+		type SceneEntryDraft,
+		type SceneApply
+	} from '$lib/components/CharacterImagesModal.svelte';
+	import type { Audience, CharacterImageSet, ContentRating, Opening } from '$lib/types';
 
 	export interface CharacterFormInitial {
 		name: string;
@@ -16,6 +21,8 @@
 		greetings: Opening[];
 		/** 기존 썸네일 URL (수정 시 미리보기용). */
 		avatarUrl: string;
+		/** 기존 장면 이미지 세트(수정 시). */
+		imageSet?: CharacterImageSet | null;
 	}
 
 	let {
@@ -65,6 +72,27 @@
 	let error = $state('');
 	let guideOpen = $state(false);
 	let replaceOpen = $state(false);
+
+	// ── 장면 이미지 세트 (모달에서 편집, 제출 시 함께 전송) ──
+	let imagesOpen = $state(false);
+	let sceneAxes = $state<SceneAxisDraft[]>(
+		initial?.imageSet?.axes.map((a) => ({ label: a.label, values: [...a.values] })) ?? []
+	);
+	let sceneEntries = $state<SceneEntryDraft[]>(
+		initial?.imageSet?.entries.map((e) => ({
+			id: e.id,
+			combo: [...e.combo],
+			file: null,
+			ext: e.ext
+		})) ?? []
+	);
+	const sceneCount = $derived(sceneEntries.length);
+
+	function applyScenes(res: SceneApply) {
+		sceneAxes = res.axes;
+		sceneEntries = res.entries;
+		imagesOpen = false;
+	}
 
 	// 새로 고른 이미지가 있으면 그것, 없으면 기존(수정) 썸네일.
 	const displayImage = $derived(imagePreview ?? initial?.avatarUrl ?? null);
@@ -184,6 +212,24 @@
 			);
 			if (imageFile) fd.set('image', imageFile);
 
+			// 장면 이미지 세트: 메타는 JSON, 새/교체 이미지는 imageEntry:<id> 파일로.
+			// 축이 없으면 필드를 보내지 않음 → 서버는 "장면 이미지 미사용"으로 처리.
+			if (sceneAxes.length > 0) {
+				const imageSetJson = {
+					axes: sceneAxes.map((a) => ({ label: a.label, values: a.values })),
+					entries: sceneEntries.map((e) => ({
+						id: e.id,
+						combo: e.combo,
+						// 새 파일이 있으면 ext 는 서버가 파일에서 도출. 유지면 기존 ext 전달.
+						...(e.file ? {} : e.ext ? { ext: e.ext } : {})
+					}))
+				};
+				fd.set('imageSet', JSON.stringify(imageSetJson));
+				for (const e of sceneEntries) {
+					if (e.file) fd.set(`imageEntry:${e.id}`, e.file);
+				}
+			}
+
 			const url = isEdit ? `/api/characters/${characterId}` : '/api/characters';
 			const res = await fetch(url, { method: isEdit ? 'PUT' : 'POST', body: fd });
 			const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
@@ -262,6 +308,29 @@
 			class="hidden-input"
 			onchange={onFileChange}
 		/>
+	</div>
+
+	<!-- 장면 이미지 -->
+	<div class="field">
+		<div class="label-row">
+			<span class="field-label">장면 이미지 <span class="opt">(선택)</span></span>
+		</div>
+		<button type="button" class="manage-images" onclick={() => (imagesOpen = true)}>
+			<span class="mi-icon">🎬</span>
+			<span class="mi-text">
+				<strong>이미지 관리</strong>
+				<span
+					>{sceneCount > 0
+						? `조합 ${sceneCount}개 등록됨`
+						: '상황별 이미지를 등록하면 대화 중 자동으로 노출돼요'}</span
+				>
+			</span>
+			<span class="mi-chev">›</span>
+		</button>
+		<p class="field-hint">
+			축(예: 캐릭터·의상·표정)과 조합을 만들어 이미지를 등록하면, AI가 장면에 맞는 코드를 출력해 그
+			이미지를 보여줍니다.
+		</p>
 	</div>
 
 	<!-- 제목 -->
@@ -476,6 +545,15 @@
 		{/if}
 	</button>
 </div>
+
+<CharacterImagesModal
+	open={imagesOpen}
+	{characterId}
+	initialAxes={sceneAxes}
+	initialEntries={sceneEntries}
+	onclose={() => (imagesOpen = false)}
+	onapply={applyScenes}
+/>
 
 <PromptGuideModal open={guideOpen} onclose={() => (guideOpen = false)} />
 
@@ -763,6 +841,48 @@
 	}
 	.hidden-input {
 		display: none;
+	}
+
+	/* 장면 이미지 관리 버튼 */
+	.manage-images {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 13px 14px;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		text-align: left;
+		transition: border-color 0.15s ease;
+	}
+	.manage-images:hover {
+		border-color: var(--accent);
+	}
+	.mi-icon {
+		font-size: 1.3rem;
+		flex-shrink: 0;
+	}
+	.mi-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+		flex: 1;
+	}
+	.mi-text strong {
+		font-size: 0.88rem;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.mi-text span {
+		font-size: 0.74rem;
+		color: var(--text-faint);
+	}
+	.mi-chev {
+		color: var(--text-faint);
+		font-size: 1.2rem;
+		flex-shrink: 0;
 	}
 
 	/* 세그먼트(타깃) */

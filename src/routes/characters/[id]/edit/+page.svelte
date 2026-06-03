@@ -22,6 +22,7 @@
 		contentRating: c.contentRating,
 		tags: c.tags,
 		greetings: c.greetings,
-		avatarUrl: c.avatarUrl
+		avatarUrl: c.avatarUrl,
+		imageSet: c.imageSet
 	}}
 />
