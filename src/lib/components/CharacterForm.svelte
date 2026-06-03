@@ -8,7 +8,7 @@
 		type SceneEntryDraft,
 		type SceneApply
 	} from '$lib/components/CharacterImagesModal.svelte';
-	import type { Audience, CharacterImageSet, ContentRating, Opening } from '$lib/types';
+	import type { Audience, CharacterImageSet, ContentRating, Opening, Visibility } from '$lib/types';
 
 	export interface CharacterFormInitial {
 		name: string;
@@ -17,6 +17,7 @@
 		description: string;
 		audience: Audience;
 		contentRating: ContentRating;
+		visibility: Visibility;
 		tags: string[];
 		greetings: Opening[];
 		/** 기존 썸네일 URL (수정 시 미리보기용). */
@@ -58,6 +59,7 @@
 	let description = $state(initial?.description ?? '');
 	let audience = $state<Audience>(initial?.audience ?? 'all');
 	let nsfw = $state(initial?.contentRating === 'nsfw');
+	let isPrivate = $state(initial?.visibility === 'private');
 
 	// 첫 상황(오프닝) — 첫 항목이 기본(필수). 각 항목은 이름(선택용)과 본문을 가진다.
 	let greetings = $state<Opening[]>(
@@ -207,6 +209,7 @@
 			fd.set('description', description.trim());
 			fd.set('audience', audience);
 			fd.set('contentRating', nsfw ? 'nsfw' : 'sfw');
+			fd.set('visibility', isPrivate ? 'private' : 'public');
 			fd.set('tags', JSON.stringify(tags));
 			fd.set(
 				'greetings',
@@ -491,6 +494,34 @@
 				</button>
 			{/each}
 		</div>
+	</div>
+
+	<!-- 공개 범위 -->
+	<div class="field">
+		<span class="field-label">공개 범위</span>
+		<div class="seg">
+			<button
+				type="button"
+				class="seg-btn"
+				class:active={!isPrivate}
+				onclick={() => (isPrivate = false)}
+			>
+				<strong>공개</strong>
+				<span>모두에게 노출</span>
+			</button>
+			<button
+				type="button"
+				class="seg-btn"
+				class:active={isPrivate}
+				onclick={() => (isPrivate = true)}
+			>
+				<strong>비공개</strong>
+				<span>내 캐릭터에서만</span>
+			</button>
+		</div>
+		<p class="field-hint">
+			비공개로 두면 메인·검색에 노출되지 않고, 내 프로필("내 캐릭터")에서 나만 볼 수 있어요.
+		</p>
 	</div>
 
 	<!-- 연령제한 -->

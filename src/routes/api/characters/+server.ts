@@ -61,6 +61,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			thumbnailKey: key,
 			audience: c.audience,
 			contentRating: c.contentRating,
+			visibility: c.visibility,
 			tags: c.tags,
 			greetings: c.greetings,
 			imageSet

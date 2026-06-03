@@ -22,6 +22,7 @@
 		description: c.description,
 		audience: c.audience,
 		contentRating: c.contentRating,
+		visibility: c.visibility,
 		tags: c.tags,
 		greetings: c.greetings,
 		avatarUrl: c.avatarUrl,

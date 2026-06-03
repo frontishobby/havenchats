@@ -79,6 +79,7 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 			description: c.description,
 			audience: c.audience,
 			contentRating: c.contentRating,
+			visibility: c.visibility,
 			tags: c.tags,
 			greetings: c.greetings,
 			imageSet,

@@ -1,4 +1,4 @@
-import type { Audience, ContentRating, ImageAxis, Opening } from '$lib/types';
+import type { Audience, ContentRating, ImageAxis, Opening, Visibility } from '$lib/types';
 import { IMAGE_LIMITS, comboToCode } from '$lib/imageCodes';
 
 /** 허용 이미지 타입 → 확장자. (webp/avif 만) */
@@ -24,6 +24,7 @@ export interface ParsedCharacterForm {
 	description: string;
 	audience: Audience;
 	contentRating: ContentRating;
+	visibility: Visibility;
 	tags: string[];
 	greetings: Opening[];
 	/** 업로드된 이미지(있으면). 없으면 null. */
@@ -46,6 +47,7 @@ export function parseCharacterForm(form: FormData): ParseResult {
 	const description = String(form.get('description') ?? '').trim();
 	const audienceRaw = String(form.get('audience') ?? 'all');
 	const nsfw = String(form.get('contentRating') ?? 'sfw') === 'nsfw';
+	const isPrivate = String(form.get('visibility') ?? 'public') === 'private';
 	const imageRaw = form.get('image');
 
 	let tags: string[] = [];
@@ -78,6 +80,7 @@ export function parseCharacterForm(form: FormData): ParseResult {
 	const audience: Audience =
 		audienceRaw === 'male' || audienceRaw === 'female' ? audienceRaw : 'all';
 	const contentRating: ContentRating = nsfw ? 'nsfw' : 'sfw';
+	const visibility: Visibility = isPrivate ? 'private' : 'public';
 
 	const tagsClean = tags
 		.filter((t): t is string => typeof t === 'string')
@@ -115,7 +118,7 @@ export function parseCharacterForm(form: FormData): ParseResult {
 
 	return {
 		ok: true,
-		data: { name, tagline, intro, description, audience, contentRating, tags: tagsClean, greetings, image }
+		data: { name, tagline, intro, description, audience, contentRating, visibility, tags: tagsClean, greetings, image }
 	};
 }
 

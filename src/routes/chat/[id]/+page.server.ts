@@ -1,5 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
 import { findCharacter } from '$lib/server/characters';
+import { getCharacterOwnership } from '$lib/server/db/characters';
 import { getSession, getSessionMessages } from '$lib/server/db/chats';
 import type { ChatMessage } from '$lib/types';
 import type { PageServerLoad } from './$types';
@@ -15,6 +16,14 @@ export const load: PageServerLoad = async ({ params, locals, platform, url }) =>
 	const character = await findCharacter(db, params.id);
 	if (!character) {
 		throw error(404, '캐릭터를 찾을 수 없어요.');
+	}
+
+	// 비공개 캐릭터는 제작자 본인만 접근 가능 (URL 직접 접근 차단).
+	if (character.visibility === 'private') {
+		const owner = db ? await getCharacterOwnership(db, params.id) : null;
+		if (owner && owner.creatorId !== locals.user?.id) {
+			throw error(404, '캐릭터를 찾을 수 없어요.');
+		}
 	}
 
 	// NSFW 캐릭터는 비로그인 상태에서 접근 불가 (목록에서도 숨겨짐)

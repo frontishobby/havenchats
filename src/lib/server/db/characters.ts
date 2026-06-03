@@ -3,7 +3,8 @@ import type {
 	Character,
 	CharacterImageSet,
 	ContentRating,
-	Opening
+	Opening,
+	Visibility
 } from '$lib/types';
 
 /** /create 에서 등록되는 새 캐릭터 입력. */
@@ -19,6 +20,8 @@ export interface NewCharacter {
 	thumbnailKey: string | null;
 	audience: Audience;
 	contentRating: ContentRating;
+	/** 공개 범위. 'private'면 제작자 본인 프로필에서만 노출. */
+	visibility: Visibility;
 	tags: string[];
 	/** 첫 상황(오프닝) 목록. 최소 1개. */
 	greetings: Opening[];
@@ -35,6 +38,7 @@ interface CharacterRow {
 	thumbnail_key: string | null;
 	audience: string;
 	content_rating: string;
+	visibility: string;
 	tags: string;
 	greetings: string;
 	image_set: string | null;
@@ -141,6 +145,7 @@ function rowToCharacter(row: CharacterRow): Character {
 		tags: parseStringArray(row.tags),
 		contentRating: row.content_rating === 'nsfw' ? 'nsfw' : 'sfw',
 		audience: toAudience(row.audience),
+		visibility: row.visibility === 'private' ? 'private' : 'public',
 		creator: '@user',
 		chats: row.chats,
 		imageSet: parseImageSet(row.image_set)
@@ -148,40 +153,53 @@ function rowToCharacter(row: CharacterRow): Character {
 }
 
 const SELECT_COLS =
-	'id, name, tagline, intro, description, thumbnail_key, audience, content_rating, tags, greetings, image_set, chats';
+	'id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, chats';
 
-/** 등록된 모든 유저 캐릭터 (최신순). */
+/** 공개(public) 유저 캐릭터 전체 (최신순). 비공개는 제외. */
 export async function listCharacters(db: D1Database): Promise<Character[]> {
 	const { results } = await db
-		.prepare(`SELECT ${SELECT_COLS} FROM characters ORDER BY created_at DESC`)
+		.prepare(
+			`SELECT ${SELECT_COLS} FROM characters WHERE visibility = 'public' ORDER BY created_at DESC`
+		)
 		.all<CharacterRow>();
 	return (results ?? []).map(rowToCharacter);
 }
 
-/** 특정 유저가 만든 캐릭터 목록 (최신순). */
+/**
+ * 특정 유저가 만든 캐릭터 목록 (최신순).
+ * includePrivate=false 면 공개 캐릭터만(외부 방문자용), true 면 비공개 포함(본인용).
+ */
 export async function listCharactersByCreator(
 	db: D1Database,
-	creatorId: string
+	creatorId: string,
+	includePrivate: boolean
 ): Promise<Character[]> {
+	const where = includePrivate
+		? 'creator_id = ?'
+		: "creator_id = ? AND visibility = 'public'";
 	const { results } = await db
-		.prepare(
-			`SELECT ${SELECT_COLS} FROM characters WHERE creator_id = ? ORDER BY created_at DESC`
-		)
+		.prepare(`SELECT ${SELECT_COLS} FROM characters WHERE ${where} ORDER BY created_at DESC`)
 		.bind(creatorId)
 		.all<CharacterRow>();
 	return (results ?? []).map(rowToCharacter);
 }
 
-/** 소유권·이미지 키 확인용 메타. 캐릭터 없으면 null. */
+/** 소유권·이미지 키·공개 범위 확인용 메타. 캐릭터 없으면 null. */
 export async function getCharacterOwnership(
 	db: D1Database,
 	id: string
-): Promise<{ creatorId: string; thumbnailKey: string | null } | null> {
+): Promise<{ creatorId: string; thumbnailKey: string | null; visibility: Visibility } | null> {
 	const row = await db
-		.prepare(`SELECT creator_id, thumbnail_key FROM characters WHERE id = ?`)
+		.prepare(`SELECT creator_id, thumbnail_key, visibility FROM characters WHERE id = ?`)
 		.bind(id)
-		.first<{ creator_id: string; thumbnail_key: string | null }>();
-	return row ? { creatorId: row.creator_id, thumbnailKey: row.thumbnail_key } : null;
+		.first<{ creator_id: string; thumbnail_key: string | null; visibility: string }>();
+	return row
+		? {
+				creatorId: row.creator_id,
+				thumbnailKey: row.thumbnail_key,
+				visibility: row.visibility === 'private' ? 'private' : 'public'
+			}
+		: null;
 }
 
 /** 단일 유저 캐릭터 조회. */
@@ -201,6 +219,8 @@ export interface CharacterUpdate {
 	description: string;
 	audience: Audience;
 	contentRating: ContentRating;
+	/** 공개 범위. 'private'면 제작자 본인 프로필에서만 노출. */
+	visibility: Visibility;
 	tags: string[];
 	greetings: Opening[];
 	/** 장면 이미지 세트(현재 상태 전체). 없으면 null. */
@@ -221,7 +241,7 @@ export async function updateCharacter(
 		.prepare(
 			`UPDATE characters SET
 			   name = ?, tagline = ?, intro = ?, description = ?,
-			   audience = ?, content_rating = ?, tags = ?, greetings = ?, image_set = ?,
+			   audience = ?, content_rating = ?, visibility = ?, tags = ?, greetings = ?, image_set = ?,
 			   ${setThumb ? 'thumbnail_key = ?,' : ''}
 			   updated_at = ?
 			 WHERE id = ?`
@@ -234,6 +254,7 @@ export async function updateCharacter(
 				c.description,
 				c.audience,
 				c.contentRating,
+				c.visibility,
 				JSON.stringify(c.tags),
 				JSON.stringify(c.greetings),
 				c.imageSet ? JSON.stringify(c.imageSet) : null,
@@ -256,8 +277,8 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 	await db
 		.prepare(
 			`INSERT INTO characters
-			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, tags, greetings, image_set, chats, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, chats, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
 		)
 		.bind(
 			c.id,
@@ -269,6 +290,7 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 			c.thumbnailKey,
 			c.audience,
 			c.contentRating,
+			c.visibility,
 			JSON.stringify(c.tags),
 			JSON.stringify(c.greetings),
 			c.imageSet ? JSON.stringify(c.imageSet) : null,

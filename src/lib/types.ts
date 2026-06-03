@@ -3,6 +3,9 @@ export type ContentRating = 'sfw' | 'nsfw';
 /** 타깃 독자층. 'all'=공통, 'male'=남성향, 'female'=여성향. */
 export type Audience = 'all' | 'male' | 'female';
 
+/** 공개 범위. 'public'=모두에게 노출, 'private'=제작자 본인만(내 캐릭터). */
+export type Visibility = 'public' | 'private';
+
 /** 첫 상황(오프닝) 하나. name=선택용 이름(라벨), content=실제 첫 메시지 본문. */
 export interface Opening {
 	name: string;
@@ -36,6 +39,8 @@ export interface Character {
 	contentRating: ContentRating;
 	/** 타깃 독자층(공통/남성향/여성향). */
 	audience: Audience;
+	/** 공개 범위. 'private'면 제작자 본인 프로필에서만 노출. */
+	visibility: Visibility;
 	creator: string;
 	/** 인기도(누적 대화 수) */
 	chats: number;
