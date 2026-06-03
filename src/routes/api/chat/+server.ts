@@ -22,6 +22,12 @@ const KEEP_RECENT = 12;
 const INPUT_SAFETY_MARGIN = 2000;
 /** 마지막 유저 메시지에 덧붙는 응답 지침의 토큰 어림값(가드 계산용). */
 const DIRECTIVE_EST = 60;
+/**
+ * 한 번에 보낼 수 있는 유저 메시지의 토큰 상한.
+ * trimWindowToBudget 는 최신 메시지를 항상 보존하므로, 거대한 단일 메시지는
+ * 누적 가드를 우회한다. 여기서 입력 단계에서 직접 막아 한 턴 비용 폭주를 방지한다.
+ */
+const MAX_USER_MSG_TOKENS = 4000;
 
 interface ChatRequestBody {
 	characterId: string;
@@ -58,6 +64,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const text = (body.text ?? '').trim();
 	if (!text) {
 		return json({ error: 'empty message' }, { status: 400 });
+	}
+	// 거대한 단일 메시지는 window trim 으로 못 막으므로(최신 메시지는 항상 유지됨)
+	// 입력 단계에서 직접 거부해 한 턴 input 토큰/비용 상한을 보장한다.
+	if (estimateTokens(text) > MAX_USER_MSG_TOKENS) {
+		return json({ error: 'message too long' }, { status: 413 });
 	}
 
 	const userId = locals.user.id;

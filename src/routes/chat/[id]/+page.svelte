@@ -107,7 +107,10 @@
 		if (showSettings) loadSummary();
 	}
 	let input = $state('');
+	let sendError = $state<string | null>(null);
 	let streaming = $state(false);
+	// 서버 MAX_USER_MSG_TOKENS(4000) × estimateTokens 비율(len/2) = 8000자.
+	const MAX_USER_MSG_CHARS = 8000;
 	let imgFailed = $state(false);
 	let scroller = $state<HTMLDivElement | null>(null);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
@@ -234,6 +237,13 @@
 			return;
 		}
 
+		// 너무 긴 메시지는 서버가 413 으로 거부하므로 전송 전에 막는다 (입력값 유지)
+		if (text.length > MAX_USER_MSG_CHARS) {
+			sendError = `메시지가 너무 길어요. ${MAX_USER_MSG_CHARS.toLocaleString()}자 이내로 줄여주세요. (현재 ${text.length.toLocaleString()}자)`;
+			return;
+		}
+		sendError = null;
+
 		input = '';
 		resetTextareaHeight();
 
@@ -262,6 +272,10 @@
 				})
 			});
 
+			if (res.status === 413) {
+				messages[idx].content = `⚠️ 메시지가 너무 길어요. ${MAX_USER_MSG_CHARS.toLocaleString()}자 이내로 줄여주세요.`;
+				return;
+			}
 			if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
 			// 서버가 lazy 생성한 세션 id 회수 (이후 전송부터 이어가기)
@@ -540,15 +554,22 @@
 			<textarea
 				bind:this={textarea}
 				bind:value={input}
-				oninput={autoGrow}
+				oninput={() => {
+					autoGrow();
+					if (sendError) sendError = null;
+				}}
 				onkeydown={onKeydown}
 				placeholder={`행동이나 대사를 입력하세요…`}
+				maxlength={MAX_USER_MSG_CHARS}
 				rows="1"
 			></textarea>
 			<button class="send" onclick={send} disabled={!input.trim() || streaming} aria-label="전송">
 				↑
 			</button>
 		</div>
+		{#if sendError}
+			<p class="send-error">{sendError}</p>
+		{/if}
 		<p class="disclaimer">
 			AI가 생성한 이야기이며 실제 인물과 무관합니다.
 			{#if inputTokens !== null}
@@ -1048,6 +1069,12 @@
 		text-align: center;
 		font-size: 0.72rem;
 		color: var(--text-faint);
+		margin: 8px 0 0;
+	}
+	.send-error {
+		text-align: center;
+		font-size: 0.78rem;
+		color: var(--danger, #ef4444);
 		margin: 8px 0 0;
 	}
 	.token-meter {
