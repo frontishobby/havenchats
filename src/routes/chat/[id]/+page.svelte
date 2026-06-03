@@ -167,15 +167,23 @@
 		modelOpen = false;
 	}
 
-	// 다른 캐릭터/세션으로 이동(컴포넌트 재사용) 시 해당 대화로 다시 초기화
-	let currentId = data.character.id;
+	// 다른 캐릭터/세션으로 이동(컴포넌트 재사용) 시 해당 대화로 다시 초기화.
+	// 같은 캐릭터의 다른 세션(사이드바)으로 이동하는 경우도 있으므로 캐릭터 id 만으로는 부족 →
+	// 서버 로드가 가리키는 (캐릭터·세션·오프닝) 조합을 키로 비교한다.
+	// 로컬 sessionId(첫 전송 시 lazy 생성으로 갱신)는 키에 넣지 않는다 → 전송 중 메시지가 날아가지 않게.
+	const loadKey = $derived(`${data.character.id}|${data.sessionId ?? ''}|${data.openingIndex}`);
+	let appliedKey = loadKey;
 	$effect(() => {
-		if (character.id !== currentId) {
-			currentId = character.id;
-			messages = initialMessages(data);
-			sessionId = data.sessionId;
-			input = '';
-		}
+		if (loadKey === appliedKey) return;
+		appliedKey = loadKey;
+		messages = initialMessages(data);
+		sessionId = data.sessionId;
+		input = '';
+		sendError = null;
+		headerHidden = false;
+		lastScroll = 0;
+		// 이어가는 세션은 맨 아래(최신 메시지)로 즉시 이동
+		if (messages.length > 0) tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
 	});
 
 	// ── 소설 파서: {@html} 없이 텍스트 세그먼트로만 렌더 → XSS 안전.
