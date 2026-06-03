@@ -939,12 +939,11 @@
 	/* 장면 이미지 */
 	.scene-img {
 		display: block;
-		max-width: min(100%, 420px);
-		max-height: 60vh;
-		margin: 0.8em auto;
+		width: 100%;
+		height: auto;
+		margin: 0.8em 0;
 		border-radius: var(--radius);
 		border: 1px solid var(--border);
-		object-fit: contain;
 		background: var(--bg-elev);
 	}
 	/* 줄 단위(대사/지시문) */
