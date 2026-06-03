@@ -217,18 +217,46 @@
 		return segments;
 	}
 
-	// 비어있지 않은 줄 단위로 분리 (대사/지시문이 줄바꿈으로 구분됨)
-	function toLines(content: string): string[] {
-		return content
-			.split('\n')
-			.map((l) => l.trim())
-			.filter((l) => l.length > 0);
-	}
-
 	// "발화자 | 대사" 형식이면 분리. 발화자는 |·(·줄바꿈 없는 짧은 토큰.
 	function parseSpeaker(line: string): { speaker: string; rest: string } | null {
 		const m = /^([^|\n(]{1,24}?)\s*\|\s*(.+)$/.exec(line);
 		return m ? { speaker: m[1].trim(), rest: m[2] } : null;
+	}
+
+	// 본문을 렌더 아이템으로 분해.
+	//   • 펜스 블록(```{제목} … ```) → kind:'block' (제목 헤더 + 본문, 줄바꿈 보존).
+	//   • 그 외 줄                    → kind:'line' (기존 소설 파서로 렌더).
+	// 스트리밍 중엔 닫는 펜스(```)가 아직 안 와도 열린 블록으로 누적 표시한다.
+	type RenderItem = { kind: 'line'; text: string } | { kind: 'block'; title: string; body: string };
+	const FENCE_OPEN = /^\s*```(.*)$/;
+	const FENCE_CLOSE = /^\s*```\s*$/;
+	function parseBody(content: string): RenderItem[] {
+		const items: RenderItem[] = [];
+		const raw = content.split('\n');
+		let i = 0;
+		while (i < raw.length) {
+			const open = FENCE_OPEN.exec(raw[i]);
+			if (open) {
+				// 정보 문자열(```뒤)에서 제목 추출: "{제목}" 형태면 그 안, 아니면 그대로.
+				const info = open[1].trim();
+				const braced = /^\{(.*)\}$/.exec(info);
+				// 스트리밍 중 미완성 "{제…" 는 제목을 비워 깜빡임 방지.
+				const title = braced ? braced[1].trim() : info.startsWith('{') ? '' : info;
+				const bodyLines: string[] = [];
+				i++;
+				while (i < raw.length && !FENCE_CLOSE.test(raw[i])) {
+					bodyLines.push(raw[i]);
+					i++;
+				}
+				if (i < raw.length) i++; // 닫는 펜스 소비
+				items.push({ kind: 'block', title, body: bodyLines.join('\n').replace(/\s+$/, '') });
+				continue;
+			}
+			const trimmed = raw[i].trim();
+			if (trimmed.length > 0) items.push({ kind: 'line', text: trimmed });
+			i++;
+		}
+		return items;
 	}
 
 	const lastMessage = $derived(messages[messages.length - 1]);
@@ -532,23 +560,35 @@
 	{/if}
 
 	{#snippet novelBody(content: string, isUser: boolean)}
-		{#each toLines(content) as line, i (i)}
-			{@const scene = resolveSceneLine(line, character.id, character.imageSet)}
-			{#if scene}
-				<!-- 장면 이미지 토큰({AAB}/{#id}) → 이미지 블록 -->
-				<img class="scene-img" src={scene.url} alt={scene.alt} title={scene.alt} loading="lazy" />
-			{:else if looksLikeSceneToken(line)}
-				<!-- 알 수 없거나 스트리밍 중 미완성 토큰 → 숨김(원문 노출 방지) -->
+		{#each parseBody(content) as item, i (i)}
+			{#if item.kind === 'block'}
+				<!-- 펜스 블록(```{제목} … ```) → 제목 헤더 + 본문 카드.
+				     스트리밍 중 내용이 아직 없으면(열린 펜스만) 빈 카드 깜빡임 방지. -->
+				{#if item.title || item.body}
+					<div class="block">
+						{#if item.title}<div class="block-title">{item.title}</div>{/if}
+						{#if item.body}<div class="block-body">{item.body}</div>{/if}
+					</div>
+				{/if}
 			{:else}
-				{@const sp = parseSpeaker(line)}
-				<span class="line" class:dialogue={!!sp} class:narration={!sp}>
-					{#if sp}<b class="speaker">{sp.speaker}</b>{' '}{/if}
-					<!-- 유저 입력은 친 그대로(정자체) 두고, 명시한 ( )/*..* 만 기울임.
-					     캐릭터 서술은 줄 전체를 소설체(기울임)로. -->
-					{#each sp || isUser ? parseInline(sp ? sp.rest : line) : parseNarration(line) as seg, j (j)}
-						{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
-					{/each}
-				</span>
+				{@const line = item.text}
+				{@const scene = resolveSceneLine(line, character.id, character.imageSet)}
+				{#if scene}
+					<!-- 장면 이미지 토큰({AAB}/{#id}) → 이미지 블록 -->
+					<img class="scene-img" src={scene.url} alt={scene.alt} title={scene.alt} loading="lazy" />
+				{:else if looksLikeSceneToken(line)}
+					<!-- 알 수 없거나 스트리밍 중 미완성 토큰 → 숨김(원문 노출 방지) -->
+				{:else}
+					{@const sp = parseSpeaker(line)}
+					<span class="line" class:dialogue={!!sp} class:narration={!sp}>
+						{#if sp}<b class="speaker">{sp.speaker}</b>{' '}{/if}
+						<!-- 유저 입력은 친 그대로(정자체) 두고, 명시한 ( )/*..* 만 기울임.
+						     캐릭터 서술은 줄 전체를 소설체(기울임)로. -->
+						{#each sp || isUser ? parseInline(sp ? sp.rest : line) : parseNarration(line) as seg, j (j)}
+							{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
+						{/each}
+					</span>
+				{/if}
 			{/if}
 		{/each}
 	{/snippet}
@@ -960,6 +1000,33 @@
 		border-radius: var(--radius);
 		border: 1px solid var(--border);
 		background: var(--bg-elev);
+	}
+	/* 펜스 블록(```{제목} … ```) — 상태창/정보 카드 */
+	.block {
+		margin: 1em 0;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--bg-elev);
+		overflow: hidden;
+	}
+	.block-title {
+		padding: 8px 14px;
+		font-size: 0.82rem;
+		font-weight: 700;
+		letter-spacing: 0.02em;
+		color: var(--accent);
+		background: var(--accent-soft);
+		border-bottom: 1px solid var(--border);
+	}
+	.block-body {
+		padding: 12px 14px;
+		font-size: 0.92rem;
+		line-height: 1.7;
+		color: var(--text);
+		white-space: pre-wrap;
+		word-break: break-word;
+		font-style: normal;
+		font-variant-numeric: tabular-nums;
 	}
 	/* 줄 단위(대사/지시문) */
 	.line {
