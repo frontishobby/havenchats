@@ -62,10 +62,10 @@
 							<a
 								class="menu-item"
 								role="menuitem"
-								href="/create"
+								href="/characters"
 								onclick={() => (menuOpen = false)}
 							>
-								캐릭터 만들기
+								캐릭터 관리
 							</a>
 							<div class="menu-sep"></div>
 							<a

@@ -11,6 +11,13 @@
 			"database_id": "b8c2b1a3-78e8-4527-aefa-461bcd3486b7",
 			"migrations_dir": "./migrations"
 		}
+	],
+	// 캐릭터 썸네일 이미지(webp/avif). 서빙: /img/[...key] 라우트.
+	"r2_buckets": [
+		{
+			"binding": "IMAGES",
+			"bucket_name": "haven-images"
+		}
 	]
 	// KV (세션을 KV로 옮길 경우):
 	// "kv_namespaces": [{ "binding": "SESSIONS", "id": "<id>" }]

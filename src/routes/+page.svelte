@@ -1,11 +1,14 @@
 <script lang="ts">
 	import CharacterCard from '$lib/components/CharacterCard.svelte';
+	import CharacterDetailModal from '$lib/components/CharacterDetailModal.svelte';
+	import type { Character } from '$lib/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	let query = $state('');
 	let activeTag = $state<string | null>(null);
+	let detail = $state<Character | null>(null);
 
 	const filtered = $derived(
 		data.characters.filter((c) => {
@@ -60,11 +63,13 @@
 	{:else}
 		<div class="grid">
 			{#each filtered as character (character.id)}
-				<CharacterCard {character} />
+				<CharacterCard {character} onselect={(c) => (detail = c)} />
 			{/each}
 		</div>
 	{/if}
 </section>
+
+<CharacterDetailModal character={detail} onclose={() => (detail = null)} />
 
 <style>
 	.notice {

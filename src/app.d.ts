@@ -19,6 +19,7 @@ declare global {
 			env: {
 				AI_GATEWAY_API_KEY?: string;
 				DB?: D1Database;
+				IMAGES?: R2Bucket;
 				SESSIONS?: KVNamespace;
 			};
 			context: { waitUntil(promise: Promise<unknown>): void };

@@ -2,7 +2,8 @@
 	import type { Character } from '$lib/types';
 	import NsfwBadge from './NsfwBadge.svelte';
 
-	let { character }: { character: Character } = $props();
+	let { character, onselect }: { character: Character; onselect: (c: Character) => void } =
+		$props();
 
 	let imgFailed = $state(false);
 
@@ -15,7 +16,7 @@
 	}
 </script>
 
-<a class="card" href={`/chat/${character.id}`}>
+<button type="button" class="card" onclick={() => onselect(character)}>
 	<div class="avatar">
 		{#if imgFailed}
 			<span class="avatar-fallback">{initial}</span>
@@ -46,16 +47,22 @@
 			{/each}
 		</div>
 	</div>
-</a>
+</button>
 
 <style>
 	.card {
 		display: flex;
 		flex-direction: column;
+		width: 100%;
+		padding: 0;
+		text-align: left;
+		font: inherit;
+		color: inherit;
 		background: var(--bg-card);
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
 		overflow: hidden;
+		cursor: pointer;
 		transition:
 			transform 0.15s ease,
 			border-color 0.15s ease,

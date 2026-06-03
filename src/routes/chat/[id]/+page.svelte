@@ -19,10 +19,19 @@
 	const character = $derived(data.character);
 
 	function greetingMessages(content: string): ChatMessage[] {
-		return [{ id: crypto.randomUUID(), role: 'assistant', content }];
+		return content ? [{ id: crypto.randomUUID(), role: 'assistant', content }] : [];
 	}
 
-	let messages = $state<ChatMessage[]>(greetingMessages(data.character.greeting));
+	// 첫 상황(오프닝)은 메인 상세 모달에서 골라 ?o=<index> 로 전달된다. (범위 보정은 서버 load)
+	function openingFor(c: typeof data.character, idx: number): string {
+		if (c.greetings.length === 0) return '';
+		const i = idx >= 0 && idx < c.greetings.length ? idx : 0;
+		return c.greetings[i].content;
+	}
+
+	let messages = $state<ChatMessage[]>(
+		greetingMessages(openingFor(data.character, data.openingIndex))
+	);
 	let input = $state('');
 	let streaming = $state(false);
 	let imgFailed = $state(false);
@@ -72,15 +81,19 @@
 	$effect(() => {
 		if (character.id !== currentId) {
 			currentId = character.id;
-			messages = greetingMessages(character.greeting);
+			messages = greetingMessages(openingFor(character, data.openingIndex));
 			input = '';
 		}
 	});
 
-	// ── 소설 파서: 괄호( ) 또는 *...* 안의 지시문/해설을 기울임 세그먼트로 분리.
-	//    {@html} 를 쓰지 않고 텍스트 세그먼트로 렌더 → XSS 안전.
+	// ── 소설 파서: {@html} 없이 텍스트 세그먼트로만 렌더 → XSS 안전.
+	//   • 대사 줄("이름 | 대사")   → parseInline: 괄호( )/별표(*) 안만 기울임, 대사 본문은 정자체.
+	//   • 서술/지시문 줄(그 외 전체) → parseNarration: 줄 전체를 기울임. 단 "..." 대사는 정자체로 유지.
+	//   모델이 묘사를 괄호로 감싸든(한 줄·여러 줄) 그냥 산문으로 쓰든 일관되게 기울임으로 보인다.
 	type Segment = { text: string; italic: boolean };
-	function parseNovel(content: string): Segment[] {
+
+	// 대사 줄 안의 인라인 지시문: ( )/*..* 안만 기울임. 구분자(괄호·별표)는 제거.
+	function parseInline(content: string): Segment[] {
 		const segments: Segment[] = [];
 		const re = /\(([^)]*)\)|\*([^*]+)\*/g;
 		let last = 0;
@@ -91,6 +104,27 @@
 			last = re.lastIndex;
 		}
 		if (last < content.length) segments.push({ text: content.slice(last), italic: false });
+		return segments;
+	}
+
+	// 서술 줄: 큰따옴표("..." / “...”) 안=대사(정자체), 그 밖 전체=기울임.
+	// 괄호·별표는 기울임 구분자로 보고 제거(내용만 남김).
+	const QUOTE_RE = /"([^"]*)"|“([^”]*)”/g;
+	function parseNarration(line: string): Segment[] {
+		const segments: Segment[] = [];
+		const pushNarr = (raw: string) => {
+			const clean = raw.replace(/[()*]/g, '');
+			if (clean) segments.push({ text: clean, italic: true });
+		};
+		let last = 0;
+		let m: RegExpExecArray | null;
+		while ((m = QUOTE_RE.exec(line)) !== null) {
+			if (m.index > last) pushNarr(line.slice(last, m.index));
+			const inner = m[1] ?? m[2] ?? '';
+			segments.push({ text: `"${inner}"`, italic: false });
+			last = QUOTE_RE.lastIndex;
+		}
+		if (last < line.length) pushNarr(line.slice(last));
 		return segments;
 	}
 
@@ -351,20 +385,24 @@
 		</div>
 	{/if}
 
+	{#snippet novelBody(content: string)}
+		{#each toLines(content) as line, i (i)}
+			{@const sp = parseSpeaker(line)}
+			<span class="line" class:dialogue={!!sp} class:narration={!sp}>
+				{#if sp}<b class="speaker">{sp.speaker}</b>{' '}{/if}
+				{#each sp ? parseInline(sp.rest) : parseNarration(line) as seg, j (j)}
+					{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
+				{/each}
+			</span>
+		{/each}
+	{/snippet}
+
 	<div class="reader" bind:this={scroller}>
 		<article class="novel">
 			{#each messages as m (m.id)}
 				{#if m.content || (streaming && m === lastMessage)}
 					<div class="para {m.role}">
-						{#each toLines(m.content) as line, i (i)}
-							{@const sp = parseSpeaker(line)}
-							<span class="line" class:dialogue={!!sp}>
-								{#if sp}<b class="speaker">{sp.speaker}</b>{' '}{/if}
-								{#each parseNovel(sp ? sp.rest : line) as seg, j (j)}
-									{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
-								{/each}
-							</span>
-						{/each}
+						{@render novelBody(m.content)}
 						{#if streaming && m.role === 'assistant' && m === lastMessage}
 							{#if m.content}<span class="cursor"></span>{:else}<span class="typing"
 									><i></i><i></i><i></i></span

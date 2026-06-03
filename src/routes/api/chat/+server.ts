@@ -2,7 +2,7 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { streamText, type ModelMessage } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
-import { getCharacter } from '$lib/data/characters';
+import { findCharacter } from '$lib/server/characters';
 import { MODEL_IDS, DEFAULT_MODEL_ID } from '$lib/data/models';
 import type { Character, ChatMessage } from '$lib/types';
 
@@ -21,14 +21,14 @@ interface ChatRequestBody {
 	userPersona?: string;
 }
 
-export const POST: RequestHandler = async ({ request, locals }) => {
+export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	// 로그인 필수 (클라이언트 가드 우회 방지)
 	if (!locals.user) {
 		return json({ error: 'unauthorized' }, { status: 401 });
 	}
 
 	const body = (await request.json()) as ChatRequestBody;
-	const character = getCharacter(body.characterId);
+	const character = await findCharacter(platform?.env?.DB, body.characterId);
 	if (!character) {
 		return json({ error: 'character not found' }, { status: 404 });
 	}
