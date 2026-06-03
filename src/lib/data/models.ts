@@ -5,14 +5,20 @@ export interface ModelOption {
 	icon: string;
 	/** 모델의 컨텍스트 윈도우(input+output 토큰 총 상한). input 가드 계산의 기준. */
 	contextLimit: number;
+	/**
+	 * 기본적으로 내부 추론(thinking/reasoning) 토큰을 출력 예산에서 소비하는 모델인지.
+	 * true 면 maxOutputTokens 에 reasoning headroom 을 더해 본문이 잘리지 않게 한다.
+	 * (Google 계열은 추론을 비활성화하지만, 무시될 경우의 안전망으로 headroom 도 함께 둠)
+	 */
+	reasoning?: boolean;
 }
 
 // contextLimit = Vercel AI Gateway 표시 max context(input+output 합산 총 컨텍스트).
 export const MODELS: ModelOption[] = [
 	{ id: 'meta/llama-3.1-8b', label: 'Llama 3.1 8B', icon: '/models/meta.avif', contextLimit: 131_072 },
 	{ id: 'alibaba/qwen3.7-max', label: 'Qwen 3.7 Max', icon: '/models/qwen.avif', contextLimit: 991_000 },
-	{ id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000 },
-	{ id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro', icon: '/models/deepseek.avif', contextLimit: 1_000_000 },
+	{ id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true },
+	{ id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true },
 	{ id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', icon: '/models/claude.avif', contextLimit: 1_000_000 }
 ];
 
@@ -31,4 +37,9 @@ export function getModel(id: string): ModelOption | undefined {
 /** 모델의 컨텍스트 상한(없으면 보수적 폴백). */
 export function getContextLimit(id: string): number {
 	return getModel(id)?.contextLimit ?? FALLBACK_CONTEXT_LIMIT;
+}
+
+/** 기본적으로 thinking/reasoning 토큰을 쓰는 모델인지(출력 예산 보정용). */
+export function isReasoningModel(id: string): boolean {
+	return getModel(id)?.reasoning === true;
 }

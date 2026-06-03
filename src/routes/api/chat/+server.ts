@@ -1,9 +1,10 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { streamText, generateText, type ModelMessage } from 'ai';
+import type { ProviderOptions } from '@ai-sdk/provider-utils';
 import { createGateway, type GatewayProvider } from '@ai-sdk/gateway';
 import { findCharacter } from '$lib/server/characters';
-import { MODEL_IDS, DEFAULT_MODEL_ID, getContextLimit } from '$lib/data/models';
+import { MODEL_IDS, DEFAULT_MODEL_ID, getContextLimit, isReasoningModel } from '$lib/data/models';
 import {
 	getSession,
 	createSession,
@@ -24,11 +25,28 @@ const INPUT_SAFETY_MARGIN = 2000;
 /** 마지막 유저 메시지에 덧붙는 응답 지침의 토큰 어림값(가드 계산용). */
 const DIRECTIVE_EST = 60;
 /**
+ * thinking/reasoning 모델용 출력 여유 토큰. 이 모델들은 내부 추론이 output 예산을 잠식해
+ * 본문이 잘리므로(finishReason='length'), 본문 예산 위에 이만큼을 더해 보존한다.
+ * (Google 계열은 추론 자체를 끄므로 대개 미사용 여유로 남는다 — 안전망)
+ */
+const REASONING_HEADROOM = 8000;
+/**
+ * Google(Gemini) 계열에 허용할 thinking 예산. 0=완전 차단인데, 약간의 내부 추론은
+ * 지시 준수·일관성에 도움이 되므로 소량만 허용한다. 본문 예산(maxOutputTokens)은
+ * 이 값 + REASONING_HEADROOM 로 충분히 커서, 이 추론이 본문 길이를 잘라먹지 않는다.
+ */
+const GOOGLE_THINKING_BUDGET = 1024;
+/**
  * 한 번에 보낼 수 있는 유저 메시지의 토큰 상한.
  * trimWindowToBudget 는 최신 메시지를 항상 보존하므로, 거대한 단일 메시지는
  * 누적 가드를 우회한다. 여기서 입력 단계에서 직접 막아 한 턴 비용 폭주를 방지한다.
  */
 const MAX_USER_MSG_TOKENS = 4000;
+/**
+ * 응답 메타 프레임 구분자(RS, U+241E). 스트림 맨 끝에 `META_SEP + JSON` 으로 붙여,
+ * 클라이언트가 본문과 분리해 console 에 찍는다. 모델 텍스트엔 등장하지 않는 제어문자.
+ */
+const META_SEP = '␞';
 
 interface ChatRequestBody {
 	characterId: string;
@@ -107,7 +125,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	// ── 모델별 input 상한 하드 가드 ──
 	// 요약(백그라운드)이 못 따라잡았거나 거대한 메시지가 끼어도 모델 컨텍스트를 넘지 않도록,
 	// 요청 시점에 동기적으로 오래된 window 부터 잘라낸다(최신 메시지는 항상 유지).
-	const outputReserve = sentencesToTokens(maxSentences);
+	// reasoning 모델은 내부 추론이 output 을 잠식하므로 본문 예산 위에 headroom 을 더한다.
+	const outputReserve = sentencesToTokens(maxSentences) + reasoningHeadroom(modelId);
 	const inputLimit = Math.max(
 		1000,
 		getContextLimit(modelId) - outputReserve - INPUT_SAFETY_MARGIN
@@ -164,9 +183,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		system: systemPrompt,
 		// live window 만 전송(오래된 맥락은 summary 가 대체) → input 토큰 상한.
 		messages,
-		providerOptions: {
-			gateway: { caching: 'auto' }
-		},
+		providerOptions: buildProviderOptions(modelId),
 		temperature: 0.9,
 		maxOutputTokens: outputReserve,
 		onError: ({ error }) => {
@@ -192,7 +209,10 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			const clean = pinSceneCodes(reply.trim(), character.imageSet);
 			if (!clean) return; // 에러/빈 응답은 저장하지 않음(유저 메시지는 이미 저장됨)
 			const inputTokens = usage?.inputTokens ?? inputTokensEst;
-			after(persistAndMaybeSummarize(db, gateway, modelId, session!, window, clean, inputTokens));
+			const cost = parseGatewayCost(providerMetadata);
+			after(
+				persistAndMaybeSummarize(db, gateway, modelId, session!, window, clean, inputTokens, cost)
+			);
 		}
 	});
 
@@ -210,6 +230,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 				// 상세 에러는 서버 로그(onError)에만 남기고, 사용자에겐 일반 메시지만 노출
 				controller.enqueue(encoder.encode('⚠️ 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요.'));
 			}
+			// 응답 메타(finishReason·usage 등)를 스트림 맨 끝에 sentinel 프레임으로 붙인다.
+			// 클라이언트는 이를 떼어 console 에만 찍고 화면엔 렌더하지 않는다.
+			// flash 등에서 출력이 잘리는 경우 finishReason='length'/'content-filter' 로 드러난다.
+			const meta = await collectMeta(result, modelId, streamError);
+			controller.enqueue(encoder.encode(META_SEP + safeJson(meta)));
 			controller.close();
 		}
 	});
@@ -222,6 +247,59 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		}
 	});
 };
+
+/** collectMeta 가 읽는 streamText 결과의 종료 후 프로미스들(구조적 부분 타입). */
+interface StreamMetaSource {
+	finishReason: PromiseLike<unknown>;
+	usage: PromiseLike<unknown>;
+	totalUsage?: PromiseLike<unknown>;
+	providerMetadata?: PromiseLike<unknown>;
+	warnings?: PromiseLike<unknown>;
+}
+
+/**
+ * 응답 종료 후 메타(종료사유·토큰·경고)를 모아 클라이언트 콘솔용 객체로.
+ * finishReason 이 'length'면 maxOutputTokens 에 막혀 잘린 것, 'content-filter'면 안전필터 차단.
+ */
+async function collectMeta(
+	result: StreamMetaSource,
+	modelId: string,
+	streamError: unknown
+): Promise<Record<string, unknown>> {
+	const meta: Record<string, unknown> = { model: modelId };
+	try {
+		meta.finishReason = await result.finishReason;
+		meta.usage = await result.usage;
+		if (result.totalUsage) meta.totalUsage = await result.totalUsage;
+		if (result.providerMetadata) meta.providerMetadata = await result.providerMetadata;
+		if (result.warnings) meta.warnings = await result.warnings;
+	} catch (e) {
+		meta.metaError = String(e);
+	}
+	if (streamError) meta.streamError = String(streamError);
+	return meta;
+}
+
+/**
+ * AI Gateway 가 반환한 이번 턴 추론 비용(USD)을 추출. providerMetadata.gateway.cost 는
+ * "0.0270609" 같은 문자열 → 숫자로. 없거나 파싱 불가면 undefined(미기록).
+ */
+function parseGatewayCost(providerMetadata: unknown): number | undefined {
+	const meta = providerMetadata as { gateway?: { cost?: unknown } } | undefined;
+	const raw = meta?.gateway?.cost;
+	if (raw == null) return undefined;
+	const n = typeof raw === 'number' ? raw : Number(raw);
+	return Number.isFinite(n) ? n : undefined;
+}
+
+/** 메타 직렬화(직렬화 불가 값이 섞여도 스트림이 깨지지 않게 방어). */
+function safeJson(value: unknown): string {
+	try {
+		return JSON.stringify(value);
+	} catch (e) {
+		return JSON.stringify({ metaError: `serialize failed: ${String(e)}` });
+	}
+}
 
 /**
  * 모델 input 상한에 맞춰 window 앞(오래된 것)부터 잘라낸다. 최신 메시지 1개는 항상 유지.
@@ -252,7 +330,8 @@ async function persistAndMaybeSummarize(
 	session: ChatSession,
 	windowBefore: Array<StoredMessage & { tokenEst: number }>,
 	reply: string,
-	inputTokens: number
+	inputTokens: number,
+	cost?: number
 ): Promise<void> {
 	const assistantSeq = await appendMessage(
 		db,
@@ -260,7 +339,8 @@ async function persistAndMaybeSummarize(
 		'assistant',
 		reply,
 		modelId,
-		inputTokens
+		inputTokens,
+		cost
 	);
 
 	const liveCount = windowBefore.length + 1;
@@ -299,8 +379,9 @@ async function summarizeSession(
 		system: SUMMARY_SYSTEM,
 		prompt: `${prior}[추가 대화]\n${transcript}`,
 		temperature: 0.3,
-		maxOutputTokens: 800,
-		providerOptions: { gateway: { caching: 'auto' } }
+		// reasoning 모델은 추론이 예산을 먹어 빈 요약이 나오므로 headroom 을 더한다.
+		maxOutputTokens: 800 + reasoningHeadroom(modelId),
+		providerOptions: buildProviderOptions(modelId)
 	});
 
 	const summary = text.trim();
@@ -322,6 +403,27 @@ const SUMMARY_SYSTEM = [
 /** 사용자가 설정에서 선택한 모델을 허용목록으로 검증해 반환. 유효하지 않으면 기본 모델. */
 function pickModel(requested?: string): string {
 	return requested && MODEL_IDS.has(requested) ? requested : DEFAULT_MODEL_ID;
+}
+
+/** reasoning 모델이면 출력 예산에 더할 여유 토큰, 아니면 0. */
+function reasoningHeadroom(modelId: string): number {
+	return isReasoningModel(modelId) ? REASONING_HEADROOM : 0;
+}
+
+/**
+ * 게이트웨이 캐싱 + (Google 계열) thinking 예산 소량 제한.
+ * 무제한 추론은 output 예산을 잠식해 본문을 자르고 비용·지연을 키우므로, Gemini 등 Google
+ * 모델은 thinkingBudget 을 작게 둔다(완전 차단 X). includeThoughts=false 로 추론 텍스트는
+ * 응답 본문에 섞지 않는다.
+ */
+function buildProviderOptions(modelId: string): ProviderOptions {
+	const opts: ProviderOptions = { gateway: { caching: 'auto' } };
+	if (modelId.startsWith('google/')) {
+		opts.google = {
+			thinkingConfig: { thinkingBudget: GOOGLE_THINKING_BUDGET, includeThoughts: false }
+		};
+	}
+	return opts;
 }
 
 /** 캐릭터의 첫 상황(오프닝) 본문. 인덱스 범위 밖이면 기본(0), 없으면 ''. */
@@ -468,6 +570,11 @@ function mockStream(
 				controller.enqueue(encoder.encode(token));
 				await new Promise((r) => setTimeout(r, 35));
 			}
+			controller.enqueue(
+				encoder.encode(
+					META_SEP + safeJson({ model: modelId, finishReason: 'stop', mock: true })
+				)
+			);
 			controller.close();
 			// mock 은 실 usage 가 없으므로 추정치를 input 토큰으로 저장.
 			after(

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { invalidate } from '$app/navigation';
 	import { MODELS, DEFAULT_MODEL_ID, getModel } from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
@@ -15,6 +16,25 @@
 	const USER_ACTS_LABELS = ['금지', '적정', '풍부'];
 
 	const MODEL_KEY = 'haven:model';
+
+	// 서버가 스트림 끝에 붙이는 응답 메타 프레임 구분자(서버 META_SEP 와 동일).
+	const META_SEP = '␞';
+
+	// AI 응답 메타(finishReason·usage 등)를 브라우저 콘솔에 출력. 잘림 진단용.
+	function logResponseMeta(jsonText: string) {
+		try {
+			const meta = JSON.parse(jsonText);
+			console.log('[haven] AI 응답 메타', meta);
+			if (meta.finishReason && meta.finishReason !== 'stop') {
+				console.warn(
+					`[haven] finishReason="${meta.finishReason}" — 응답이 정상 종료(stop)가 아닙니다.` +
+						` (length=토큰상한 도달, content-filter=안전필터 차단)`
+				);
+			}
+		} catch (e) {
+			console.error('[haven] 응답 메타 파싱 실패', e, jsonText);
+		}
+	}
 
 	let { data }: { data: PageData } = $props();
 	const character = $derived(data.character);
@@ -45,6 +65,10 @@
 	let messages = $state<ChatMessage[]>(initialMessages(data));
 	// 현재 세션 id. null 이면 첫 전송 시 서버가 lazy 생성 → 응답 헤더로 회수.
 	let sessionId = $state<string | null>(data.sessionId);
+	// ── 과거 메시지 페이징 ── 최초엔 최근 20개만. 위로 올리면 더 불러온다.
+	let oldestSeq = $state(data.oldestSeq ?? 0); // 현재 로드된 가장 오래된 seq
+	let hasMore = $state(data.hasMore ?? false); // 그 앞에 더 오래된 메시지가 있는지
+	let loadingMore = $state(false);
 	// 직전 턴 input 토큰(추정치)·모델 input 상한 — 응답 헤더에서 회수.
 	let inputTokens = $state<number | null>(null);
 	let inputMax = $state<number | null>(null);
@@ -137,6 +161,8 @@
 		if (savedActs !== null) userActs = Math.min(2, Math.max(0, Number(savedActs)));
 		// 터치 기반(소프트 키보드) 기기 감지 → Enter 는 개행으로
 		isTouch = window.matchMedia('(pointer: coarse)').matches;
+		// 새로고침/직접 진입(컴포넌트 미재사용) 시에도 최신 메시지로 스크롤.
+		if (messages.length > 0) tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
 	});
 	$effect(() => {
 		localStorage.setItem(MODEL_KEY, model);
@@ -169,11 +195,51 @@
 		appliedKey = loadKey;
 		messages = initialMessages(data);
 		sessionId = data.sessionId;
+		oldestSeq = data.oldestSeq ?? 0;
+		hasMore = data.hasMore ?? false;
 		input = '';
 		sendError = null;
 		// 이어가는 세션은 맨 아래(최신 메시지)로 즉시 이동
 		if (messages.length > 0) tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
 	});
+
+	// 위로 스크롤 시 과거 메시지 한 페이지를 prepend. 스크롤 위치는 유지한다.
+	async function loadOlder() {
+		if (loadingMore || !hasMore || !sessionId || !scroller) return;
+		// 인디케이터/프리펜드 전 높이를 먼저 기록 → 복원 시 인디케이터 높이가 섞이지 않게.
+		const prevHeight = scroller.scrollHeight;
+		const prevTop = scroller.scrollTop;
+		loadingMore = true;
+		try {
+			const res = await fetch(
+				`/api/chat/messages?sessionId=${encodeURIComponent(sessionId)}&before=${oldestSeq}`
+			);
+			if (!res.ok) return;
+			const d = (await res.json()) as {
+				messages: ChatMessage[];
+				oldestSeq: number;
+				hasMore: boolean;
+			};
+			if (d.messages.length === 0) {
+				hasMore = false;
+				return;
+			}
+			messages = [...d.messages, ...messages];
+			oldestSeq = d.oldestSeq;
+			hasMore = d.hasMore;
+		} catch (e) {
+			console.error(e);
+		} finally {
+			loadingMore = false;
+			// 인디케이터 제거 후 측정해야 정확. prepend 로 늘어난 높이만큼 내려 위치 유지.
+			await tick();
+			if (scroller) scroller.scrollTop = prevTop + (scroller.scrollHeight - prevHeight);
+		}
+	}
+
+	function onReaderScroll() {
+		if (scroller && scroller.scrollTop < 120 && hasMore && !loadingMore) loadOlder();
+	}
 
 	// ── 소설 파서: {@html} 없이 텍스트 세그먼트로만 렌더 → XSS 안전.
 	//   • 대사 줄("이름 | 대사")   → parseInline: 괄호( )/별표(*) 안만 기울임, 대사 본문은 정자체.
@@ -329,17 +395,29 @@
 
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
+			// 스트림 끝에 붙는 메타 프레임(META_SEP + JSON)은 화면에 렌더하지 않고 콘솔에만 찍는다.
+			let raw = '';
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) break;
-				messages[idx].content += decoder.decode(value, { stream: true });
+				raw += decoder.decode(value, { stream: true });
+				const sep = raw.indexOf(META_SEP);
+				messages[idx].content = sep >= 0 ? raw.slice(0, sep) : raw;
 				await scrollToBottom();
+			}
+			raw += decoder.decode(); // 멀티바이트 잔여 flush
+			const sep = raw.indexOf(META_SEP);
+			if (sep >= 0) {
+				messages[idx].content = raw.slice(0, sep);
+				logResponseMeta(raw.slice(sep + META_SEP.length));
 			}
 		} catch (e) {
 			messages[idx].content = '⚠️ 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.';
 			console.error(e);
 		} finally {
 			streaming = false;
+			// 새 세션·최신 미리보기가 새로고침 없이 사이드바에 반영되도록 목록만 무효화.
+			invalidate('app:recentChats');
 		}
 	}
 
@@ -593,7 +671,10 @@
 		{/each}
 	{/snippet}
 
-	<div class="reader" bind:this={scroller}>
+	<div class="reader" bind:this={scroller} onscroll={onReaderScroll}>
+		{#if loadingMore}
+			<div class="load-more">이전 대화를 불러오는 중…</div>
+		{/if}
 		<article class="novel">
 			{#each messages as m (m.id)}
 				{#if m.content || (streaming && m === lastMessage)}
@@ -980,6 +1061,12 @@
 		flex: 1;
 		overflow-y: auto;
 		padding: 28px 24px 40px;
+	}
+	.load-more {
+		text-align: center;
+		font-size: 0.78rem;
+		color: var(--text-faint);
+		padding: 4px 0 16px;
 	}
 	.novel {
 		font-size: 1.05rem;

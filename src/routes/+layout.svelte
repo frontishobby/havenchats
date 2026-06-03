@@ -1,5 +1,6 @@
 <script lang="ts">
 	import '../app.css';
+	import { invalidate } from '$app/navigation';
 	import LoginModal from '$lib/components/LoginModal.svelte';
 	import ProfileModal from '$lib/components/ProfileModal.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
@@ -7,6 +8,16 @@
 	import { profileModal } from '$lib/state/profileModal.svelte';
 	import type { LayoutData } from './$types';
 	let { children, data }: { children: import('svelte').Snippet; data: LayoutData } = $props();
+
+	// 사이드바에서 세션 삭제 → 서버 삭제 후 최근 채팅 목록만 새로고침.
+	async function deleteChat(sessionId: string) {
+		const res = await fetch('/api/chat/session', {
+			method: 'DELETE',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ sessionId })
+		});
+		if (res.ok) await invalidate('app:recentChats');
+	}
 
 	// 최초 로그인(프로필 미완성) 시 프로필 설정 모달 자동 노출
 	$effect(() => {
@@ -109,7 +120,12 @@
 	</main>
 </div>
 
-<Sidebar open={sidebarOpen} chats={data.recentChats} onClose={() => (sidebarOpen = false)} />
+<Sidebar
+	open={sidebarOpen}
+	chats={data.recentChats}
+	onClose={() => (sidebarOpen = false)}
+	onDelete={deleteChat}
+/>
 <LoginModal />
 <ProfileModal user={data.user} />
 

@@ -5,8 +5,42 @@
 	let {
 		open = false,
 		chats = [],
-		onClose
-	}: { open: boolean; chats: RecentChat[]; onClose: () => void } = $props();
+		onClose,
+		onDelete
+	}: {
+		open: boolean;
+		chats: RecentChat[];
+		onClose: () => void;
+		onDelete: (sessionId: string) => Promise<void>;
+	} = $props();
+
+	// 삭제는 2단계: 휴지통 클릭 → 같은 항목 확인 버튼 노출 → 다시 클릭 시 삭제.
+	let confirmId = $state<string | null>(null);
+	let deletingId = $state<string | null>(null);
+
+	function askDelete(e: MouseEvent, sessionId: string) {
+		e.preventDefault();
+		e.stopPropagation();
+		confirmId = sessionId;
+	}
+
+	async function confirmDelete(e: MouseEvent, sessionId: string) {
+		e.preventDefault();
+		e.stopPropagation();
+		deletingId = sessionId;
+		try {
+			await onDelete(sessionId);
+		} finally {
+			deletingId = null;
+			confirmId = null;
+		}
+	}
+
+	function cancelDelete(e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		confirmId = null;
+	}
 
 	/** 상대 시각: 방금 / N분 전 / N시간 전 / N일 전 / 날짜. */
 	function relTime(ts: number | null): string {
@@ -44,20 +78,43 @@
 		{:else}
 			<nav class="list">
 				{#each chats as c (c.sessionId)}
-					<a
-						class="item"
-						href={`/chat/${c.characterId}?s=${c.sessionId}`}
-						onclick={onClose}
-					>
-						<img class="thumb" src={c.avatarUrl} alt={c.characterName} loading="lazy" />
-						<div class="meta">
-							<div class="top">
-								<span class="name">{c.characterName}</span>
-								<span class="time">{relTime(c.lastMessageAt)}</span>
+					<div class="row" class:confirming={confirmId === c.sessionId}>
+						<a
+							class="item"
+							href={`/chat/${c.characterId}?s=${c.sessionId}`}
+							onclick={onClose}
+						>
+							<img class="thumb" src={c.avatarUrl} alt={c.characterName} loading="lazy" />
+							<div class="meta">
+								<div class="top">
+									<span class="name">{c.characterName}</span>
+									<span class="time">{relTime(c.lastMessageAt)}</span>
+								</div>
+								<div class="preview">{c.preview || '…'}</div>
 							</div>
-							<div class="preview">{c.preview || '…'}</div>
-						</div>
-					</a>
+						</a>
+						{#if confirmId === c.sessionId}
+							<div class="confirm">
+								<button
+									class="confirm-btn yes"
+									onclick={(e) => confirmDelete(e, c.sessionId)}
+									disabled={deletingId === c.sessionId}
+								>
+									{deletingId === c.sessionId ? '삭제 중…' : '삭제'}
+								</button>
+								<button class="confirm-btn no" onclick={cancelDelete}>취소</button>
+							</div>
+						{:else}
+							<button
+								class="del"
+								onclick={(e) => askDelete(e, c.sessionId)}
+								aria-label="대화 삭제"
+								title="대화 삭제"
+							>
+								🗑
+							</button>
+						{/if}
+					</div>
 				{/each}
 			</nav>
 		{/if}
@@ -122,16 +179,83 @@
 		overflow-y: auto;
 		padding: 6px;
 	}
+	.row {
+		position: relative;
+		display: flex;
+		align-items: center;
+		border-radius: var(--radius-sm);
+		transition: background 0.12s ease;
+	}
+	.row:hover {
+		background: var(--bg-elev);
+	}
 	.item {
 		display: flex;
 		align-items: center;
 		gap: 12px;
 		padding: 10px;
-		border-radius: var(--radius-sm);
-		transition: background 0.12s ease;
+		flex: 1;
+		min-width: 0;
 	}
-	.item:hover {
+	/* 휴지통 버튼 — 평소 숨김, 행 hover 시 노출(터치기기는 항상 노출) */
+	.del {
+		flex-shrink: 0;
+		width: 34px;
+		height: 34px;
+		margin-right: 6px;
+		border: none;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--text-faint);
+		font-size: 0.95rem;
+		opacity: 0;
+		transition:
+			opacity 0.12s ease,
+			background 0.12s ease;
+	}
+	.row:hover .del {
+		opacity: 1;
+	}
+	.del:hover {
+		background: var(--bg-card);
+		color: var(--text);
+	}
+	@media (pointer: coarse) {
+		.del {
+			opacity: 1;
+		}
+	}
+	/* 삭제 확인 */
+	.row.confirming {
+		background: color-mix(in srgb, var(--danger, #ef4444) 12%, transparent);
+	}
+	.confirm {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-shrink: 0;
+		margin-right: 8px;
+	}
+	.confirm-btn {
+		border: none;
+		border-radius: 8px;
+		padding: 6px 10px;
+		font-size: 0.78rem;
+		font-weight: 600;
+	}
+	.confirm-btn.yes {
+		background: var(--danger, #ef4444);
+		color: #fff;
+	}
+	.confirm-btn.yes:disabled {
+		opacity: 0.6;
+	}
+	.confirm-btn.no {
 		background: var(--bg-elev);
+		color: var(--text-dim);
+	}
+	.confirm-btn.no:hover {
+		color: var(--text);
 	}
 	.thumb {
 		width: 44px;

@@ -139,6 +139,27 @@ export async function listRecentSessions(
 	}));
 }
 
+/**
+ * 세션과 그 메시지를 삭제(소유권 확인). 반환: 실제로 삭제됐는지.
+ * chat_messages 는 FK·cascade 가 없으므로 메시지를 먼저 지운 뒤 세션을 지운다.
+ */
+export async function deleteSession(
+	db: D1Database,
+	sessionId: string,
+	userId: string
+): Promise<boolean> {
+	const owned = await db
+		.prepare('SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?')
+		.bind(sessionId, userId)
+		.first<{ id: string }>();
+	if (!owned) return false;
+	await db.batch([
+		db.prepare('DELETE FROM chat_messages WHERE session_id = ?').bind(sessionId),
+		db.prepare('DELETE FROM chat_sessions WHERE id = ?').bind(sessionId)
+	]);
+	return true;
+}
+
 interface MessageRow {
 	id: string;
 	seq: number;
@@ -146,16 +167,31 @@ interface MessageRow {
 	content: string;
 }
 
-/** 세션의 전체 메시지(렌더링용, seq 순). */
-export async function getSessionMessages(
+/**
+ * 세션 메시지 한 페이지(렌더링용). before 가 있으면 그 seq '미만'에서 최신 limit 개를,
+ * 없으면 세션 전체에서 최신 limit 개를 가져온다. 항상 seq 오름차순으로 반환.
+ *  - oldestSeq: 이 페이지의 가장 오래된 seq(없으면 0). 다음 페이지 요청의 before 로 사용.
+ *  - hasMore:   이 페이지 앞에 더 오래된 메시지가 남아있는지(seq 는 1-based 연속이라 oldest>1).
+ */
+export async function getMessagePage(
 	db: D1Database,
-	sessionId: string
-): Promise<StoredMessage[]> {
+	sessionId: string,
+	limit: number,
+	before?: number
+): Promise<{ messages: StoredMessage[]; oldestSeq: number; hasMore: boolean }> {
+	const beforeSeq = before && before > 0 ? before : Number.MAX_SAFE_INTEGER;
 	const { results } = await db
-		.prepare('SELECT id, seq, role, content FROM chat_messages WHERE session_id = ? ORDER BY seq')
-		.bind(sessionId)
+		.prepare(
+			`SELECT id, seq, role, content FROM chat_messages
+			 WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`
+		)
+		.bind(sessionId, beforeSeq, limit)
 		.all<MessageRow>();
-	return (results ?? []).map((r) => ({ id: r.id, seq: r.seq, role: r.role, content: r.content }));
+	const messages = (results ?? [])
+		.map((r) => ({ id: r.id, seq: r.seq, role: r.role, content: r.content }))
+		.reverse(); // DESC 로 가져온 뒤 화면 표시용 오름차순으로 뒤집기
+	const oldestSeq = messages.length > 0 ? messages[0].seq : 0;
+	return { messages, oldestSeq, hasMore: oldestSeq > 1 };
 }
 
 /**
@@ -212,6 +248,7 @@ export async function createSession(
  * 메시지 1건 추가. 다음 seq 를 발급하고 세션 카운터/시각을 갱신한다.
  * model 을 같이 넘기면 세션의 "마지막 사용 모델"을 갱신(요약 시 사용).
  * inputTokens 는 assistant 메시지에서, 그 응답에 들어간 input 토큰 수(실측/추정).
+ * cost 는 assistant 메시지에서, 그 응답의 AI Gateway 추론 비용(USD, 실측). 없으면 미기록.
  * 반환: 발급된 seq.
  */
 export async function appendMessage(
@@ -220,7 +257,8 @@ export async function appendMessage(
 	role: Role,
 	content: string,
 	model?: string,
-	inputTokens?: number
+	inputTokens?: number,
+	cost?: number
 ): Promise<number> {
 	const now = Date.now();
 	// 단일 유저가 순차 전송하므로 read-then-write 경쟁 위험은 낮다.
@@ -233,8 +271,8 @@ export async function appendMessage(
 	await db.batch([
 		db
 			.prepare(
-				`INSERT INTO chat_messages (id, session_id, seq, role, content, token_est, input_tokens, created_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+				`INSERT INTO chat_messages (id, session_id, seq, role, content, token_est, input_tokens, cost, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			)
 			.bind(
 				crypto.randomUUID(),
@@ -244,6 +282,7 @@ export async function appendMessage(
 				content,
 				estimateTokens(content),
 				inputTokens ?? null,
+				cost ?? null,
 				now
 			),
 		db

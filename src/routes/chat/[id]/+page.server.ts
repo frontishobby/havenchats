@@ -1,9 +1,12 @@
 import { error, redirect } from '@sveltejs/kit';
 import { findCharacter } from '$lib/server/characters';
 import { getCharacterOwnership } from '$lib/server/db/characters';
-import { getSession, getSessionMessages } from '$lib/server/db/chats';
+import { getSession, getMessagePage } from '$lib/server/db/chats';
 import type { ChatMessage } from '$lib/types';
 import type { PageServerLoad } from './$types';
+
+/** 최초 진입 시 가져올 최근 메시지 수. 더 위로 올리면 같은 크기로 페이징. */
+const PAGE_SIZE = 20;
 
 /**
  * 세션 진입 규칙:
@@ -37,16 +40,21 @@ export const load: PageServerLoad = async ({ params, locals, platform, url }) =>
 	const sessionParam = url.searchParams.get('s');
 
 	// 이어갈 세션은 ?s=<id> 로 명시했을 때만 (사이드바 진입). 그 외엔 항상 새로 시작.
+	// 최근 PAGE_SIZE 개만 로드하고, 더 위는 클라이언트가 페이징으로 가져온다.
 	let resumed: ChatMessage[] | null = null;
 	let sessionId: string | null = null;
+	let oldestSeq = 0;
+	let hasMore = false;
 	if (locals.user && db && sessionParam) {
 		const s = await getSession(db, sessionParam, locals.user.id);
 		if (s && s.characterId === character.id) {
 			sessionId = s.id;
-			const msgs = await getSessionMessages(db, sessionId);
-			resumed = msgs.map((m) => ({ id: m.id, role: m.role, content: m.content }));
+			const page = await getMessagePage(db, sessionId, PAGE_SIZE);
+			resumed = page.messages.map((m) => ({ id: m.id, role: m.role, content: m.content }));
+			oldestSeq = page.oldestSeq;
+			hasMore = page.hasMore;
 		}
 	}
 
-	return { character, user: locals.user, openingIndex, sessionId, resumed };
+	return { character, user: locals.user, openingIndex, sessionId, resumed, oldestSeq, hasMore };
 };
