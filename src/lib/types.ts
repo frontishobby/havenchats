@@ -6,6 +6,13 @@ export type Audience = 'all' | 'male' | 'female';
 /** 공개 범위. 'public'=모두에게 노출, 'private'=제작자 본인만(내 캐릭터). */
 export type Visibility = 'public' | 'private';
 
+/** 캐릭터 제작자 요약(상세 모달 표시·유저 페이지 링크용). name 미설정(프로필 미완성)이면 null. */
+export interface Creator {
+	id: string;
+	name: string | null;
+	avatarUrl: string | null;
+}
+
 /** 첫 상황(오프닝) 하나. name=선택용 이름(라벨), content=실제 첫 메시지 본문. */
 export interface Opening {
 	name: string;
@@ -41,7 +48,8 @@ export interface Character {
 	audience: Audience;
 	/** 공개 범위. 'private'면 제작자 본인 프로필에서만 노출. */
 	visibility: Visibility;
-	creator: string;
+	/** 제작자 정보(프로필 사진·이름·유저 페이지 링크용). */
+	creator: Creator;
 	/** 인기도(누적 대화 수) */
 	chats: number;
 	/** 장면 이미지 세트(축×조합). 없으면 null. */

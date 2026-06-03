@@ -8,6 +8,7 @@
 	let selected = $state(0);
 	let pickOpen = $state(false);
 	let imgFailed = $state(false);
+	let creatorImgFailed = $state(false);
 	let starting = $state(false);
 
 	// 캐릭터가 바뀌면 선택/상태 초기화
@@ -18,9 +19,19 @@
 			selected = 0;
 			pickOpen = false;
 			imgFailed = false;
+			creatorImgFailed = false;
 			starting = false;
 		}
 	});
+
+	// 제작자 표시명(미설정 시 '익명'). 이름이 있어야 유저 페이지 링크가 유효(미완성 프로필은 404).
+	const creatorName = $derived(character?.creator.name ?? '익명');
+	const creatorLinkable = $derived(!!character?.creator.name);
+
+	function openCreator() {
+		if (!character || !creatorLinkable) return;
+		goto(`/user/${character.creator.id}`);
+	}
 
 	const AUDIENCE_LABEL: Record<Character['audience'], string> = {
 		all: '공통',
@@ -133,6 +144,32 @@
 					</div>
 				</div>
 			{/if}
+
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<svelte:element
+				this={creatorLinkable ? 'button' : 'div'}
+				class="creator"
+				class:linkable={creatorLinkable}
+				type={creatorLinkable ? 'button' : undefined}
+				onclick={creatorLinkable ? openCreator : undefined}
+			>
+				<span class="creator-avatar">
+					{#if character.creator.avatarUrl && !creatorImgFailed}
+						<img
+							src={character.creator.avatarUrl}
+							alt={creatorName}
+							onerror={() => (creatorImgFailed = true)}
+						/>
+					{:else}
+						<span class="creator-fallback">{creatorName.charAt(0).toUpperCase()}</span>
+					{/if}
+				</span>
+				<span class="creator-text">
+					<span class="creator-label">제작자</span>
+					<span class="creator-name">{creatorName}</span>
+				</span>
+				{#if creatorLinkable}<span class="creator-chev">›</span>{/if}
+			</svelte:element>
 
 			<button class="start" onclick={start} disabled={starting}>
 				{starting ? '시작하는 중…' : '채팅 시작하기'}
@@ -360,6 +397,72 @@
 		color: var(--accent);
 		font-weight: 700;
 		flex-shrink: 0;
+	}
+
+	.creator {
+		flex-shrink: 0;
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 11px;
+		margin-bottom: 12px;
+		padding: 9px 12px;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		text-align: left;
+		color: var(--text);
+		transition: border-color 0.15s ease;
+	}
+	.creator.linkable:hover {
+		border-color: var(--accent);
+		cursor: pointer;
+	}
+	.creator-avatar {
+		width: 34px;
+		height: 34px;
+		flex-shrink: 0;
+		border-radius: 50%;
+		overflow: hidden;
+		background: linear-gradient(135deg, var(--accent), var(--nsfw));
+	}
+	.creator-avatar img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+	.creator-fallback {
+		width: 100%;
+		height: 100%;
+		display: grid;
+		place-items: center;
+		font-size: 1rem;
+		font-weight: 700;
+		color: #fff;
+	}
+	.creator-text {
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+	}
+	.creator-label {
+		font-size: 0.7rem;
+		color: var(--text-faint);
+	}
+	.creator-name {
+		font-size: 0.9rem;
+		font-weight: 600;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.creator-chev {
+		margin-left: auto;
+		flex-shrink: 0;
+		color: var(--text-faint);
+		font-size: 1.1rem;
 	}
 
 	.start {

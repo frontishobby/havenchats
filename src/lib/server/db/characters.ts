@@ -43,6 +43,14 @@ interface CharacterRow {
 	greetings: string;
 	image_set: string | null;
 	chats: number;
+	creator_id: string;
+	creator_name: string | null;
+	creator_avatar_key: string | null;
+}
+
+/** avatar_url 컬럼(R2 키)을 servable URL 로 변환. 없으면 null. */
+function avatarUrlFromKey(key: string | null): string | null {
+	return key ? `/img/${key}` : null;
 }
 
 /** dicebear 폴백 아바타 (이미지 미등록 시). */
@@ -146,20 +154,26 @@ function rowToCharacter(row: CharacterRow): Character {
 		contentRating: row.content_rating === 'nsfw' ? 'nsfw' : 'sfw',
 		audience: toAudience(row.audience),
 		visibility: row.visibility === 'private' ? 'private' : 'public',
-		creator: '@user',
+		creator: {
+			id: row.creator_id,
+			name: row.creator_name,
+			avatarUrl: avatarUrlFromKey(row.creator_avatar_key)
+		},
 		chats: row.chats,
 		imageSet: parseImageSet(row.image_set)
 	};
 }
 
+// 제작자(users) 를 LEFT JOIN 해 프로필 사진·이름을 함께 읽는다. id 가 양쪽에 있어 컬럼은 모두 c./u. 로 한정.
 const SELECT_COLS =
-	'id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, chats';
+	'c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key';
+const FROM_JOIN = 'FROM characters c LEFT JOIN users u ON u.id = c.creator_id';
 
 /** 공개(public) 유저 캐릭터 전체 (최신순). 비공개는 제외. */
 export async function listCharacters(db: D1Database): Promise<Character[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT ${SELECT_COLS} FROM characters WHERE visibility = 'public' ORDER BY created_at DESC`
+			`SELECT ${SELECT_COLS} ${FROM_JOIN} WHERE c.visibility = 'public' ORDER BY c.created_at DESC`
 		)
 		.all<CharacterRow>();
 	return (results ?? []).map(rowToCharacter);
@@ -175,10 +189,10 @@ export async function listCharactersByCreator(
 	includePrivate: boolean
 ): Promise<Character[]> {
 	const where = includePrivate
-		? 'creator_id = ?'
-		: "creator_id = ? AND visibility = 'public'";
+		? 'c.creator_id = ?'
+		: "c.creator_id = ? AND c.visibility = 'public'";
 	const { results } = await db
-		.prepare(`SELECT ${SELECT_COLS} FROM characters WHERE ${where} ORDER BY created_at DESC`)
+		.prepare(`SELECT ${SELECT_COLS} ${FROM_JOIN} WHERE ${where} ORDER BY c.created_at DESC`)
 		.bind(creatorId)
 		.all<CharacterRow>();
 	return (results ?? []).map(rowToCharacter);
@@ -205,7 +219,7 @@ export async function getCharacterOwnership(
 /** 단일 유저 캐릭터 조회. */
 export async function getCharacterById(db: D1Database, id: string): Promise<Character | null> {
 	const row = await db
-		.prepare(`SELECT ${SELECT_COLS} FROM characters WHERE id = ?`)
+		.prepare(`SELECT ${SELECT_COLS} ${FROM_JOIN} WHERE c.id = ?`)
 		.bind(id)
 		.first<CharacterRow>();
 	return row ? rowToCharacter(row) : null;
