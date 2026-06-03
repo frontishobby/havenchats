@@ -79,19 +79,25 @@ export function hasScenes(set: CharacterImageSet | null | undefined): set is Cha
 
 /**
  * 시스템 프롬프트에 붙일 장면 이미지 카탈로그. 캐릭터 단위로 고정(캐싱 prefix 유지).
+ * 조합(행)을 전부 나열하지 않고 **축의 의미만** 설명한다 — 조합이 수천 개까지
+ * 늘어도 인풋이 폭증하지 않게. 모델은 각 축에서 하나씩 골라 코드를 조립한다.
+ * 존재하지 않는 조합을 출력하면 프론트가 조용히 무시한다(렌더 시 숨김).
  * 쓸 조합이 없으면 빈 문자열.
  */
 export function buildImageCatalog(set: CharacterImageSet | null | undefined): string {
 	if (!hasScenes(set)) return '';
 	const axisOrder = set.axes.map((a) => a.label).join('][');
-	const lines = set.entries.map((e) => `  - {${comboToCode(e.combo)}} = ${entryAlt(set, e)}`);
+	// 축별 값 → 글자 매핑. (values 순서가 곧 코드 글자: 0→A, 1→B …)
+	const axisLines = set.axes.map((a) => {
+		const vals = a.values.map((v, i) => `${String.fromCharCode(65 + i)}=${v}`).join(', ');
+		return `  - ${a.label}: ${vals}`;
+	});
 	return [
 		`# 장면 이미지 (선택적 출력)`,
-		`이야기 흐름상 아래 장면 중 하나가 되면, 그 코드만 중괄호로 감싸 한 줄에 단독으로 출력하라. 예: {${comboToCode(set.entries[0].combo)}}`,
-		`- 코드는 [${axisOrder}] 순서의 글자 조합이다.`,
-		`- 사용 가능한 장면:`,
-		...lines,
-		`규칙: 위 목록에 있는 코드만, 장면이 실제로 바뀔 때만 출력한다. 본문 서술·대사는 평소대로 이어가라.`
+		`이야기 흐름상 한 장면이 떠오르면, 각 축에서 값을 하나씩 골라 그 글자들을 [${axisOrder}] 순서로 이어 붙인 코드를 중괄호로 감싸 한 줄에 단독으로 출력하라. 예: {${comboToCode(set.entries[0].combo)}}`,
+		`- 축과 값(글자):`,
+		...axisLines,
+		`규칙: 위 축 값 중에서만 골라 코드를 만들고, 장면이 실제로 바뀔 때만 출력한다. 본문 서술·대사는 평소대로 이어가라.`
 	].join('\n');
 }
 
