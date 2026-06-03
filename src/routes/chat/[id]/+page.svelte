@@ -18,6 +18,12 @@
 	let { data }: { data: PageData } = $props();
 	const character = $derived(data.character);
 
+	// 제작자가 쓴 "{{나}}" 플레이스홀더 → 사용자 이름(없으면 '나')으로 치환.
+	function personalize(text: string): string {
+		const label = data.user?.name?.trim() || '나';
+		return text.replace(/\{\{\s*나\s*\}\}/g, label);
+	}
+
 	function greetingMessages(content: string): ChatMessage[] {
 		return content ? [{ id: crypto.randomUUID(), role: 'assistant', content }] : [];
 	}
@@ -26,12 +32,80 @@
 	function openingFor(c: typeof data.character, idx: number): string {
 		if (c.greetings.length === 0) return '';
 		const i = idx >= 0 && idx < c.greetings.length ? idx : 0;
-		return c.greetings[i].content;
+		return personalize(c.greetings[i].content);
 	}
 
-	let messages = $state<ChatMessage[]>(
-		greetingMessages(openingFor(data.character, data.openingIndex))
-	);
+	// 이어가는 세션이 있으면 저장된 메시지로, 없으면 오프닝으로 시작.
+	function initialMessages(d: PageData): ChatMessage[] {
+		if (d.resumed && d.resumed.length > 0) return d.resumed.map((m) => ({ ...m }));
+		return greetingMessages(openingFor(d.character, d.openingIndex));
+	}
+
+	let messages = $state<ChatMessage[]>(initialMessages(data));
+	// 현재 세션 id. null 이면 첫 전송 시 서버가 lazy 생성 → 응답 헤더로 회수.
+	let sessionId = $state<string | null>(data.sessionId);
+	// 직전 턴 input 토큰(추정치)·모델 input 상한 — 응답 헤더에서 회수.
+	let inputTokens = $state<number | null>(null);
+	let inputMax = $state<number | null>(null);
+
+	// ── 대화 요약(설정 모달에서 표시·편집) ──
+	let summary = $state<string | null>(null); // 서버 최신 요약
+	let summaryDraft = $state(''); // 편집 중 텍스트
+	let summaryLoading = $state(false);
+	let summarySaving = $state(false);
+	let summarySaved = $state(false);
+	const summaryDirty = $derived(summaryDraft !== (summary ?? ''));
+
+	// 설정 모달을 열 때 현재 세션의 최신 요약을 불러온다(백그라운드 갱신 반영).
+	async function loadSummary() {
+		if (!sessionId) {
+			summary = null;
+			summaryDraft = '';
+			return;
+		}
+		summaryLoading = true;
+		try {
+			const res = await fetch(`/api/chat/summary?sessionId=${encodeURIComponent(sessionId)}`);
+			if (res.ok) {
+				const d = (await res.json()) as { summary: string | null };
+				summary = d.summary ?? null;
+				summaryDraft = summary ?? '';
+				summarySaved = false;
+			}
+		} catch (e) {
+			console.error(e);
+		} finally {
+			summaryLoading = false;
+		}
+	}
+
+	async function saveSummary() {
+		if (!sessionId || summarySaving) return;
+		summarySaving = true;
+		summarySaved = false;
+		try {
+			const res = await fetch('/api/chat/summary', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ sessionId, summary: summaryDraft })
+			});
+			if (res.ok) {
+				const d = (await res.json()) as { summary: string | null };
+				summary = d.summary ?? null;
+				summaryDraft = summary ?? '';
+				summarySaved = true;
+			}
+		} catch (e) {
+			console.error(e);
+		} finally {
+			summarySaving = false;
+		}
+	}
+
+	function toggleSettings() {
+		showSettings = !showSettings;
+		if (showSettings) loadSummary();
+	}
 	let input = $state('');
 	let streaming = $state(false);
 	let imgFailed = $state(false);
@@ -76,12 +150,13 @@
 		modelOpen = false;
 	}
 
-	// 다른 캐릭터로 이동(컴포넌트 재사용) 시 이야기를 새로 시작
+	// 다른 캐릭터/세션으로 이동(컴포넌트 재사용) 시 해당 대화로 다시 초기화
 	let currentId = data.character.id;
 	$effect(() => {
 		if (character.id !== currentId) {
 			currentId = character.id;
-			messages = greetingMessages(openingFor(character, data.openingIndex));
+			messages = initialMessages(data);
+			sessionId = data.sessionId;
 			input = '';
 		}
 	});
@@ -164,9 +239,6 @@
 
 		messages.push({ id: crypto.randomUUID(), role: 'user', content: text });
 
-		// 보낼 메시지는 빈 placeholder 를 넣기 전에 만든다(인사말 + 이전 턴 + 방금 입력)
-		const outgoing = messages.map(({ role, content }) => ({ role, content }));
-
 		// assistant placeholder. $state 배열은 push 시 프록시로 감싸므로,
 		// 반드시 messages[idx] (프록시)를 통해 수정해야 반응성이 동작한다.
 		const idx = messages.length;
@@ -175,21 +247,32 @@
 		await scrollToBottom();
 
 		try {
+			// 서버가 history 의 주인. 새 유저 메시지만 보내고, 세션이 없으면 오프닝 인덱스로 생성.
 			const res = await fetch('/api/chat', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
 					characterId: character.id,
-					messages: outgoing,
+					sessionId: sessionId ?? undefined,
+					text,
+					openingIndex: data.openingIndex,
 					model,
 					maxSentences,
-					userActs,
-					userName: data.user?.name ?? undefined,
-					userPersona: data.user?.persona ?? undefined
+					userActs
 				})
 			});
 
 			if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+			// 서버가 lazy 생성한 세션 id 회수 (이후 전송부터 이어가기)
+			const newSession = res.headers.get('x-haven-session');
+			if (newSession) sessionId = newSession;
+
+			// 이번 턴 input 토큰(추정치)·상한 회수 → 하단에 표시
+			const it = Number(res.headers.get('x-haven-input-tokens'));
+			const im = Number(res.headers.get('x-haven-input-max'));
+			inputTokens = Number.isFinite(it) && it > 0 ? it : null;
+			inputMax = Number.isFinite(im) && im > 0 ? im : null;
 
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
@@ -259,7 +342,7 @@
 			<button
 				class="settings-btn"
 				class:active={showSettings}
-				onclick={() => (showSettings = !showSettings)}
+				onclick={toggleSettings}
 				aria-label="채팅 설정"
 				aria-expanded={showSettings}
 			>
@@ -381,6 +464,42 @@
 						{/if}
 					</p>
 				</div>
+
+				<div class="setting">
+					<div class="setting-row">
+						<span class="field-label">대화 요약</span>
+					</div>
+					<p class="setting-hint">
+						대화가 길어지면 오래된 내용은 <strong>요약</strong>으로 압축됩니다. 모델에는
+						<strong>이 요약과 최근 메시지</strong>가 함께 전달돼요. 내용을 직접 고치면 이후 대화에 반영됩니다.
+					</p>
+					{#if !sessionId}
+						<p class="summary-empty">대화를 시작하면 요약이 만들어집니다.</p>
+					{:else if summaryLoading}
+						<p class="summary-empty">불러오는 중…</p>
+					{:else if summary !== null}
+						<textarea
+							class="summary-edit"
+							bind:value={summaryDraft}
+							rows="6"
+							placeholder="요약 내용"
+						></textarea>
+						<div class="summary-actions">
+							{#if summarySaved && !summaryDirty}
+								<span class="summary-note">저장됨</span>
+							{/if}
+							<button
+								class="summary-save"
+								onclick={saveSummary}
+								disabled={summarySaving || !summaryDirty}
+							>
+								{summarySaving ? '저장 중…' : '저장'}
+							</button>
+						</div>
+					{:else}
+						<p class="summary-empty">아직 요약이 없어요. 대화가 길어지면 자동으로 생성됩니다.</p>
+					{/if}
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -428,7 +547,16 @@
 				↑
 			</button>
 		</div>
-		<p class="disclaimer">AI가 생성한 이야기이며 실제 인물과 무관합니다.</p>
+		<p class="disclaimer">
+			AI가 생성한 이야기이며 실제 인물과 무관합니다.
+			{#if inputTokens !== null}
+				<span class="token-meter"
+					>· 직전 input ~{inputTokens.toLocaleString()}{#if inputMax}<span class="token-max"
+							>/{inputMax.toLocaleString()}</span
+						>{/if} 토큰</span
+				>
+			{/if}
+		</p>
 	</div>
 </div>
 
@@ -615,6 +743,62 @@
 		font-size: 0.74rem;
 		line-height: 1.45;
 		color: var(--text-dim);
+	}
+	.setting-hint strong {
+		color: var(--text);
+		font-weight: 600;
+	}
+
+	/* 대화 요약 편집 */
+	.summary-empty {
+		margin: 10px 0 0;
+		font-size: 0.78rem;
+		color: var(--text-faint);
+	}
+	.summary-edit {
+		width: 100%;
+		margin-top: 10px;
+		padding: 10px 12px;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		color: var(--text);
+		font: inherit;
+		font-size: 0.82rem;
+		line-height: 1.5;
+		resize: vertical;
+		min-height: 90px;
+		outline: none;
+	}
+	.summary-edit:focus {
+		border-color: var(--accent);
+	}
+	.summary-actions {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 10px;
+		margin-top: 8px;
+	}
+	.summary-note {
+		font-size: 0.74rem;
+		color: var(--accent);
+	}
+	.summary-save {
+		padding: 7px 16px;
+		border: none;
+		border-radius: var(--radius-sm);
+		background: var(--accent);
+		color: #fff;
+		font-size: 0.82rem;
+		font-weight: 600;
+	}
+	.summary-save:disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
+	.summary-save:not(:disabled):hover {
+		background: var(--accent-hover);
 	}
 
 	/* 모델 드롭다운 */
@@ -863,5 +1047,11 @@
 		font-size: 0.72rem;
 		color: var(--text-faint);
 		margin: 8px 0 0;
+	}
+	.token-meter {
+		color: var(--text-dim);
+	}
+	.token-max {
+		color: var(--text-faint);
 	}
 </style>

@@ -48,3 +48,22 @@ export interface ChatMessage {
 	role: Role;
 	content: string;
 }
+
+/** DB 영속 메시지 — ChatMessage + 세션 내 순번(seq). */
+export interface StoredMessage extends ChatMessage {
+	seq: number;
+}
+
+/** 대화 세션. summary/summary_upto_seq 가 토큰 전략(요약+window)의 상태. */
+export interface ChatSession {
+	id: string;
+	userId: string;
+	characterId: string;
+	model: string | null;
+	summary: string | null;
+	summaryUptoSeq: number;
+	messageCount: number;
+	createdAt: number;
+	updatedAt: number;
+	lastMessageAt: number | null;
+}

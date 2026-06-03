@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
+	import PromptGuideModal from '$lib/components/PromptGuideModal.svelte';
+	import TextReplaceModal from '$lib/components/TextReplaceModal.svelte';
 	import type { Audience, ContentRating, Opening } from '$lib/types';
 
 	export interface CharacterFormInitial {
@@ -61,6 +63,8 @@
 
 	let submitting = $state(false);
 	let error = $state('');
+	let guideOpen = $state(false);
+	let replaceOpen = $state(false);
 
 	// 새로 고른 이미지가 있으면 그것, 없으면 기존(수정) 썸네일.
 	const displayImage = $derived(imagePreview ?? initial?.avatarUrl ?? null);
@@ -305,7 +309,30 @@
 	<!-- 프롬프트 -->
 	<div class="field">
 		<div class="label-row">
-			<label class="field-label" for="c-desc">프롬프트 <span class="req">*</span></label>
+			<span class="label-with-info">
+				<label class="field-label" for="c-desc">프롬프트 <span class="req">*</span></label>
+				<button
+					type="button"
+					class="info-btn"
+					onclick={() => (guideOpen = true)}
+					aria-label="프롬프트 작성 가이드 열기"
+					title="작성 가이드">ⓘ</button
+				>
+				<button
+					type="button"
+					class="info-btn"
+					onclick={() => (replaceOpen = true)}
+					aria-label="텍스트 대치 도구 열기"
+					title="텍스트 대치"
+				>
+					<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+						<path
+							fill="currentColor"
+							d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"
+						/>
+					</svg>
+				</button>
+			</span>
 			<span class="count" class:over={description.length > DESC_MAX}
 				>{description.length}/{DESC_MAX}</span
 			>
@@ -450,6 +477,18 @@
 	</button>
 </div>
 
+<PromptGuideModal open={guideOpen} onclose={() => (guideOpen = false)} />
+
+<TextReplaceModal
+	open={replaceOpen}
+	text={description}
+	onclose={() => (replaceOpen = false)}
+	onapply={(next) => {
+		description = next;
+		replaceOpen = false;
+	}}
+/>
+
 <style>
 	.create {
 		max-width: 640px;
@@ -508,6 +547,32 @@
 	}
 	.label-row .field-label {
 		margin-bottom: 0;
+	}
+	.label-with-info {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.info-btn {
+		display: grid;
+		place-items: center;
+		width: 20px;
+		height: 20px;
+		padding: 0;
+		border: none;
+		background: transparent;
+		color: var(--text-faint);
+		font-size: 0.92rem;
+		line-height: 1;
+		cursor: pointer;
+		border-radius: 50%;
+		transition:
+			color 0.15s ease,
+			background 0.15s ease;
+	}
+	.info-btn:hover {
+		color: var(--accent);
+		background: var(--accent-soft);
 	}
 	.req {
 		color: var(--accent);
