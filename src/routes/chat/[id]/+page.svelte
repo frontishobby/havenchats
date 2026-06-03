@@ -409,7 +409,6 @@
 				raw += decoder.decode(value, { stream: true });
 				const sep = raw.indexOf(META_SEP);
 				messages[idx].content = sep >= 0 ? raw.slice(0, sep) : raw;
-				await scrollToBottom();
 			}
 			raw += decoder.decode(); // 멀티바이트 잔여 flush
 			const sep = raw.indexOf(META_SEP);
