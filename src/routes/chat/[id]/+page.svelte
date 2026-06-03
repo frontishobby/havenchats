@@ -116,19 +116,6 @@
 	let scroller = $state<HTMLDivElement | null>(null);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
 
-	// ── 모바일: 아래로 스크롤하면 상단 캐릭터 헤더 숨김 / 위로 스크롤하면 다시 보임 ──
-	let headerHidden = $state(false);
-	let headerH = $state(0); // 헤더 높이(숨길 때 음수 margin 으로 정확히 접기 위해 측정)
-	let lastScroll = 0;
-	function onReaderScroll() {
-		if (!scroller) return;
-		const st = scroller.scrollTop;
-		if (st <= 8) headerHidden = false; // 맨 위 근처에서는 항상 보임
-		else if (st > lastScroll + 6) headerHidden = true; // 아래로
-		else if (st < lastScroll - 6) headerHidden = false; // 위로
-		lastScroll = st;
-	}
-
 	// ── 채팅 설정 ──
 	let showSettings = $state(false);
 	let modelOpen = $state(false); // 모델 드롭다운 열림
@@ -180,8 +167,6 @@
 		sessionId = data.sessionId;
 		input = '';
 		sendError = null;
-		headerHidden = false;
-		lastScroll = 0;
 		// 이어가는 세션은 맨 아래(최신 메시지)로 즉시 이동
 		if (messages.length > 0) tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
 	});
@@ -355,8 +340,8 @@
 
 <svelte:window onkeydown={onWindowKey} />
 
-<div class="chat" class:header-collapsed={headerHidden} style:--header-h="{headerH}px">
-	<header class="chat-header" bind:clientHeight={headerH}>
+<div class="chat">
+	<header class="chat-header">
 		<a class="back" href="/" aria-label="뒤로">←</a>
 		<div class="avatar-sm">
 			{#if imgFailed}
@@ -562,7 +547,7 @@
 		{/each}
 	{/snippet}
 
-	<div class="reader" bind:this={scroller} onscroll={onReaderScroll}>
+	<div class="reader" bind:this={scroller}>
 		<article class="novel">
 			{#each messages as m (m.id)}
 				{#if m.content || (streaming && m === lastMessage)}
@@ -629,18 +614,6 @@
 		padding: 12px 16px;
 		border-bottom: 1px solid var(--border);
 		background: var(--bg);
-	}
-	/* 모바일: 아래로 스크롤 시 헤더를 위로 접어 읽기 공간 확보(위로 스크롤하면 복귀).
-	   음수 margin 으로 실제 공간까지 회수 → reader 가 그만큼 넓어진다.
-	   --header-h 는 측정된 헤더 높이(스크립트에서 주입). 데스크톱에서는 비활성. */
-	@media (max-width: 640px) {
-		.chat-header {
-			transition: margin-top 0.25s ease;
-			will-change: margin-top;
-		}
-		.chat.header-collapsed .chat-header {
-			margin-top: calc(-1 * var(--header-h, 62px));
-		}
 	}
 	.back {
 		font-size: 1.4rem;

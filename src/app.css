@@ -54,6 +54,17 @@ textarea {
 	font-family: inherit;
 }
 
+/* iOS Safari: form 컨트롤 font-size 가 16px 미만이면 포커스 시 화면이 자동 줌인된다.
+   모바일에서 입력 폰트를 16px 로 올려 줌인을 막는다. (viewport 의 줌 자체는 막지 않아 접근성 유지)
+   컴포넌트 스코프 선택자(.search input 등)보다 우선해야 하므로 !important. */
+@media (max-width: 640px) {
+	input,
+	textarea,
+	select {
+		font-size: 16px !important;
+	}
+}
+
 ::selection {
 	background: var(--accent-soft);
 }
