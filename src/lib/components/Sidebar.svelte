@@ -111,7 +111,7 @@
 								aria-label="대화 삭제"
 								title="대화 삭제"
 							>
-								🗑
+								×
 							</button>
 						{/if}
 					</div>
@@ -207,7 +207,8 @@
 		border-radius: 8px;
 		background: transparent;
 		color: var(--text-faint);
-		font-size: 0.95rem;
+		font-size: 1.25rem;
+		line-height: 1;
 		opacity: 0;
 		transition:
 			opacity 0.12s ease,

@@ -103,7 +103,7 @@
 							disabled={deleting === c.id}
 							aria-label="캐릭터 삭제"
 						>
-							{deleting === c.id ? '…' : '🗑'}
+							{deleting === c.id ? '…' : '×'}
 						</button>
 					</li>
 				{/each}
@@ -313,7 +313,8 @@
 		border-left: 1px solid var(--border);
 		background: transparent;
 		color: var(--text-faint);
-		font-size: 0.95rem;
+		font-size: 1.25rem;
+		line-height: 1;
 		cursor: pointer;
 		transition:
 			background 0.15s ease,
