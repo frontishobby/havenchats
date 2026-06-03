@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import NsfwBadge from './NsfwBadge.svelte';
+	import { hasScenes } from '$lib/imageCodes';
 	import type { Character } from '$lib/types';
 
 	let { character, onclose }: { character: Character | null; onclose: () => void } = $props();
@@ -53,6 +54,14 @@
 		starting = true;
 		const multi = character.greetings.length > 1;
 		goto(`/chat/${character.id}${multi ? `?o=${selected}` : ''}`);
+	}
+
+	// 등록된 장면 이미지(에셋)가 있을 때만 미리보기 버튼 노출.
+	const hasAssets = $derived(hasScenes(character?.imageSet));
+
+	function viewAssets() {
+		if (!character) return;
+		goto(`/characters/${character.id}/assets`);
 	}
 </script>
 
@@ -171,9 +180,14 @@
 				{#if creatorLinkable}<span class="creator-chev">›</span>{/if}
 			</svelte:element>
 
-			<button class="start" onclick={start} disabled={starting}>
-				{starting ? '시작하는 중…' : '채팅 시작하기'}
-			</button>
+			<div class="actions">
+				{#if hasAssets}
+					<button class="assets" onclick={viewAssets}>🖼 에셋 미리보기</button>
+				{/if}
+				<button class="start" onclick={start} disabled={starting}>
+					{starting ? '시작하는 중…' : '채팅 시작하기'}
+				</button>
+			</div>
 		</div>
 	</div>
 {/if}
@@ -465,9 +479,28 @@
 		font-size: 1.1rem;
 	}
 
-	.start {
+	.actions {
 		flex-shrink: 0;
-		width: 100%;
+		display: flex;
+		gap: 10px;
+	}
+	.assets {
+		flex-shrink: 0;
+		padding: 13px 16px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--bg-elev);
+		color: var(--text);
+		font-weight: 600;
+		font-size: 0.9rem;
+		white-space: nowrap;
+		transition: border-color 0.15s ease;
+	}
+	.assets:hover {
+		border-color: var(--accent);
+	}
+	.start {
+		flex: 1;
 		padding: 13px;
 		border: none;
 		border-radius: var(--radius-sm);
