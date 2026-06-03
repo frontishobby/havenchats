@@ -11,7 +11,24 @@
 	$effect(() => {
 		if (data.user && !data.user.profileComplete) profileModal.open = true;
 	});
+
+	// 우상단 유저 메뉴(드롭다운)
+	let menuOpen = $state(false);
+	let menuRef = $state<HTMLDivElement | null>(null);
+
+	function openProfileSettings() {
+		profileModal.open = true;
+		menuOpen = false;
+	}
+	function onWindowClick(e: MouseEvent) {
+		if (menuOpen && menuRef && !menuRef.contains(e.target as Node)) menuOpen = false;
+	}
+	function onWindowKey(e: KeyboardEvent) {
+		if (e.key === 'Escape') menuOpen = false;
+	}
 </script>
+
+<svelte:window onclick={onWindowClick} onkeydown={onWindowKey} />
 
 <div class="app">
 	<header class="topbar">
@@ -22,14 +39,45 @@
 		<nav>
 			<a href="/" class="nav-link">탐색</a>
 			{#if data.user}
-				<div class="user-chip">
-					<button class="user-name-btn" onclick={() => (profileModal.open = true)} title="프로필 수정">
+				<div class="user-menu" bind:this={menuRef}>
+					<button
+						class="user-name-btn"
+						class:active={menuOpen}
+						onclick={() => (menuOpen = !menuOpen)}
+						aria-haspopup="menu"
+						aria-expanded={menuOpen}
+						title="메뉴"
+					>
 						<span class="user-fallback">
 							{(data.user.name ?? data.user.email).charAt(0).toUpperCase()}
 						</span>
 						<span class="user-name">{data.user.name ?? '프로필 설정'}</span>
+						<span class="chev">▾</span>
 					</button>
-					<a href="/auth/logout" class="logout-link" data-sveltekit-preload-data="off">로그아웃</a>
+					{#if menuOpen}
+						<div class="menu" role="menu">
+							<button class="menu-item" role="menuitem" onclick={openProfileSettings}>
+								프로필 설정
+							</button>
+							<a
+								class="menu-item"
+								role="menuitem"
+								href="/create"
+								onclick={() => (menuOpen = false)}
+							>
+								캐릭터 만들기
+							</a>
+							<div class="menu-sep"></div>
+							<a
+								class="menu-item danger"
+								role="menuitem"
+								href="/auth/logout"
+								data-sveltekit-preload-data="off"
+							>
+								로그아웃
+							</a>
+						</div>
+					{/if}
 				</div>
 			{:else}
 				<button class="login-btn" onclick={() => (loginModal.open = true)}>로그인</button>
@@ -107,10 +155,8 @@
 	.login-btn:hover {
 		background: var(--accent-hover);
 	}
-	.user-chip {
-		display: flex;
-		align-items: center;
-		gap: 12px;
+	.user-menu {
+		position: relative;
 	}
 	.user-name-btn {
 		display: flex;
@@ -118,12 +164,58 @@
 		gap: 8px;
 		background: transparent;
 		border: none;
-		padding: 4px 8px 4px 4px;
+		padding: 4px 10px 4px 4px;
 		border-radius: 999px;
 		transition: background 0.15s ease;
 	}
-	.user-name-btn:hover {
+	.user-name-btn:hover,
+	.user-name-btn.active {
 		background: var(--bg-card);
+	}
+	.chev {
+		color: var(--text-faint);
+		font-size: 0.7rem;
+	}
+
+	/* 드롭다운 메뉴 */
+	.menu {
+		position: absolute;
+		top: calc(100% + 8px);
+		right: 0;
+		z-index: 30;
+		min-width: 180px;
+		padding: 6px;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+	}
+	.menu-item {
+		display: block;
+		width: 100%;
+		text-align: left;
+		background: transparent;
+		border: none;
+		padding: 9px 12px;
+		border-radius: 8px;
+		color: var(--text);
+		font-size: 0.88rem;
+		font-weight: 500;
+		transition: background 0.12s ease;
+	}
+	.menu-item:hover {
+		background: var(--bg-elev);
+	}
+	.menu-item.danger {
+		color: var(--text-faint);
+	}
+	.menu-item.danger:hover {
+		color: var(--text);
+	}
+	.menu-sep {
+		height: 1px;
+		margin: 6px 4px;
+		background: var(--border);
 	}
 	.user-fallback {
 		width: 28px;
@@ -144,13 +236,6 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-	}
-	.logout-link {
-		font-size: 0.82rem;
-		color: var(--text-faint);
-	}
-	.logout-link:hover {
-		color: var(--text);
 	}
 	main {
 		flex: 1;

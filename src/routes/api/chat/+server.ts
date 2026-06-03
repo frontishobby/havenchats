@@ -54,7 +54,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const result = streamText({
 		model: gateway(modelId),
-		// system(공통 규칙) + character(description) 가 항상 맨 앞 → 안정적인 prefix.
+		// system(제작자 프롬프트 + 공통 정보/가드레일) 가 항상 맨 앞 → 안정적인 prefix.
 		// 그 뒤에 채팅 기록이 누적되므로 프롬프트 캐싱이 적용된다(비용↓ / TTFT↓).
 		system: buildSystemPrompt(character, body.userName, body.userPersona),
 		// 길이/시점 지침은 정적 system 이 아니라 "현재 유저 메시지 끝"에 붙여 prefix 캐싱을 보존한다.
@@ -104,30 +104,36 @@ function pickModel(requested?: string): string {
 	return requested && MODEL_IDS.has(requested) ? requested : DEFAULT_MODEL_ID;
 }
 
+/**
+ * 시스템 프롬프트 = [제작자 프롬프트(description)] + 공통 정보 + 공통 가드레일.
+ *
+ * 캐릭터 연기/내레이터/시뮬레이션/어시스턴트 같은 "역할 프레이밍"과 소설·대사 출력 형식,
+ * 말투·세계관 등은 전부 제작자가 description 에 직접 작성한다(기호에 맞게).
+ * 서버가 더하는 것은 두 가지 "완전 공통" 부분뿐:
+ *   ① 상대(사용자) 정보 — 제작자가 작성 시점에 알 수 없는 런타임 정보.
+ *   ② 가드레일 — 제작자 설정과 무관하게 항상 강제되는 안전 규칙.
+ */
 function buildSystemPrompt(character: Character, userName?: string, userPersona?: string): string {
 	const userLabel = (userName && userName.trim()) || '나';
-	const lines = [
-		`너는 "${character.name}" 라는 가상의 캐릭터를 연기한다.`,
-		``,
-		`# 캐릭터 설정`,
-		character.description,
-		``,
+
+	// ① 제작자가 작성한 프롬프트 (전체 프레이밍·설정·형식)
+	const lines: string[] = [character.description.trim(), ``];
+
+	// ② 상대(사용자) 정보 — 런타임 정보라 공통으로 주입
+	lines.push(
 		`# 상대(사용자) 정보`,
 		`- 상대의 이름은 "${userLabel}" 이다. 대화에서 상대를 이 이름으로 부른다.`
-	];
+	);
 	if (userPersona && userPersona.trim()) {
 		lines.push(`- 상대(${userLabel})의 페르소나: ${userPersona.trim()}`);
 	}
+
+	// ③ 가드레일 — 항상 강제되는 안전 규칙
 	lines.push(
 		``,
-		`# 규칙`,
-		`- 소설(웹소설) 형식으로 서술한다. 행동·표정·심리·배경 묘사는 괄호( ) 안의 지시문으로 적는다.`,
-		`- 대사는 반드시 줄을 바꿔서 "발화자 | "대사"" 형식으로 적는다. 발화자는 말하는 인물의 이름이다. 예: ${character.name} | "안녕." / 상대가 말하면: ${userLabel} | "응, 안녕."`,
-		`- 항상 ${character.name}의 말투와 성격을 유지하고, OOC(설정 이탈)나 "나는 AI"라는 언급을 하지 마라.`,
-		`- 한국어로, 장면 묘사와 대사를 풍부하게 섞어 몰입감 있게 서술한다. 응답 분량은 메시지에 주어지는 [서술 분량] 지시를 따른다.`,
-		`- 사용자(상대)의 행동과 말에 반응하여 이야기를 자연스럽게 이어간다.`,
+		`# 필수 준수`,
 		`- 미성년자에 대한 성적 묘사 등 불법적인 내용은 어떤 경우에도 생성하지 않는다.`,
-		`- 미성년자가 아닌 '성인' 캐릭터의 경우 상황에 맞는 성적 묘사 등 모든것이 허용된다.`
+		`- 등장인물이 미성년자가 아닌 '성인'인 경우, 상황에 맞는 성적 묘사 등이 허용된다.`
 	);
 	return lines.join('\n');
 }
@@ -162,8 +168,9 @@ function userActsLine(level: number): string {
 
 /**
  * 클라이언트 메시지를 AI SDK 메시지로 변환(빈 내용 제거).
- * 동적 지침(분량·사용자 시점)은 마지막 유저 메시지 끝에만 덧붙인다
+ * 유저 설정(분량·'나' 행동 생성 정도)은 마지막 유저 메시지 끝에만 덧붙인다
  * → 과거 메시지/시스템 prefix 는 그대로라 캐싱 유지.
+ * (출력 형식 자체는 제작자 프롬프트가 정의하므로 여기서는 분량/시점만 다룬다.)
  */
 function buildMessages(
 	messages: ChatMessage[],
@@ -177,8 +184,8 @@ function buildMessages(
 	const last = out[out.length - 1];
 	if (last && last.role === 'user') {
 		const directive = [
-			`[서술 지침]`,
-			`- 분량: 약 ${maxSentences}문장 내외로, 장면 묘사와 대사를 풍부하고 길게 서술하라.`,
+			`[응답 지침]`,
+			`- 분량: 약 ${maxSentences}문장 내외로 작성하라.`,
 			userActsLine(userActs)
 		].join('\n');
 		last.content = `${last.content}\n\n${directive}`;

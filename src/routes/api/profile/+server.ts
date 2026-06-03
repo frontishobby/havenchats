@@ -26,6 +26,6 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		body.preference === 'male' || body.preference === 'female' ? body.preference : null;
 	const persona = String(body.persona ?? '').trim().slice(0, 2000) || null;
 
-	await updateProfile(db, locals.user.id, { name, persona, preference });
+	await updateProfile(db, locals.user.id, locals.user.email, { name, persona, preference });
 	return json({ ok: true });
 };

@@ -83,14 +83,28 @@ export async function getUserProfile(db: D1Database, id: string): Promise<UserPr
 	};
 }
 
-/** 프로필 모달 저장. */
+/**
+ * 프로필 모달 저장 (upsert).
+ * 세션은 서명 쿠키로 검증되지만 해당 유저 row 가 없을 수 있어(예: 로컬 D1 초기화 후 stale 쿠키)
+ * UPDATE 만 하면 0건 수정으로 조용히 누락된다. id 충돌 시 갱신하는 upsert 로 self-heal 한다.
+ */
 export async function updateProfile(
 	db: D1Database,
 	id: string,
+	email: string,
 	data: { name: string; persona: string | null; preference: Preference | null }
 ): Promise<void> {
+	const now = Date.now();
 	await db
-		.prepare('UPDATE users SET display_name = ?, persona = ?, preference = ?, updated_at = ? WHERE id = ?')
-		.bind(data.name, data.persona, data.preference, Date.now(), id)
+		.prepare(
+			`INSERT INTO users (id, email, display_name, persona, preference, age_verified, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET
+			   display_name = excluded.display_name,
+			   persona = excluded.persona,
+			   preference = excluded.preference,
+			   updated_at = excluded.updated_at`
+		)
+		.bind(id, email, data.name, data.persona, data.preference, now, now)
 		.run();
 }
