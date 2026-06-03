@@ -1247,10 +1247,16 @@
 		padding: 4px 0 16px;
 	}
 	.novel {
-		font-size: 1.05rem;
+		/* 소설 읽기에 맞춘 한글 명조(세리프). 로딩 전엔 시스템 명조로 폴백. */
+		font-family: 'Noto Serif KR', 'Apple SD Gothic Neo', 'Nanum Myeongjo', serif;
+		font-size: 1.08rem;
 		line-height: 2;
 		color: var(--text);
 		letter-spacing: 0.01em;
+	}
+	/* 삭제 버튼(×)은 본문 세리프를 따라가지 않도록 UI 폰트 유지. */
+	.msg-del {
+		font-family: 'Pretendard', system-ui, sans-serif;
 	}
 	.para {
 		position: relative;
