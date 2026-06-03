@@ -95,6 +95,50 @@ export async function listSessions(
 	return (results ?? []).map(rowToSession);
 }
 
+interface RecentSessionRow {
+	id: string;
+	character_id: string;
+	last_message_at: number | null;
+	last_content: string | null;
+}
+
+/**
+ * 유저의 최근 세션(캐릭터 무관, 전역 최근순). 사이드바 목록용.
+ * 각 행에 그 세션의 마지막 메시지 본문(last_content)을 함께 가져온다.
+ * 메시지가 한 건도 없는 세션은 last_content=null 로 나오며 호출부에서 거른다.
+ */
+export async function listRecentSessions(
+	db: D1Database,
+	userId: string,
+	limit = 30
+): Promise<
+	Array<{
+		sessionId: string;
+		characterId: string;
+		lastMessageAt: number | null;
+		lastContent: string | null;
+	}>
+> {
+	const { results } = await db
+		.prepare(
+			`SELECT s.id, s.character_id, s.last_message_at,
+			        (SELECT m.content FROM chat_messages m
+			           WHERE m.session_id = s.id ORDER BY m.seq DESC LIMIT 1) AS last_content
+			 FROM chat_sessions s
+			 WHERE s.user_id = ?
+			 ORDER BY s.last_message_at DESC NULLS LAST, s.created_at DESC
+			 LIMIT ?`
+		)
+		.bind(userId, limit)
+		.all<RecentSessionRow>();
+	return (results ?? []).map((r) => ({
+		sessionId: r.id,
+		characterId: r.character_id,
+		lastMessageAt: r.last_message_at,
+		lastContent: r.last_content
+	}));
+}
+
 interface MessageRow {
 	id: string;
 	seq: number;

@@ -504,12 +504,14 @@
 		</div>
 	{/if}
 
-	{#snippet novelBody(content: string)}
+	{#snippet novelBody(content: string, isUser: boolean)}
 		{#each toLines(content) as line, i (i)}
 			{@const sp = parseSpeaker(line)}
 			<span class="line" class:dialogue={!!sp} class:narration={!sp}>
 				{#if sp}<b class="speaker">{sp.speaker}</b>{' '}{/if}
-				{#each sp ? parseInline(sp.rest) : parseNarration(line) as seg, j (j)}
+				<!-- 유저 입력은 친 그대로(정자체) 두고, 명시한 ( )/*..* 만 기울임.
+				     캐릭터 서술은 줄 전체를 소설체(기울임)로. -->
+				{#each sp || isUser ? parseInline(sp ? sp.rest : line) : parseNarration(line) as seg, j (j)}
 					{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
 				{/each}
 			</span>
@@ -521,7 +523,7 @@
 			{#each messages as m (m.id)}
 				{#if m.content || (streaming && m === lastMessage)}
 					<div class="para {m.role}">
-						{@render novelBody(m.content)}
+						{@render novelBody(m.content, m.role === 'user')}
 						{#if streaming && m.role === 'assistant' && m === lastMessage}
 							{#if m.content}<span class="cursor"></span>{:else}<span class="typing"
 									><i></i><i></i><i></i></span

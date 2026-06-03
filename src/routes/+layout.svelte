@@ -2,6 +2,7 @@
 	import '../app.css';
 	import LoginModal from '$lib/components/LoginModal.svelte';
 	import ProfileModal from '$lib/components/ProfileModal.svelte';
+	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { loginModal } from '$lib/state/loginModal.svelte';
 	import { profileModal } from '$lib/state/profileModal.svelte';
 	import type { LayoutData } from './$types';
@@ -11,6 +12,9 @@
 	$effect(() => {
 		if (data.user && !data.user.profileComplete) profileModal.open = true;
 	});
+
+	// 좌측 사이드바(최근 채팅)
+	let sidebarOpen = $state(false);
 
 	// 우상단 유저 메뉴(드롭다운)
 	let menuOpen = $state(false);
@@ -32,10 +36,22 @@
 
 <div class="app">
 	<header class="topbar">
-		<a class="brand" href="/">
-			<span class="logo">✦</span>
-			<span class="wordmark">Haven<span class="dim">chats</span></span>
-		</a>
+		<div class="left">
+			{#if data.user}
+				<button
+					class="hamburger"
+					onclick={() => (sidebarOpen = true)}
+					aria-label="최근 채팅"
+					title="최근 채팅"
+				>
+					<span></span><span></span><span></span>
+				</button>
+			{/if}
+			<a class="brand" href="/">
+				<span class="logo">✦</span>
+				<span class="wordmark">Haven<span class="dim">chats</span></span>
+			</a>
+		</div>
 		<nav>
 			<a href="/" class="nav-link">탐색</a>
 			{#if data.user}
@@ -90,6 +106,7 @@
 	</main>
 </div>
 
+<Sidebar open={sidebarOpen} chats={data.recentChats} onClose={() => (sidebarOpen = false)} />
 <LoginModal />
 <ProfileModal user={data.user} />
 
@@ -111,6 +128,33 @@
 		background: color-mix(in srgb, var(--bg) 80%, transparent);
 		backdrop-filter: blur(12px);
 		border-bottom: 1px solid var(--border);
+	}
+	.left {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.hamburger {
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		gap: 4px;
+		width: 36px;
+		height: 36px;
+		padding: 0 8px;
+		background: transparent;
+		border: none;
+		border-radius: 8px;
+		transition: background 0.12s ease;
+	}
+	.hamburger:hover {
+		background: var(--bg-card);
+	}
+	.hamburger span {
+		display: block;
+		height: 2px;
+		border-radius: 2px;
+		background: var(--text-dim);
 	}
 	.brand {
 		display: flex;

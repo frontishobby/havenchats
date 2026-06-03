@@ -67,3 +67,13 @@ export interface ChatSession {
 	updatedAt: number;
 	lastMessageAt: number | null;
 }
+
+/** 사이드바(최근 채팅) 한 줄. 세션 + 캐릭터 메타 + 마지막 대사 미리보기. */
+export interface RecentChat {
+	sessionId: string;
+	characterId: string;
+	characterName: string;
+	avatarUrl: string;
+	preview: string;
+	lastMessageAt: number | null;
+}
