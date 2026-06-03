@@ -115,6 +115,8 @@
 	let imgFailed = $state(false);
 	let scroller = $state<HTMLDivElement | null>(null);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
+	// 터치(모바일) 기기 여부 — 이 경우 Enter 는 전송하지 않고 개행(기본 동작) 시킨다.
+	let isTouch = $state(false);
 
 	// ── 채팅 설정 ──
 	let showSettings = $state(false);
@@ -133,6 +135,8 @@
 		if (savedLen) maxSentences = Math.min(SENTENCE_MAX, Math.max(SENTENCE_MIN, savedLen));
 		const savedActs = localStorage.getItem(USER_ACTS_KEY);
 		if (savedActs !== null) userActs = Math.min(2, Math.max(0, Number(savedActs)));
+		// 터치 기반(소프트 키보드) 기기 감지 → Enter 는 개행으로
+		isTouch = window.matchMedia('(pointer: coarse)').matches;
 	});
 	$effect(() => {
 		localStorage.setItem(MODEL_KEY, model);
@@ -312,6 +316,8 @@
 	}
 
 	function onKeydown(e: KeyboardEvent) {
+		// 모바일(터치)에서는 Enter 를 전송으로 가로채지 않고 기본 개행 동작에 맡긴다.
+		if (isTouch) return;
 		if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
 			e.preventDefault();
 			send();
