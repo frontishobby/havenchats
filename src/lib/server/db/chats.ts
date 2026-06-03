@@ -270,9 +270,12 @@ export async function createSession(
 
 /**
  * 메시지 1건 추가. 다음 seq 를 발급하고 세션 카운터/시각을 갱신한다.
- * model 을 같이 넘기면 세션의 "마지막 사용 모델"을 갱신(요약 시 사용).
+ * model 을 같이 넘기면 세션의 "마지막 사용 모델"을 갱신(요약 시 사용)하고, 동시에 이 메시지
+ * 행에도 어떤 모델로 보냈는지를 기록한다(메시지 단위 모델 — 세션 model 과 별개).
  * inputTokens 는 assistant 메시지에서, 그 응답에 들어간 input 토큰 수(실측/추정).
  * cost 는 assistant 메시지에서, 그 응답의 AI Gateway 추론 비용(USD, 실측). 없으면 미기록.
+ * targetSentences 는 그 턴에 사용자가 출력 분량 슬라이더로 요청한 값(문장 수). assistant
+ * 메시지에 그 응답에 기대된 분량을 남긴다(데이터셋용). 없으면 미기록.
  * id 를 넘기면 그 값을 메시지 PK 로 사용(클라가 생성한 id 와 DB id 를 일치시켜 삭제 등 동기화).
  * 없으면 서버가 생성.
  * 반환: 발급된 seq.
@@ -285,7 +288,8 @@ export async function appendMessage(
 	model?: string,
 	inputTokens?: number,
 	cost?: number,
-	id?: string
+	id?: string,
+	targetSentences?: number
 ): Promise<number> {
 	const now = Date.now();
 	// 단일 유저가 순차 전송하므로 read-then-write 경쟁 위험은 낮다.
@@ -298,8 +302,8 @@ export async function appendMessage(
 	await db.batch([
 		db
 			.prepare(
-				`INSERT INTO chat_messages (id, session_id, seq, role, content, token_est, input_tokens, cost, created_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				`INSERT INTO chat_messages (id, session_id, seq, role, content, token_est, input_tokens, cost, model, target_sentences, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			)
 			.bind(
 				id ?? crypto.randomUUID(),
@@ -310,6 +314,8 @@ export async function appendMessage(
 				estimateTokens(content),
 				inputTokens ?? null,
 				cost ?? null,
+				model ?? null,
+				targetSentences ?? null,
 				now
 			),
 		db

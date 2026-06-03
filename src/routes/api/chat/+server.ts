@@ -15,6 +15,7 @@ import {
 } from '$lib/server/db/chats';
 import type { Character, ChatSession, StoredMessage } from '$lib/types';
 import { buildImageCatalog, pinSceneCodes } from '$lib/imageCodes';
+import { notifyServerError } from '$lib/server/notify';
 
 /** live window 토큰 예산 — 이 이상이면 요약 트리거. */
 const WINDOW_TOKEN_BUDGET = 6000;
@@ -182,6 +183,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			modelId,
 			inputTokensEst,
 			assistantMsgId,
+			maxSentences,
 			tokenHeaders
 		);
 	}
@@ -207,6 +209,12 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		onError: ({ error }) => {
 			streamError = error;
 			console.error(`[chat] streamText error (model=${modelId}):`, error);
+			notifyServerError({
+				context: 'streamText /api/chat',
+				error,
+				extra: { model: modelId, session: session!.id, character: character.id, user: userId },
+				waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+			});
 		},
 		onFinish: ({ text: reply, usage, providerMetadata }) => {
 			// AI 호출 토큰·캐시 사용량 실측 로그.
@@ -238,6 +246,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 					clean,
 					inputTokens,
 					assistantMsgId,
+					maxSentences,
 					cost
 				)
 			);
@@ -253,6 +262,12 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 				}
 			} catch (err) {
 				streamError = err;
+				notifyServerError({
+					context: 'textStream iterate /api/chat',
+					error: err,
+					extra: { model: modelId, session: session!.id, character: character.id, user: userId },
+					waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+				});
 			}
 			if (streamError) {
 				// 상세 에러는 서버 로그(onError)에만 남기고, 사용자에겐 일반 메시지만 노출
@@ -360,6 +375,7 @@ async function persistAndMaybeSummarize(
 	reply: string,
 	inputTokens: number,
 	assistantMsgId: string,
+	maxSentences: number,
 	cost?: number
 ): Promise<void> {
 	const assistantSeq = await appendMessage(
@@ -370,7 +386,8 @@ async function persistAndMaybeSummarize(
 		modelId,
 		inputTokens,
 		cost,
-		assistantMsgId
+		assistantMsgId,
+		maxSentences
 	);
 
 	const liveCount = windowBefore.length + 1;
@@ -596,6 +613,7 @@ function mockStream(
 	modelId: string,
 	inputTokensEst: number,
 	assistantMsgId: string,
+	maxSentences: number,
 	tokenHeaders: Record<string, string>
 ): Response {
 	const reply = mockReply(character.name);
@@ -624,7 +642,8 @@ function mockStream(
 					modelId,
 					inputTokensEst,
 					undefined,
-					assistantMsgId
+					assistantMsgId,
+					maxSentences
 				).then(() => undefined)
 			);
 		}
