@@ -8,7 +8,7 @@ import {
 import { ALLOWED_IMAGE, parseCharacterForm, parseImageSet } from '$lib/server/characterForm';
 import { commitImageSet, deleteAllSceneImages, deleteKeys } from '$lib/server/imageStore';
 
-/** 빌트인(목) 캐릭터는 슬러그 id → uuid 가 아니면 편집 대상이 아님. */
+/** 유저 캐릭터 id 는 uuid. 그 외 형식은 편집 대상이 아님. */
 function isUserCharacterId(id: string): boolean {
 	return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
