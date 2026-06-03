@@ -70,6 +70,7 @@
 		display: grid;
 		place-items: center;
 		padding: 20px;
+		animation: backdrop-in 0.18s ease both;
 	}
 	.modal {
 		position: relative;
@@ -81,6 +82,31 @@
 		padding: 32px 24px 22px;
 		box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
 		text-align: center;
+		animation: modal-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+	}
+	@keyframes backdrop-in {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+	@keyframes modal-in {
+		from {
+			opacity: 0;
+			transform: translateY(8px) scale(0.97);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.backdrop,
+		.modal {
+			animation: none;
+		}
 	}
 	.close {
 		position: absolute;
