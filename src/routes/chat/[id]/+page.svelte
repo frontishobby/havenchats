@@ -1322,13 +1322,25 @@
 		overflow: hidden;
 	}
 	.block-title {
-		padding: 8px 14px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 9px 14px;
 		font-size: 0.82rem;
 		font-weight: 700;
 		letter-spacing: 0.02em;
 		color: var(--accent);
 		background: var(--accent-soft);
-		border-bottom: 1px solid var(--border);
+		border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+	}
+	/* 제목 앞 점 마커 — '제목'임을 한눈에 */
+	.block-title::before {
+		content: '';
+		flex: 0 0 auto;
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--accent);
 	}
 	.block-body {
 		padding: 12px 14px;
