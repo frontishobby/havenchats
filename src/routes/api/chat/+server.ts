@@ -173,7 +173,21 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			streamError = error;
 			console.error(`[chat] streamText error (model=${modelId}):`, error);
 		},
-		onFinish: ({ text: reply, usage }) => {
+		onFinish: ({ text: reply, usage, providerMetadata }) => {
+			// AI 호출 토큰·캐시 사용량 실측 로그.
+			// cacheRead > 0 이면 prefix 캐시 hit, cacheWrite 는 이번 턴에 새로 캐시에 쓴 토큰.
+			const d = usage?.inputTokenDetails;
+			const cacheRead = d?.cacheReadTokens ?? usage?.cachedInputTokens ?? 0;
+			const cacheWrite = d?.cacheWriteTokens ?? 0;
+			console.log(
+				`[chat] usage session=${session!.id} model=${modelId} ` +
+					`in=${usage?.inputTokens ?? 0} out=${usage?.outputTokens ?? 0} total=${usage?.totalTokens ?? 0} | ` +
+					`cacheRead=${cacheRead} cacheWrite=${cacheWrite} noCache=${d?.noCacheTokens ?? 0}` +
+					(providerMetadata?.gateway
+						? ` | gateway=${JSON.stringify(providerMetadata.gateway)}`
+						: '')
+			);
+
 			// 저장 직전 위치코드 {AAB} → 불변 토큰 {#id} 로 고정(이후 제작자 수정에 안 흔들림).
 			const clean = pinSceneCodes(reply.trim(), character.imageSet);
 			if (!clean) return; // 에러/빈 응답은 저장하지 않음(유저 메시지는 이미 저장됨)

@@ -91,7 +91,7 @@ export function buildImageCatalog(set: CharacterImageSet | null | undefined): st
 		`- 코드는 [${axisOrder}] 순서의 글자 조합이다.`,
 		`- 사용 가능한 장면:`,
 		...lines,
-		`규칙: 위 목록에 있는 코드만, 한 응답에 최대 1개, 장면이 실제로 바뀔 때만 출력한다. 본문 서술·대사는 평소대로 이어가라.`
+		`규칙: 위 목록에 있는 코드만, 장면이 실제로 바뀔 때만 출력한다. 본문 서술·대사는 평소대로 이어가라.`
 	].join('\n');
 }
 
