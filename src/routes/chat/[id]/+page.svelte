@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { MODELS, DEFAULT_MODEL_ID, getModel } from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
+	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import type { ChatMessage } from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -212,13 +213,15 @@
 			{/if}
 		</div>
 		<div class="who">
-			<strong>{character.name}</strong>
+			<div class="name-row">
+				<strong>{character.name}</strong>
+				{#if character.contentRating === 'nsfw'}
+					<NsfwBadge size={17} />
+				{/if}
+			</div>
 			<span class="tagline">{character.tagline}</span>
 		</div>
 		<div class="header-right">
-			{#if character.contentRating === 'nsfw'}
-				<span class="badge-nsfw">18+</span>
-			{/if}
 			<button
 				class="settings-btn"
 				class:active={showSettings}
@@ -444,8 +447,17 @@
 		line-height: 1.3;
 		min-width: 0;
 	}
+	.who .name-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+	}
 	.who strong {
 		font-size: 0.98rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.who .tagline {
 		font-size: 0.78rem;
@@ -459,14 +471,6 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-	}
-	.badge-nsfw {
-		background: var(--nsfw);
-		color: #fff;
-		font-size: 0.7rem;
-		font-weight: 700;
-		padding: 2px 8px;
-		border-radius: 999px;
 	}
 	.settings-btn {
 		width: 34px;

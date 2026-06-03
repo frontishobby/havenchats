@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Character } from '$lib/types';
+	import NsfwBadge from './NsfwBadge.svelte';
 
 	let { character }: { character: Character } = $props();
 
@@ -26,14 +27,16 @@
 				onerror={() => (imgFailed = true)}
 			/>
 		{/if}
-		{#if character.contentRating === 'nsfw'}
-			<span class="badge-nsfw">18+</span>
-		{/if}
 	</div>
 
 	<div class="body">
 		<div class="name-row">
-			<h3>{character.name}</h3>
+			<h3 class="name">
+				<span class="name-text">{character.name}</span>
+				{#if character.contentRating === 'nsfw'}
+					<NsfwBadge size={17} />
+				{/if}
+			</h3>
 			<span class="chats">💬 {formatChats(character.chats)}</span>
 		</div>
 		<p class="tagline">{character.tagline}</p>
@@ -85,19 +88,6 @@
 		color: #fff;
 		background: linear-gradient(135deg, var(--accent), var(--nsfw));
 	}
-	.badge-nsfw {
-		position: absolute;
-		top: 8px;
-		right: 8px;
-		background: var(--nsfw);
-		color: #fff;
-		font-size: 0.7rem;
-		font-weight: 700;
-		padding: 2px 8px;
-		border-radius: 999px;
-		letter-spacing: 0.02em;
-	}
-
 	.body {
 		padding: 12px 14px 14px;
 		display: flex;
@@ -110,10 +100,20 @@
 		justify-content: space-between;
 		gap: 8px;
 	}
-	h3 {
+	h3.name {
 		margin: 0;
 		font-size: 1rem;
 		font-weight: 700;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.name-text {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.chats {
 		font-size: 0.75rem;
