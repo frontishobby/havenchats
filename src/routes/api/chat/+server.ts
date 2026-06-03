@@ -63,6 +63,8 @@ interface ChatRequestBody {
 	maxSentences?: number;
 	/** '나'(사용자) 행동·대사를 AI가 생성하는 정도. 0=금지, 1=적정, 2=풍부. 기본 1. */
 	userActs?: number;
+	/** 첫 대화 전에 미리 설정한 상시 기억(새 세션 생성 시에만 사용, 최대 100자). */
+	memory?: string;
 	/**
 	 * 클라가 생성한 이번 유저/assistant 메시지 id. DB PK 로 그대로 저장해 클라 메시지 ↔ DB 행을
 	 * 일치시킨다(이어가기 전, 라이브 메시지도 id 로 삭제 가능). 없으면 서버가 생성.
@@ -118,7 +120,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			userId,
 			characterId: character.id,
 			model: modelId,
-			opening
+			opening,
+			memory: body.memory
 		});
 	}
 

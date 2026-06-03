@@ -237,6 +237,11 @@
 		hasMore = data.hasMore ?? false;
 		input = '';
 		sendError = null;
+		// 상시 기억·요약 드래프트도 초기화(다른 대화의 입력값이 새 세션에 새지 않게). 모달 열 때 다시 로드.
+		memory = null;
+		memoryDraft = '';
+		summary = null;
+		summaryDraft = '';
 		// 이어가는 세션은 맨 아래(최신 메시지)로 즉시 이동
 		if (messages.length > 0) tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
 	});
@@ -401,6 +406,8 @@
 		const idx = messages.length;
 		messages.push({ id: assistantMsgId, role: 'assistant', content: '' });
 		streaming = true;
+		// 첫 대화(세션 없음)면 미리 입력해 둔 상시 기억을 세션 생성과 함께 저장한다.
+		const newSessionMemory = sessionId ? undefined : memoryDraft.trim() || undefined;
 		await scrollToBottom();
 
 		try {
@@ -417,7 +424,8 @@
 					maxSentences,
 					userActs,
 					userMsgId,
-					assistantMsgId
+					assistantMsgId,
+					memory: newSessionMemory
 				})
 			});
 
@@ -429,7 +437,14 @@
 
 			// 서버가 lazy 생성한 세션 id 회수 (이후 전송부터 이어가기)
 			const newSession = res.headers.get('x-haven-session');
-			if (newSession) sessionId = newSession;
+			if (newSession) {
+				sessionId = newSession;
+				// 첫 전송과 함께 저장된 상시 기억을 클라 상태에도 반영(모달 재오픈 시 일관성).
+				if (newSessionMemory !== undefined) {
+					memory = newSessionMemory;
+					memoryDraft = newSessionMemory;
+				}
+			}
 
 			// 이번 턴 input 토큰(추정치)·상한 회수 → 하단에 표시
 			const it = Number(res.headers.get('x-haven-input-tokens'));
@@ -681,9 +696,7 @@
 						대화 내내 <strong>항상 기억</strong>시킬 정보를 직접 적어두세요(예: 호칭, 설정, 금기).
 						요약과 달리 사라지지 않고 매 응답에 반영됩니다.
 					</p>
-					{#if !sessionId}
-						<p class="summary-empty">대화를 시작하면 설정할 수 있어요.</p>
-					{:else if summaryLoading}
+					{#if summaryLoading}
 						<p class="summary-empty">불러오는 중…</p>
 					{:else}
 						<textarea
@@ -694,16 +707,20 @@
 							placeholder="예: 나를 '주인님'이라 부른다. 존댓말 사용."
 						></textarea>
 						<div class="summary-actions">
-							{#if memorySaved && !memoryDirty}
-								<span class="summary-note">저장됨</span>
+							{#if !sessionId}
+								<span class="summary-note">첫 메시지를 보낼 때 함께 저장돼요</span>
+							{:else}
+								{#if memorySaved && !memoryDirty}
+									<span class="summary-note">저장됨</span>
+								{/if}
+								<button
+									class="summary-save"
+									onclick={saveMemory}
+									disabled={memorySaving || !memoryDirty}
+								>
+									{memorySaving ? '저장 중…' : '저장'}
+								</button>
 							{/if}
-							<button
-								class="summary-save"
-								onclick={saveMemory}
-								disabled={memorySaving || !memoryDirty}
-							>
-								{memorySaving ? '저장 중…' : '저장'}
-							</button>
 						</div>
 					{/if}
 				</div>

@@ -226,7 +226,14 @@ export async function getMessagePage(
  */
 export async function createSession(
 	db: D1Database,
-	input: { userId: string; characterId: string; model: string | null; opening: string }
+	input: {
+		userId: string;
+		characterId: string;
+		model: string | null;
+		opening: string;
+		/** 첫 대화 전에 미리 설정한 상시 기억(최대 100자). 없으면 null. */
+		memory?: string | null;
+	}
 ): Promise<ChatSession> {
 	const now = Date.now();
 	const id = crypto.randomUUID();
@@ -234,15 +241,16 @@ export async function createSession(
 	const hasOpening = opening !== '';
 	const count = hasOpening ? 1 : 0;
 	const lastAt = hasOpening ? now : null;
+	const memVal = ((input.memory ?? '').trim().slice(0, MAX_MEMORY_CHARS) || null) as string | null;
 
 	const stmts = [
 		db
 			.prepare(
 				`INSERT INTO chat_sessions
-				 (id, user_id, character_id, model, summary, summary_upto_seq, message_count, created_at, updated_at, last_message_at)
-				 VALUES (?, ?, ?, ?, NULL, 0, ?, ?, ?, ?)`
+				 (id, user_id, character_id, model, summary, summary_upto_seq, memory, message_count, created_at, updated_at, last_message_at)
+				 VALUES (?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?)`
 			)
-			.bind(id, input.userId, input.characterId, input.model, count, now, now, lastAt)
+			.bind(id, input.userId, input.characterId, input.model, memVal, count, now, now, lastAt)
 	];
 	if (hasOpening) {
 		stmts.push(
@@ -263,7 +271,7 @@ export async function createSession(
 		model: input.model,
 		summary: null,
 		summaryUptoSeq: 0,
-		memory: null,
+		memory: memVal,
 		messageCount: count,
 		createdAt: now,
 		updatedAt: now,
