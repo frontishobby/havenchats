@@ -427,7 +427,7 @@ async function summarizeSession(
 		prompt: `${prior}[추가 대화]\n${transcript}`,
 		temperature: 0.3,
 		// reasoning 모델은 추론이 예산을 먹어 빈 요약이 나오므로 headroom 을 더한다.
-		maxOutputTokens: 800 + reasoningHeadroom(modelId),
+		maxOutputTokens: 2000 + reasoningHeadroom(modelId),
 		providerOptions: buildProviderOptions(modelId)
 	});
 
@@ -443,7 +443,7 @@ const SUMMARY_SYSTEM = [
 	`[기존 요약]과 [추가 대화]를 하나로 합쳐, 이후 대화에 필요한 정보만 남긴 새 요약을 작성하라.`,
 	`- 포함: 줄거리 진행, 인물 관계·감정 변화, 확정된 설정/사실, 미해결된 떡밥·약속.`,
 	`- 제외: 인사·잡담·중복, 문체 흉내(요약은 산문 묘사가 아니라 사실 정리다).`,
-	`- 시점·인물명은 대화 그대로 유지. 한국어. 800자 이내의 간결한 개조식 문단.`,
+	`- 시점·인물명은 대화 그대로 유지. 한국어. 1500자 이내의 간결한 개조식 문단.`,
 	`- 새 요약 본문만 출력(머리말·설명 금지).`
 ].join('\n');
 
