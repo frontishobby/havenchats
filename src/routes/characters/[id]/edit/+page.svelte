@@ -14,7 +14,7 @@
 	mode="edit"
 	characterId={c.id}
 	returnTo={`/user/${data.ownerId}`}
-	returnLabel="내 프로필"
+	returnLabel="내 캐릭터"
 	initial={{
 		name: c.name,
 		tagline: c.tagline,

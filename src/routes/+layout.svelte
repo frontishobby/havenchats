@@ -81,7 +81,7 @@
 								href="/user/{data.user.id}"
 								onclick={() => (menuOpen = false)}
 							>
-								내 프로필
+								내 캐릭터
 							</a>
 							<button class="menu-item" role="menuitem" onclick={openProfileSettings}>
 								프로필 설정
