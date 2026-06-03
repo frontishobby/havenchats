@@ -723,7 +723,7 @@
 								aria-label="메시지 삭제"
 								title="삭제"
 							>
-								🗑
+								×
 							</button>
 						{/if}
 						{@render novelBody(m.content, m.role === 'user')}
@@ -1126,10 +1126,10 @@
 		margin: 0 0 1.5em;
 		word-break: break-word;
 	}
-	/* 메시지 삭제 버튼 — 평소 숨김, 문단 hover/focus 시 노출(우상단). */
+	/* 메시지 삭제 버튼 — 평소 숨김, 문단 hover/focus 시 노출(우하단). */
 	.msg-del {
 		position: absolute;
-		top: -6px;
+		bottom: -6px;
 		right: -6px;
 		width: 28px;
 		height: 28px;
@@ -1139,7 +1139,7 @@
 		border-radius: 8px;
 		background: var(--bg-card);
 		color: var(--text-dim);
-		font-size: 0.8rem;
+		font-size: 1.05rem;
 		line-height: 1;
 		opacity: 0;
 		transition:
