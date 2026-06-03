@@ -1,0 +1,17 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "havenchats",
+	"compatibility_date": "2026-06-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"pages_build_output_dir": ".svelte-kit/cloudflare",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "haven",
+			"database_id": "b8c2b1a3-78e8-4527-aefa-461bcd3486b7",
+			"migrations_dir": "./migrations"
+		}
+	]
+	// KV (세션을 KV로 옮길 경우):
+	// "kv_namespaces": [{ "binding": "SESSIONS", "id": "<id>" }]
+}
