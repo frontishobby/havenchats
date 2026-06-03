@@ -116,6 +116,7 @@
 <style>
 	.app {
 		min-height: 100vh;
+		min-height: 100dvh; /* 모바일: 실제 보이는 높이 기준 → body 넘침/헤더 가려짐 방지 */
 		display: flex;
 		flex-direction: column;
 	}

@@ -602,7 +602,10 @@
 	.chat {
 		display: flex;
 		flex-direction: column;
+		/* 모바일 브라우저에서 100vh 는 주소창 숨김 기준(실제보다 큼)이라 body 가 넘쳐 스크롤되고,
+		   sticky 가 아닌 캐릭터 헤더가 상단바 뒤로 밀려 사라진다 → 실제 보이는 높이(dvh)로 맞춘다. */
 		height: calc(100vh - 60px);
+		height: calc(100dvh - 60px);
 		max-width: 760px;
 		margin: 0 auto;
 	}
