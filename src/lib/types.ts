@@ -103,6 +103,8 @@ export interface ChatSession {
 	model: string | null;
 	summary: string | null;
 	summaryUptoSeq: number;
+	/** 유저가 직접 넣는 "상시 기억"(최대 100자). 존재 시 system↔history 사이에 주입. */
+	memory: string | null;
 	messageCount: number;
 	createdAt: number;
 	updatedAt: number;

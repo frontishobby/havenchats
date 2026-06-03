@@ -23,6 +23,7 @@ interface SessionRow {
 	model: string | null;
 	summary: string | null;
 	summary_upto_seq: number;
+	memory: string | null;
 	message_count: number;
 	created_at: number;
 	updated_at: number;
@@ -37,6 +38,7 @@ function rowToSession(r: SessionRow): ChatSession {
 		model: r.model,
 		summary: r.summary,
 		summaryUptoSeq: r.summary_upto_seq,
+		memory: r.memory,
 		messageCount: r.message_count,
 		createdAt: r.created_at,
 		updatedAt: r.updated_at,
@@ -45,7 +47,7 @@ function rowToSession(r: SessionRow): ChatSession {
 }
 
 const SESSION_COLS =
-	'id, user_id, character_id, model, summary, summary_upto_seq, message_count, created_at, updated_at, last_message_at';
+	'id, user_id, character_id, model, summary, summary_upto_seq, memory, message_count, created_at, updated_at, last_message_at';
 
 /** 단일 세션 조회(소유권 확인 포함). */
 export async function getSession(
@@ -261,6 +263,7 @@ export async function createSession(
 		model: input.model,
 		summary: null,
 		summaryUptoSeq: 0,
+		memory: null,
 		messageCount: count,
 		createdAt: now,
 		updatedAt: now,
@@ -393,4 +396,24 @@ export async function setSummaryText(
 		.bind(text, Date.now(), sessionId)
 		.run();
 	return text;
+}
+
+/** 상시 기억 최대 길이(자). 클라/서버 공통 상한. */
+export const MAX_MEMORY_CHARS = 100;
+
+/**
+ * 유저가 직접 넣는 "상시 기억" 저장. 앞뒤 공백 제거 후 MAX_MEMORY_CHARS 로 잘라 저장.
+ * 빈 문자열이면 NULL 로 지운다. 반환: 저장된 값(없으면 null).
+ */
+export async function setMemoryText(
+	db: D1Database,
+	sessionId: string,
+	memory: string
+): Promise<string | null> {
+	const text = memory.trim().slice(0, MAX_MEMORY_CHARS);
+	await db
+		.prepare('UPDATE chat_sessions SET memory = ?, updated_at = ? WHERE id = ?')
+		.bind(text === '' ? null : text, Date.now(), sessionId)
+		.run();
+	return text === '' ? null : text;
 }

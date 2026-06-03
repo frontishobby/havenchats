@@ -80,27 +80,65 @@
 	let summarySaving = $state(false);
 	let summarySaved = $state(false);
 	const summaryDirty = $derived(summaryDraft !== (summary ?? ''));
+	let summaryExpanded = $state(false); // 대화 요약 펼침 여부(기본 닫힘)
 
-	// 설정 모달을 열 때 현재 세션의 최신 요약을 불러온다(백그라운드 갱신 반영).
+	// ── 상시 기억(유저가 직접 넣는 짧은 메모) ──
+	const MAX_MEMORY_CHARS = 100;
+	let memory = $state<string | null>(null); // 서버 최신 값
+	let memoryDraft = $state(''); // 편집 중 텍스트
+	let memorySaving = $state(false);
+	let memorySaved = $state(false);
+	const memoryDirty = $derived(memoryDraft !== (memory ?? ''));
+
+	// 설정 모달을 열 때 현재 세션의 최신 요약·상시 기억을 함께 불러온다(백그라운드 갱신 반영).
 	async function loadSummary() {
 		if (!sessionId) {
 			summary = null;
 			summaryDraft = '';
+			memory = null;
+			memoryDraft = '';
 			return;
 		}
 		summaryLoading = true;
 		try {
 			const res = await fetch(`/api/chat/summary?sessionId=${encodeURIComponent(sessionId)}`);
 			if (res.ok) {
-				const d = (await res.json()) as { summary: string | null };
+				const d = (await res.json()) as { summary: string | null; memory: string | null };
 				summary = d.summary ?? null;
 				summaryDraft = summary ?? '';
 				summarySaved = false;
+				summaryExpanded = false;
+				memory = d.memory ?? null;
+				memoryDraft = memory ?? '';
+				memorySaved = false;
 			}
 		} catch (e) {
 			console.error(e);
 		} finally {
 			summaryLoading = false;
+		}
+	}
+
+	async function saveMemory() {
+		if (!sessionId || memorySaving) return;
+		memorySaving = true;
+		memorySaved = false;
+		try {
+			const res = await fetch('/api/chat/memory', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ sessionId, memory: memoryDraft })
+			});
+			if (res.ok) {
+				const d = (await res.json()) as { memory: string | null };
+				memory = d.memory ?? null;
+				memoryDraft = memory ?? '';
+				memorySaved = true;
+			}
+		} catch (e) {
+			console.error(e);
+		} finally {
+			memorySaving = false;
 		}
 	}
 
@@ -636,35 +674,84 @@
 
 				<div class="setting">
 					<div class="setting-row">
-						<span class="field-label">대화 요약</span>
+						<span class="field-label">상시 기억</span>
+						<span class="memory-count">{memoryDraft.length}/{MAX_MEMORY_CHARS}</span>
 					</div>
 					<p class="setting-hint">
-						대화가 길어지면 오래된 내용은 <strong>요약</strong>으로 압축됩니다. 모델에는
-						<strong>이 요약과 최근 메시지</strong>가 함께 전달돼요. 내용을 직접 고치면 이후 대화에 반영됩니다.
+						대화 내내 <strong>항상 기억</strong>시킬 정보를 직접 적어두세요(예: 호칭, 설정, 금기).
+						요약과 달리 사라지지 않고 매 응답에 반영됩니다.
 					</p>
+					{#if !sessionId}
+						<p class="summary-empty">대화를 시작하면 설정할 수 있어요.</p>
+					{:else if summaryLoading}
+						<p class="summary-empty">불러오는 중…</p>
+					{:else}
+						<textarea
+							class="summary-edit"
+							bind:value={memoryDraft}
+							rows="2"
+							maxlength={MAX_MEMORY_CHARS}
+							placeholder="예: 나를 '주인님'이라 부른다. 존댓말 사용."
+						></textarea>
+						<div class="summary-actions">
+							{#if memorySaved && !memoryDirty}
+								<span class="summary-note">저장됨</span>
+							{/if}
+							<button
+								class="summary-save"
+								onclick={saveMemory}
+								disabled={memorySaving || !memoryDirty}
+							>
+								{memorySaving ? '저장 중…' : '저장'}
+							</button>
+						</div>
+					{/if}
+				</div>
+
+				<div class="setting">
+					{#if summary !== null}
+						<button
+							class="summary-toggle"
+							onclick={() => (summaryExpanded = !summaryExpanded)}
+							aria-expanded={summaryExpanded}
+						>
+							<span class="field-label">대화 요약</span>
+							<span class="chevron" class:open={summaryExpanded}>›</span>
+						</button>
+					{:else}
+						<div class="setting-row">
+							<span class="field-label">대화 요약</span>
+						</div>
+					{/if}
 					{#if !sessionId}
 						<p class="summary-empty">대화를 시작하면 요약이 만들어집니다.</p>
 					{:else if summaryLoading}
 						<p class="summary-empty">불러오는 중…</p>
 					{:else if summary !== null}
-						<textarea
-							class="summary-edit"
-							bind:value={summaryDraft}
-							rows="6"
-							placeholder="요약 내용"
-						></textarea>
-						<div class="summary-actions">
-							{#if summarySaved && !summaryDirty}
-								<span class="summary-note">저장됨</span>
-							{/if}
-							<button
-								class="summary-save"
-								onclick={saveSummary}
-								disabled={summarySaving || !summaryDirty}
-							>
-								{summarySaving ? '저장 중…' : '저장'}
-							</button>
-						</div>
+						{#if summaryExpanded}
+							<p class="setting-hint">
+								대화가 길어지면 오래된 내용은 <strong>요약</strong>으로 압축됩니다. 모델에는
+								<strong>이 요약과 최근 메시지</strong>가 함께 전달돼요. 내용을 직접 고치면 이후 대화에 반영됩니다.
+							</p>
+							<textarea
+								class="summary-edit"
+								bind:value={summaryDraft}
+								rows="6"
+								placeholder="요약 내용"
+							></textarea>
+							<div class="summary-actions">
+								{#if summarySaved && !summaryDirty}
+									<span class="summary-note">저장됨</span>
+								{/if}
+								<button
+									class="summary-save"
+									onclick={saveSummary}
+									disabled={summarySaving || !summaryDirty}
+								>
+									{summarySaving ? '저장 중…' : '저장'}
+								</button>
+							</div>
+						{/if}
 					{:else}
 						<p class="summary-empty">아직 요약이 없어요. 대화가 길어지면 자동으로 생성됩니다.</p>
 					{/if}
@@ -962,6 +1049,35 @@
 	.setting-hint strong {
 		color: var(--text);
 		font-weight: 600;
+	}
+
+	/* 상시 기억 글자수 */
+	.memory-count {
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--text-faint);
+	}
+
+	/* 대화 요약 펼침 토글(꺽쇠) */
+	.summary-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		padding: 0;
+		background: none;
+		border: none;
+		cursor: pointer;
+		text-align: left;
+	}
+	.summary-toggle .chevron {
+		font-size: 1.1rem;
+		color: var(--text-dim);
+		transition: transform 0.15s ease;
+		line-height: 1;
+	}
+	.summary-toggle .chevron.open {
+		transform: rotate(90deg);
 	}
 
 	/* 대화 요약 편집 */

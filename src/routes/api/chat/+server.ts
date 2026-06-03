@@ -148,7 +148,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		);
 	}
 
-	const messages = buildMessages(window, maxSentences, userActs);
+	const messages = buildMessages(window, maxSentences, userActs, session.memory);
 	// 이번 턴에 실제로 보낼 input 토큰 추정치(헤더로 즉시 반환 + usage 없을 때 폴백).
 	const inputTokensEst =
 		systemTokens +
@@ -580,15 +580,25 @@ function userActsLine(level: number): string {
  * live window(DB 메시지)를 AI SDK 메시지로 변환(빈 내용 제거).
  * 유저 설정(분량·'나' 행동 생성 정도)은 마지막 유저 메시지 끝에만 덧붙인다
  * → 과거 메시지/시스템 prefix 는 그대로라 캐싱 유지.
+ * memory(상시 기억)가 있으면 system 프롬프트와 history 사이(messages 맨 앞)에
+ * system 롤 메시지로 끼워 넣는다 — 유저가 강제하는 항상 유효한 지침.
  */
 function buildMessages(
 	window: StoredMessage[],
 	maxSentences: number,
-	userActs: number
+	userActs: number,
+	memory: string | null
 ): ModelMessage[] {
 	const out: ModelMessage[] = window
 		.filter((m) => m.content.trim() !== '')
 		.map((m) => ({ role: m.role, content: m.content }));
+
+	if (memory && memory.trim()) {
+		out.unshift({
+			role: 'system',
+			content: `# 상시 기억 (반드시 준수)\n상대(사용자)가 직접 지정한, 대화 내내 항상 유효한 정보·지침이다. 잊지 말고 일관되게 반영하라.\n${memory.trim()}`
+		});
+	}
 
 	const last = out[out.length - 1];
 	if (last && last.role === 'user') {

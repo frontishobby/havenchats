@@ -13,7 +13,8 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 	const session = await getSession(db, sessionId, locals.user.id);
 	if (!session) return json({ error: 'session not found' }, { status: 404 });
 
-	return json({ summary: session.summary });
+	// 모달 한 번 열 때 요약·상시 기억을 함께 내려준다(왕복 1회).
+	return json({ summary: session.summary, memory: session.memory });
 };
 
 interface SummaryBody {
