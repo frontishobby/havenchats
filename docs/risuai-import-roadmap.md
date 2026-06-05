@@ -122,15 +122,64 @@ description/personality/scenario/system_prompt/post_history/mes_example → `des
 
 ---
 
-### 1-4. 정규식 치환 스크립트 — **4순위**
+### 1-4. 정규식 치환 스크립트 — **4순위 (재평가: 대부분 포팅 비대상)**
 
-**무엇**: `module.risum` `regex[]`(customscript). `{in: 정규식, out: 치환, type: editinput/editoutput/editdisplay}`. 모델 입출력/표시 텍스트를 후처리.
+**무엇**: `module.risum` `regex[]`(customscript). `{in: 정규식, out: 치환, type, flag}`. AI 텍스트를 파이프라인
+단계별로 find-replace. `out` 에 `$1` 그룹·CBS 매크로 포함 가능(정규식+CBS 결합). 단계(type):
+- `editdisplay`: **화면 표시 텍스트만**(모델 못 봄) · `editoutput`: AI 출력 원본 · `editinput`: 유저 입력 ·
+  `editprocess`: 모델에 보낼 프롬프트(보통 숨김 마커 제거) · `disabled`: 꺼짐(에디터 구분선/라벨)
 
-**구현**:
-- **`editdisplay`(렌더링만 변경, 모델은 못 봄) 우선** — 안전하고 쉬움. modifychat 수요 상당수 흡수.
-- `editoutput`(저장/전송 텍스트 변경)은 신중.
+**⚠️ 실제 카드 분석(2026-06-06, Catrina/무인도/Celis) 결과 — 전제가 틀렸음:**
+대부분의 정규식은 **RisuAI의 HTML 렌더링 장치**다. `editdisplay` 들이 `<style>`/`<div>`/`<input>` **생 HTML/CSS
+를 뿜어** 감정이미지·상태창·첫메시지 선택 UI 를 그린다(예: `<img="char_emotion">` → CSS+HTML, `[ Date:…|
+Location:… ]` → `<div class="cartoon-bg">` 상태창). **Haven 은 소설 모드(산문/마크다운)라 생 HTML 을 안
+그리고, 장면 이미지는 자체 시스템(위치코드/named)으로 이미 처리** → **display 정규식은 우리 렌더러와 근본 충돌**
+(그대로 가져오면 HTML 태그가 텍스트로 노출되거나 XSS 위험).
+
+**수정된 방향:**
+- **표시형(editdisplay, HTML 출력)** → **포팅 안 함**. 우리 장면이미지/산문 렌더링으로 대체. 감지 경고만 유지.
+- **텍스트 정리형(editprocess/editoutput, HTML 없는 순수 치환 — 숨김 마커 제거 등)** → 선택적·소수만. 단독 효용
+  낮고 CBS 조건과 얽히면 복잡. 안전한 정규식 한정.
+- "editdisplay 먼저(쉽고 안전)"는 **오판이었음** — display 가 오히려 HTML 뿜어 부적합/위험.
 
 **보안**: 제작자 임의 정규식 → **ReDoS 위험**. 입력 길이 제한 + 패턴 검증(또는 안전 정규식 엔진). Workers엔 동기 정규식 타임아웃이 없으니 입력 크기로 방어.
+
+---
+
+### 1-4b. HTML 표시 모드 (editdisplay HTML 렌더링) — **별도/후순위, 미결정**
+
+editdisplay 정규식 대부분이 생 HTML/CSS(감정스프라이트·상태창·선택UI)를 뿜는다(§1-4). 이걸 실제로
+그리려면 "HTML 렌더링 장치"가 필요. **RisuAI 원본 조사(2026-06-06)로 어떻게 하는지 파악함.**
+
+**RisuAI 방식 — `{@html}` + DOMPurify + CSS AST 스코핑 (Shadow DOM/iframe 아님):**
+파이프라인(`parser/parser.svelte.ts:736~`, `ChatBody.svelte`):
+`CBS → 에셋매크로({{emotion}}→<img>) → editdisplay 정규식 → <style> hex인코딩 → markdown-it → DOMPurify → <style> 디코딩+스코핑 → {@html}`
+
+보안 3기둥(전부 copyable):
+1. **DOMPurify + 훅**(`:46-119,780`): `<script>`·`on*` 제거, `href` http(s)만(→`javascript:` 차단),
+   `<iframe>`은 YouTube embed만, `<style>`·`<img>`·`blob:` 허용.
+2. **CSS 격리 = AST 재작성**(`:893-953`, 핵심): `<style>`를 hex로 숨겨 DOMPurify 통과 → `css.parse` →
+   **모든 셀렉터에 `.chattext ` 접두 + 모든 클래스에 `x-risu-` 접두**. 카드 CSS가 앱 전역으로 못 샘.
+   (Shadow DOM 대신 셀렉터 재작성으로 스코핑 — 우리가 걱정한 격리는 이걸로 해결)
+3. **에셋 리졸버**(`:482-629`): `<img="name">`/`{{emotion::name}}` → 이름 소문자화 → 캐시 조회
+   (Levenshtein 퍼지매칭) → `getFileSrc` → `blob:`/`data:` URL → `<img src>`.
+
+**우리가 이식할 부품:** DOMPurify+훅(라이브러리 추가, config 복사) · `<style>` 인코딩/디코딩 + CSS AST
+스코핑(`.chattext`→우리 메시지 컨테이너 클래스) · 에셋 `<img="name">`→우리 장면이미지(IndexedDB/R2) URL
+리졸버. **markdown-it 은 우리 산문 렌더러와 이질적** → imported 카드용 **2번째 렌더 경로**가 됨.
+
+**핵심 판단:**
+- **보안은 해결된 문제**(RisuAI 레시피 그대로면 잔여 위험 낮음, Shadow DOM 불필요).
+- 진짜 비용은 **CSS AST 스코핑 + 에셋 리졸버** 두 덩어리 + **산문 모드와 2-렌더러 공존 통합**.
+- 감정 스프라이트는 우리 장면이미지(위치코드)로 이미 가능 → HTML 에셋 리졸버는 일부 중복.
+
+**옵션:**
+- **(A) imported 카드용 RisuAI 호환 HTML 표시 모드**(별도 렌더 경로) — DOMPurify + CSS AST 스코핑 +
+  에셋 리졸버 이식. 보안 레시피 검증돼 의외로 할 만함. 중간~큰 공사. imported 캐릭터 한정 적용.
+- **(B) 안 함 + 네이티브 대체** — 감정/상태창을 장면이미지 + 마크다운 상태블록으로. 카드 HTML 은 경고만.
+
+**권장 순서:** 경량 트리거(3순위) + 텍스트형 정규식 먼저 → HTML 표시 모드(A/B)는 그 다음 독립 작업으로 결정.
+"수입 카드를 제대로 보이게"가 핵심 목표면 (A) 가 현실적(보안 copyable). 아니면 (B).
 
 ---
 
