@@ -5,8 +5,8 @@ import {
 	getCharacterOwnership,
 	updateCharacter
 } from '$lib/server/db/characters';
-import { ALLOWED_IMAGE, parseCharacterForm, parseImageSet } from '$lib/server/characterForm';
-import { commitImageSet, deleteAllSceneImages, deleteKeys } from '$lib/server/imageStore';
+import { ALLOWED_IMAGE, parseCharacterForm } from '$lib/server/characterForm';
+import { commitSceneImages, deleteAllSceneImages, deleteKeys } from '$lib/server/imageStore';
 
 /** 유저 캐릭터 id 는 uuid. 그 외 형식은 편집 대상이 아님. */
 function isUserCharacterId(id: string): boolean {
@@ -44,11 +44,6 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 	}
 	const c = parsed.data;
 
-	const imgParsed = parseImageSet(form);
-	if (!imgParsed.ok) {
-		return json({ error: imgParsed.error }, { status: 400 });
-	}
-
 	// 기존 장면 세트(키 diff·정리에 필요).
 	const existing = await getCharacterById(db, id);
 	const oldSet = existing?.imageSet ?? null;
@@ -63,8 +58,8 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 		});
 	}
 
-	// 장면 이미지 업로드/keep. 실패 시 방금 올린 썸네일 정리.
-	const committed = await commitImageSet(bucket, id, imgParsed.data, oldSet);
+	// 장면 이미지(grid|named) 업로드/keep. 실패 시 방금 올린 썸네일 정리.
+	const committed = await commitSceneImages(form, bucket, id, oldSet);
 	if (!committed.ok) {
 		if (newKey) await bucket.delete(newKey).catch(() => {});
 		return json({ error: committed.error }, { status: 400 });

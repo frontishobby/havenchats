@@ -24,6 +24,7 @@
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.123",
     "ai": "^6.0.195",
-    "arctic": "^3.7.0"
+    "arctic": "^3.7.0",
+    "fflate": "^0.8.3"
   }
 }

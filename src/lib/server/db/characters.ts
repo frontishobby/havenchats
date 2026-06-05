@@ -101,44 +101,67 @@ function parseImageSet(json: string | null): CharacterImageSet | null {
 	try {
 		const parsed = JSON.parse(json) as unknown;
 		if (!parsed || typeof parsed !== 'object') return null;
-		const obj = parsed as { axes?: unknown; entries?: unknown };
-		if (!Array.isArray(obj.axes) || !Array.isArray(obj.entries)) return null;
-
-		const axes = obj.axes
-			.map((a) => {
-				const o = (a ?? {}) as { label?: unknown; values?: unknown };
-				const label = typeof o.label === 'string' ? o.label : '';
-				const values = Array.isArray(o.values)
-					? o.values.filter((v): v is string => typeof v === 'string')
-					: [];
-				return { label, values };
-			})
-			.filter((a) => a.label && a.values.length > 0);
-		if (axes.length === 0) return null;
-
-		const entries = obj.entries
-			.map((e) => {
-				const o = (e ?? {}) as { id?: unknown; combo?: unknown; ext?: unknown };
-				const id = typeof o.id === 'string' ? o.id : '';
-				const combo = Array.isArray(o.combo)
-					? o.combo.filter((n): n is number => typeof n === 'number')
-					: [];
-				const ext = typeof o.ext === 'string' ? o.ext : '';
-				return { id, combo, ext };
-			})
-			.filter(
-				(e) =>
-					e.id &&
-					e.ext &&
-					e.combo.length === axes.length &&
-					e.combo.every((vi, ai) => vi >= 0 && vi < axes[ai].values.length)
-			);
-		if (entries.length === 0) return null;
-
-		return { axes, entries };
+		const obj = parsed as { kind?: unknown };
+		return obj.kind === 'named'
+			? parseNamedSet(obj as { images?: unknown })
+			: parseGridSet(obj as { axes?: unknown; entries?: unknown });
 	} catch {
 		return null;
 	}
+}
+
+/** 그리드 세트 파싱. 축 개수와 각 combo 길이가 안 맞는 엔트리는 버린다(방어적). */
+function parseGridSet(obj: { axes?: unknown; entries?: unknown }): CharacterImageSet | null {
+	if (!Array.isArray(obj.axes) || !Array.isArray(obj.entries)) return null;
+
+	const axes = obj.axes
+		.map((a) => {
+			const o = (a ?? {}) as { label?: unknown; values?: unknown };
+			const label = typeof o.label === 'string' ? o.label : '';
+			const values = Array.isArray(o.values)
+				? o.values.filter((v): v is string => typeof v === 'string')
+				: [];
+			return { label, values };
+		})
+		.filter((a) => a.label && a.values.length > 0);
+	if (axes.length === 0) return null;
+
+	const entries = obj.entries
+		.map((e) => {
+			const o = (e ?? {}) as { id?: unknown; combo?: unknown; ext?: unknown };
+			const id = typeof o.id === 'string' ? o.id : '';
+			const combo = Array.isArray(o.combo)
+				? o.combo.filter((n): n is number => typeof n === 'number')
+				: [];
+			const ext = typeof o.ext === 'string' ? o.ext : '';
+			return { id, combo, ext };
+		})
+		.filter(
+			(e) =>
+				e.id &&
+				e.ext &&
+				e.combo.length === axes.length &&
+				e.combo.every((vi, ai) => vi >= 0 && vi < axes[ai].values.length)
+		);
+	if (entries.length === 0) return null;
+
+	return { kind: 'grid', axes, entries };
+}
+
+/** 플랫 네임드 세트 파싱. id·name·ext 가 온전한 이미지만 남긴다. */
+function parseNamedSet(obj: { images?: unknown }): CharacterImageSet | null {
+	if (!Array.isArray(obj.images)) return null;
+	const images = obj.images
+		.map((i) => {
+			const o = (i ?? {}) as { id?: unknown; name?: unknown; ext?: unknown };
+			const id = typeof o.id === 'string' ? o.id : '';
+			const name = typeof o.name === 'string' ? o.name : '';
+			const ext = typeof o.ext === 'string' ? o.ext : '';
+			return { id, name, ext };
+		})
+		.filter((i) => i.id && i.name && i.ext);
+	if (images.length === 0) return null;
+	return { kind: 'named', images };
 }
 
 function rowToCharacter(row: CharacterRow): Character {
@@ -285,6 +308,18 @@ export async function updateCharacter(
 /** 캐릭터 삭제. */
 export async function deleteCharacter(db: D1Database, id: string): Promise<void> {
 	await db.prepare(`DELETE FROM characters WHERE id = ?`).bind(id).run();
+}
+
+/** image_set 만 교체(charx import 의 단계적 업로드 → finalize 용). null 이면 장면 이미지 없음. */
+export async function updateImageSet(
+	db: D1Database,
+	id: string,
+	imageSet: CharacterImageSet | null
+): Promise<void> {
+	await db
+		.prepare(`UPDATE characters SET image_set = ?, updated_at = ? WHERE id = ?`)
+		.bind(imageSet ? JSON.stringify(imageSet) : null, Date.now(), id)
+		.run();
 }
 
 /** 새 캐릭터 저장. */

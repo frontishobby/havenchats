@@ -8,6 +8,12 @@
 		type SceneEntryDraft,
 		type SceneApply
 	} from '$lib/components/CharacterImagesModal.svelte';
+	import NamedImagesModal, {
+		type NamedDraft,
+		type NamedApply
+	} from '$lib/components/NamedImagesModal.svelte';
+	import { isGrid, isNamed, namedUrl } from '$lib/imageCodes';
+	import { estimatePromptTokens } from '$lib/tokens';
 	import type { Audience, CharacterImageSet, ContentRating, Opening, Visibility } from '$lib/types';
 
 	export interface CharacterFormInitial {
@@ -45,7 +51,11 @@
 	const NAME_MAX = 15;
 	const TAGLINE_MAX = 100;
 	const INTRO_MAX = 3000;
-	const DESC_MAX = 6000;
+	// 프롬프트 제한은 글자가 아니라 **추정 토큰** 기준 — 영어처럼 토큰 효율이 높은 언어가
+	// 글자 수로 불이익을 안 받게. (한국어 ≈16000자, 영어 ≈32000자). charx import 한
+	// 대형 카드(설정+로어북 합쳐 5000~7000토큰)도 편집 가능하도록 넉넉히.
+	const DESC_TOKEN_MAX = 8000;
+	const DESC_CHAR_CEIL = 32000; // 입력 폭주 방지용 하드 상한(검증은 토큰 기준).
 	const TAGS_MAX = 5;
 	const GREETING_MAX = 2000;
 	const GREETING_NAME_MAX = 30;
@@ -57,6 +67,7 @@
 	let tagline = $state(initial?.tagline ?? '');
 	let intro = $state(initial?.intro ?? '');
 	let description = $state(initial?.description ?? '');
+	const descTokens = $derived(estimatePromptTokens(description));
 	let audience = $state<Audience>(initial?.audience ?? 'all');
 	let nsfw = $state(initial?.contentRating === 'nsfw');
 	let isPrivate = $state(initial?.visibility === 'private');
@@ -82,12 +93,17 @@
 	let replaceOpen = $state(false);
 
 	// ── 장면 이미지 세트 (모달에서 편집, 제출 시 함께 전송) ──
+	// 방식: grid(축×조합) 또는 named(이름별 플랫). initial 의 kind 로 시작값 결정.
+	let imageMode = $state<'grid' | 'named'>(isNamed(initial?.imageSet) ? 'named' : 'grid');
 	let imagesOpen = $state(false);
+	let namedOpen = $state(false);
+
+	const initialGrid = isGrid(initial?.imageSet) ? initial.imageSet : null;
 	let sceneAxes = $state<SceneAxisDraft[]>(
-		initial?.imageSet?.axes.map((a) => ({ label: a.label, values: [...a.values] })) ?? []
+		initialGrid?.axes.map((a) => ({ label: a.label, values: [...a.values] })) ?? []
 	);
 	let sceneEntries = $state<SceneEntryDraft[]>(
-		initial?.imageSet?.entries.map((e) => ({
+		initialGrid?.entries.map((e) => ({
 			id: e.id,
 			combo: [...e.combo],
 			file: null,
@@ -96,10 +112,29 @@
 	);
 	const sceneCount = $derived(sceneEntries.length);
 
+	// 플랫 네임드 드래프트(initial 이 named 면 기존 이미지로 시작).
+	const initialNamed = isNamed(initial?.imageSet) ? initial.imageSet : null;
+	let namedImages = $state<NamedDraft[]>(
+		initialNamed?.images.map((img) => ({
+			id: img.id,
+			name: img.name,
+			file: null,
+			ext: img.ext,
+			url: namedUrl(characterId ?? '', img),
+			previewUrl: null
+		})) ?? []
+	);
+	const namedCount = $derived(namedImages.length);
+
 	function applyScenes(res: SceneApply) {
 		sceneAxes = res.axes;
 		sceneEntries = res.entries;
 		imagesOpen = false;
+	}
+
+	function applyNamed(res: NamedApply) {
+		namedImages = res.images;
+		namedOpen = false;
 	}
 
 	// 새로 고른 이미지가 있으면 그것, 없으면 기존(수정) 썸네일.
@@ -120,7 +155,7 @@
 			tagline.length <= TAGLINE_MAX &&
 			intro.length <= INTRO_MAX &&
 			description.trim().length > 0 &&
-			description.length <= DESC_MAX &&
+			descTokens <= DESC_TOKEN_MAX &&
 			greetings.length > 0 &&
 			greetings.every(
 				(g) =>
@@ -221,9 +256,24 @@
 			);
 			if (imageFile) fd.set('image', imageFile);
 
-			// 장면 이미지 세트: 메타는 JSON, 새/교체 이미지는 imageEntry:<id> 파일로.
-			// 축이 없으면 필드를 보내지 않음 → 서버는 "장면 이미지 미사용"으로 처리.
-			if (sceneAxes.length > 0) {
+			// 장면 이미지 방식(grid|named) 전달.
+			fd.set('imageMode', imageMode);
+
+			if (imageMode === 'named') {
+				// 플랫: namedImages JSON + 새/교체 이미지는 namedImage:<id> 파일로.
+				if (namedImages.length > 0) {
+					const namedJson = namedImages.map((n) => ({
+						id: n.id,
+						name: n.name,
+						...(n.file ? {} : n.ext ? { ext: n.ext } : {})
+					}));
+					fd.set('namedImages', JSON.stringify(namedJson));
+					for (const n of namedImages) {
+						if (n.file) fd.set(`namedImage:${n.id}`, n.file);
+					}
+				}
+			} else if (sceneAxes.length > 0) {
+				// 그리드: 메타는 JSON, 새/교체 이미지는 imageEntry:<id> 파일로.
 				const imageSetJson = {
 					axes: sceneAxes.map((a) => ({ label: a.label, values: a.values })),
 					entries: sceneEntries.map((e) => ({
@@ -323,23 +373,54 @@
 	<div class="field">
 		<div class="label-row">
 			<span class="field-label">장면 이미지 <span class="opt">(선택)</span></span>
-		</div>
-		<button type="button" class="manage-images" onclick={() => (imagesOpen = true)}>
-			<span class="mi-icon">🎬</span>
-			<span class="mi-text">
-				<strong>이미지 관리</strong>
-				<span
-					>{sceneCount > 0
-						? `조합 ${sceneCount}개 등록됨`
-						: '상황별 이미지를 등록하면 대화 중 자동으로 노출돼요'}</span
+			<div class="mode-toggle" role="tablist">
+				<button
+					type="button"
+					class:active={imageMode === 'grid'}
+					onclick={() => (imageMode = 'grid')}>그리드</button
 				>
-			</span>
-			<span class="mi-chev">›</span>
-		</button>
-		<p class="field-hint">
-			축(예: 캐릭터·의상·표정)과 조합을 만들어 이미지를 등록하면, AI가 장면에 맞는 코드를 출력해 그
-			이미지를 보여줍니다.
-		</p>
+				<button
+					type="button"
+					class:active={imageMode === 'named'}
+					onclick={() => (imageMode = 'named')}>플랫</button
+				>
+			</div>
+		</div>
+
+		{#if imageMode === 'grid'}
+			<button type="button" class="manage-images" onclick={() => (imagesOpen = true)}>
+				<span class="mi-icon">🎬</span>
+				<span class="mi-text">
+					<strong>이미지 관리</strong>
+					<span
+						>{sceneCount > 0
+							? `조합 ${sceneCount}개 등록됨`
+							: '상황별 이미지를 등록하면 대화 중 자동으로 노출돼요'}</span
+					>
+				</span>
+				<span class="mi-chev">›</span>
+			</button>
+			<p class="field-hint">
+				축(예: 캐릭터·의상·표정)과 조합을 만들어 이미지를 등록하면, AI가 장면에 맞는 코드를 출력해 그
+				이미지를 보여줍니다.
+			</p>
+		{:else}
+			<button type="button" class="manage-images" onclick={() => (namedOpen = true)}>
+				<span class="mi-icon">🖼️</span>
+				<span class="mi-text">
+					<strong>이미지 관리</strong>
+					<span
+						>{namedCount > 0
+							? `이미지 ${namedCount}장 등록됨`
+							: '이름별 이미지를 등록하면 AI가 <img="이름">로 노출해요'}</span
+					>
+				</span>
+				<span class="mi-chev">›</span>
+			</button>
+			<p class="field-hint">
+				이미지마다 이름(토큰)을 붙이는 방식이에요. 불규칙·대량 이미지에 적합합니다.
+			</p>
+		{/if}
 	</div>
 
 	<!-- 제목 -->
@@ -411,15 +492,15 @@
 					</svg>
 				</button>
 			</span>
-			<span class="count" class:over={description.length > DESC_MAX}
-				>{description.length}/{DESC_MAX}</span
+			<span class="count" class:over={descTokens > DESC_TOKEN_MAX}
+				>~{descTokens}/{DESC_TOKEN_MAX} 토큰</span
 			>
 		</div>
 		<textarea
 			id="c-desc"
 			rows="10"
 			placeholder={'캐릭터의 역할·성격·말투·세계관, 그리고 출력 형식을 자유롭게 작성하세요.\n\n예) 너는 "OOO"라는 가상의 캐릭터를 연기한다. ...\n[출력 형식] 소설 형식으로 서술한다. 대사는 \'이름 | "대사"\' 형식으로 쓴다. ...'}
-			maxlength={DESC_MAX}
+			maxlength={DESC_CHAR_CEIL}
 			bind:value={description}
 		></textarea>
 		<p class="field-hint">
@@ -592,6 +673,13 @@
 	onapply={applyScenes}
 />
 
+<NamedImagesModal
+	open={namedOpen}
+	initial={namedImages}
+	onclose={() => (namedOpen = false)}
+	onapply={applyNamed}
+/>
+
 <PromptGuideModal open={guideOpen} onclose={() => (guideOpen = false)} />
 
 <TextReplaceModal
@@ -662,6 +750,28 @@
 	}
 	.label-row .field-label {
 		margin-bottom: 0;
+	}
+	.mode-toggle {
+		display: inline-flex;
+		gap: 2px;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		padding: 2px;
+	}
+	.mode-toggle button {
+		border: none;
+		background: transparent;
+		color: var(--text-dim);
+		font-size: 0.76rem;
+		font-weight: 700;
+		padding: 4px 12px;
+		border-radius: 999px;
+		cursor: pointer;
+	}
+	.mode-toggle button.active {
+		background: var(--accent);
+		color: #fff;
 	}
 	.label-with-info {
 		display: inline-flex;

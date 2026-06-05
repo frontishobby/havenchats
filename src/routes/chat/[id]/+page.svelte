@@ -5,6 +5,7 @@
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import { resolveSceneLine, looksLikeSceneToken } from '$lib/imageCodes';
+	import { personalize as fillPlaceholders } from '$lib/placeholders';
 	import type { ChatMessage } from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -39,10 +40,9 @@
 	let { data }: { data: PageData } = $props();
 	const character = $derived(data.character);
 
-	// 제작자가 쓴 "{{나}}" 플레이스홀더 → 사용자 이름(없으면 '나')으로 치환.
+	// 제작자가 쓴 플레이스홀더({{char}}/{{나}}/{{user}}) → 캐릭터·사용자 이름으로 치환.
 	function personalize(text: string): string {
-		const label = data.user?.name?.trim() || '나';
-		return text.replace(/\{\{\s*나\s*\}\}/g, label);
+		return fillPlaceholders(text, character.name, data.user?.name);
 	}
 
 	function greetingMessages(content: string): ChatMessage[] {

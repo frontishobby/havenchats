@@ -76,11 +76,46 @@ export interface ImageEntry {
 	ext: string;
 }
 
-/** 캐릭터의 장면 이미지 세트. 없으면 null. */
-export interface CharacterImageSet {
+/**
+ * 플랫 네임드 이미지 한 장. RisuAI 류 카드(charx) 호환 방식.
+ *  - id: 불변 식별자 → R2 키(charimg/<charId>/<id>.<ext>). 공백·특수문자 없는 안전한 키.
+ *  - name: 모델이 본문에 출력하는 매칭 토큰. `<img="name">` 의 name 과 정확히 일치(공백 가능).
+ *  - ext: R2 오브젝트 확장자(webp|avif|png 등).
+ * 그리드(축×조합)와 달리 조합 규칙 없이 이름→이미지 1:1 맵. import 무손실·불규칙 세트 수용.
+ */
+export interface NamedImage {
+	id: string;
+	name: string;
+	ext: string;
+}
+
+/**
+ * 그리드 방식 장면 이미지 세트(축×조합). 모델은 위치코드 {AAB} 를 출력.
+ * 네이티브 제작 기본 방식 — 프롬프트 카탈로그가 조합 수에 안 휘둘리고(축만 나열),
+ * 제작자가 축 단위로 재편집·핀 안정성 확보.
+ */
+export interface GridImageSet {
+	kind: 'grid';
 	axes: ImageAxis[];
 	entries: ImageEntry[];
 }
+
+/**
+ * 플랫 네임드 방식 장면 이미지 세트. 모델은 본문에 `<img="name">` 토큰을 출력.
+ * charx import·불규칙/대량/멀티캐릭터 갤러리에 적합(무손실).
+ */
+export interface NamedImageSet {
+	kind: 'named';
+	images: NamedImage[];
+}
+
+/**
+ * 캐릭터의 장면 이미지 세트(없으면 null). 두 방식을 kind 판별자로 공존:
+ *  - 'grid'  : 축×조합 위치코드({AAB})
+ *  - 'named' : 플랫 이름 토큰(`<img="name">`)
+ * DB 의 옛 image_set JSON(축/조합만 있고 kind 없음)은 로드 시 'grid' 로 해석(하위호환).
+ */
+export type CharacterImageSet = GridImageSet | NamedImageSet;
 
 export type Role = 'user' | 'assistant';
 

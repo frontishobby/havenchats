@@ -1,6 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { comboToCode, entryUrl, entryAlt, hasScenes } from '$lib/imageCodes';
+	import {
+		comboToCode,
+		entryUrl,
+		entryAlt,
+		hasScenes,
+		isGrid,
+		isNamed,
+		namedUrl
+	} from '$lib/imageCodes';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import type { PageData } from './$types';
 
@@ -34,7 +42,7 @@
 
 	{#if !hasAssets || !set}
 		<p class="empty">이 캐릭터엔 등록된 장면 이미지가 없어요.</p>
-	{:else}
+	{:else if isGrid(set)}
 		<!-- 축(카탈로그) 설명 -->
 		<section class="axes">
 			{#each set.axes as axis, a (a)}
@@ -64,6 +72,20 @@
 		</section>
 
 		<p class="count">{set.entries.length}개 조합</p>
+	{:else if isNamed(set)}
+		<!-- 플랫 네임드 갤러리 -->
+		<section class="grid">
+			{#each set.images as img (img.id)}
+				<figure class="card">
+					<div class="img">
+						<img src={namedUrl(character.id, img)} alt={img.name} loading="lazy" />
+					</div>
+					<figcaption>{img.name}</figcaption>
+				</figure>
+			{/each}
+		</section>
+
+		<p class="count">{set.images.length}장</p>
 	{/if}
 </div>
 

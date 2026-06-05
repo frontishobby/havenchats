@@ -1,5 +1,6 @@
 import type { Audience, ContentRating, ImageAxis, Opening, Visibility } from '$lib/types';
-import { IMAGE_LIMITS, comboToCode } from '$lib/imageCodes';
+import { IMAGE_LIMITS, NAMED_LIMITS, comboToCode } from '$lib/imageCodes';
+import { estimatePromptTokens } from '$lib/tokens';
 
 /** 허용 이미지 타입 → 확장자. (webp/avif 만) */
 export const ALLOWED_IMAGE: Record<string, string> = {
@@ -11,7 +12,9 @@ export const MAX_IMAGE_BYTES = 3 * 1024 * 1024; // 3MB
 const NAME_MAX = 15;
 const TAGLINE_MAX = 100;
 const INTRO_MAX = 3000;
-const DESC_MAX = 6000;
+// 프롬프트 제한은 글자가 아니라 추정 토큰 기준(영어가 글자 수로 불이익 안 받게). $lib/tokens 참고.
+// charx import 한 대형 카드도 편집 가능하도록 넉넉히.
+const DESC_TOKEN_MAX = 8000;
 const TAGS_MAX = 5;
 const GREETING_MAX = 2000;
 const GREETING_NAME_MAX = 30;
@@ -74,8 +77,8 @@ export function parseCharacterForm(form: FormData): ParseResult {
 		return { ok: false, error: `소개는 ${TAGLINE_MAX}자 이내로 입력해 주세요.` };
 	if (intro.length > INTRO_MAX) return { ok: false, error: `설명은 ${INTRO_MAX}자 이내로 입력해 주세요.` };
 	if (!description) return { ok: false, error: '프롬프트를 입력해 주세요.' };
-	if (description.length > DESC_MAX)
-		return { ok: false, error: `프롬프트는 ${DESC_MAX}자 이내로 입력해 주세요.` };
+	if (estimatePromptTokens(description) > DESC_TOKEN_MAX)
+		return { ok: false, error: `프롬프트가 너무 길어요 (약 ${DESC_TOKEN_MAX} 토큰 이내).` };
 
 	const audience: Audience =
 		audienceRaw === 'male' || audienceRaw === 'female' ? audienceRaw : 'all';
@@ -246,4 +249,77 @@ export function parseImageSet(form: FormData): ImageSetResult {
 	}
 
 	return { ok: true, data: { axes, entries } };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 플랫 네임드 이미지 세트 파싱 (네이티브 제작 — 플랫 방식)
+// ─────────────────────────────────────────────────────────────
+
+/** 파싱된 네임드 이미지 한 장. file 있으면 신규/교체, 없으면 ext 로 기존 유지. */
+export interface ParsedNamedImage {
+	id: string;
+	name: string;
+	file: File | null;
+	ext: string | null;
+}
+
+export interface ParsedNamedSet {
+	images: ParsedNamedImage[];
+}
+
+type NamedSetResult = { ok: true; data: ParsedNamedSet | null } | { ok: false; error: string };
+
+/**
+ * 폼의 namedImages(JSON: [{id,name,ext?}]) + namedImage:<id>(파일들)을 파싱·검증.
+ * 비거나 이미지가 없으면 data=null(장면 이미지 미사용).
+ * 매칭 토큰(name)은 모델이 `<img="name">` 으로 출력하는 값 — 고유·필수.
+ */
+export function parseNamedImageSet(form: FormData): NamedSetResult {
+	const raw = form.get('namedImages');
+	if (typeof raw !== 'string' || raw.trim() === '') return { ok: true, data: null };
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return { ok: false, error: '이미지 목록 형식이 올바르지 않습니다.' };
+	}
+	const arr = Array.isArray(parsed) ? parsed : [];
+	if (arr.length === 0) return { ok: true, data: null };
+	if (arr.length > NAMED_LIMITS.MAX_IMAGES)
+		return { ok: false, error: `이미지는 최대 ${NAMED_LIMITS.MAX_IMAGES}장까지 가능합니다.` };
+
+	const images: ParsedNamedImage[] = [];
+	const seenId = new Set<string>();
+	const seenName = new Set<string>();
+	for (const item of arr) {
+		const o = (item ?? {}) as { id?: unknown; name?: unknown; ext?: unknown };
+		const id = typeof o.id === 'string' ? o.id : '';
+		const name = (typeof o.name === 'string' ? o.name : '').trim();
+		if (!id || seenId.has(id)) return { ok: false, error: '이미지 식별자가 올바르지 않습니다.' };
+		if (!name) return { ok: false, error: '각 이미지에 이름(토큰)을 입력해 주세요.' };
+		if (name.length > NAMED_LIMITS.NAME_MAX)
+			return { ok: false, error: `이미지 이름은 ${NAMED_LIMITS.NAME_MAX}자 이내로 입력해 주세요.` };
+		if (seenName.has(name)) return { ok: false, error: `이미지 이름이 중복됩니다: ${name}` };
+		seenId.add(id);
+		seenName.add(name);
+
+		const fileRaw = form.get(`namedImage:${id}`);
+		let file: File | null = null;
+		let ext: string | null = null;
+		if (fileRaw instanceof File && fileRaw.size > 0) {
+			if (!ALLOWED_IMAGE[fileRaw.type])
+				return { ok: false, error: '장면 이미지는 webp 또는 avif 만 가능합니다.' };
+			if (fileRaw.size > MAX_IMAGE_BYTES)
+				return { ok: false, error: '장면 이미지 용량이 너무 큽니다 (최대 3MB).' };
+			file = fileRaw;
+		} else {
+			const keepExt = typeof o.ext === 'string' ? o.ext : '';
+			if (keepExt === 'webp' || keepExt === 'avif') ext = keepExt;
+		}
+
+		images.push({ id, name, file, ext });
+	}
+
+	return { ok: true, data: { images } };
 }

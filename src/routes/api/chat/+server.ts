@@ -15,6 +15,7 @@ import {
 } from '$lib/server/db/chats';
 import type { Character, ChatSession, StoredMessage } from '$lib/types';
 import { buildImageCatalog, pinSceneCodes } from '$lib/imageCodes';
+import { fillCharName, personalize } from '$lib/placeholders';
 import { notifyServerError } from '$lib/server/notify';
 
 /** live window 토큰 예산 — 이 이상이면 요약 트리거. */
@@ -115,7 +116,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		session = await getSession(db, body.sessionId, userId);
 		if (!session) return json({ error: 'session not found' }, { status: 404 });
 	} else {
-		const opening = personalizeUser(openingContent(character, body.openingIndex), userName);
+		const opening = personalize(openingContent(character, body.openingIndex), character.name, userName);
 		session = await createSession(db, {
 			userId,
 			characterId: character.id,
@@ -491,12 +492,6 @@ function openingContent(character: Character, index?: number): string {
 	return greetings[i].content;
 }
 
-/** 제작자가 쓴 "{{나}}" 플레이스홀더 → 사용자 이름(없으면 '나')으로 치환. */
-function personalizeUser(text: string, userName: string | null): string {
-	const label = (userName && userName.trim()) || '나';
-	return text.replace(/\{\{\s*나\s*\}\}/g, label);
-}
-
 /**
  * 시스템 프롬프트 = [제작자 프롬프트] + 상대 정보 + 가드레일 (+ 요약 블록).
  * 앞 3개는 캐릭터/유저 단위로 고정 → 장수명 prefix 캐시.
@@ -511,7 +506,9 @@ function buildSystemPrompt(
 	const userLabel = (userName && userName.trim()) || '나';
 
 	// ① 제작자가 작성한 프롬프트 (전체 프레이밍·설정·형식)
-	const lines: string[] = [character.description.trim(), ``];
+	//    {{char}} 는 캐릭터-불변이라 prefix 에 직접 치환해도 교차-유저 캐싱 안전.
+	//    {{나}}/{{user}} 는 유저-가변이라 여기선 그대로 두고 아래 ②에서 의미만 설명(캐시 prefix 보존).
+	const lines: string[] = [fillCharName(character.description.trim(), character.name), ``];
 
 	// ①-b 장면 이미지 카탈로그 — 캐릭터 단위로 고정 → prefix 캐시 유지.
 	const catalog = buildImageCatalog(character.imageSet);
@@ -521,7 +518,7 @@ function buildSystemPrompt(
 	lines.push(
 		`# 상대(사용자) 정보`,
 		`- 상대의 이름은 "${userLabel}" 이다. 대화에서 상대를 이 이름으로 부른다.`,
-		`- 프롬프트나 첫 상황 등에 나오는 "{{나}}" 는 이 서비스를 사용하는 상대(사용자), 즉 "${userLabel}" 를 가리킨다. 너 자신이 아니라 항상 상대를 뜻한다.`
+		`- 프롬프트나 첫 상황 등에 나오는 "{{나}}" 와 "{{user}}" 는 이 서비스를 사용하는 상대(사용자), 즉 "${userLabel}" 를 가리킨다. 너 자신이 아니라 항상 상대를 뜻한다.`
 	);
 	if (userPersona && userPersona.trim()) {
 		lines.push(`- 상대(${userLabel})의 페르소나: ${userPersona.trim()}`);
