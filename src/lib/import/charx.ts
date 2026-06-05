@@ -32,9 +32,31 @@ function getFile(files: Unzipped, path: string): Uint8Array | null {
 	return hit ? files[hit] : null;
 }
 
+/**
+ * 일부 charx(예: RisuAI 계열)는 **앞에 JPEG/PNG 썸네일이 붙은 ZIP 폴리글랏**으로 나온다.
+ * 이 경우 ZIP 의 중앙 디렉토리 오프셋이 '아카이브 시작' 기준이라 앞 prefix 길이만큼 어긋난다.
+ * macOS 압축유틸/unzip 은 prefix 를 자동 보정하지만 fflate 는 안 함 → 파싱 실패.
+ * EOCD 의 저장 오프셋과 실제 위치 차이로 prefix 길이를 구해 잘라내면 오프셋이 그대로 맞는다.
+ */
+function stripZipPrefix(buf: Uint8Array): Uint8Array {
+	const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+	// EOCD 시그니처(PK\x05\x06)를 뒤에서 탐색(코멘트 최대 65535).
+	const min = Math.max(0, buf.length - 22 - 0xffff);
+	for (let i = buf.length - 22; i >= min; i--) {
+		if (dv.getUint32(i, true) === 0x06054b50) {
+			const cdSize = dv.getUint32(i + 12, true);
+			const cdOff = dv.getUint32(i + 16, true);
+			const prefix = i - cdSize - cdOff; // 실제 CD 위치 - 저장된 CD 오프셋.
+			if (prefix > 0 && prefix < buf.length) return buf.subarray(prefix);
+			return buf;
+		}
+	}
+	return buf;
+}
+
 /** charx(File) → 매핑된 카드 + 풀린 파일들. */
 export async function parseCharx(file: File): Promise<ParsedCharx> {
-	const buf = new Uint8Array(await file.arrayBuffer());
+	const buf = stripZipPrefix(new Uint8Array(await file.arrayBuffer()));
 	const files = await new Promise<Unzipped>((resolve, reject) => {
 		unzip(buf, (err, data) => (err ? reject(err) : resolve(data)));
 	});
