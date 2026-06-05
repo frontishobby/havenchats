@@ -47,13 +47,13 @@ const REASONING_HEADROOM = 8000;
  */
 const GOOGLE_THINKING_BUDGET = 1024;
 /**
- * OpenAI/xAI/DeepSeek 추론 모델의 추론 강도. 소설모드 RP/산문엔 깊은 추론이 득보다 비용·
- * 지연·지시이탈을 키우므로 최소로 둔다(완전 차단 X — Google 의 thinkingBudget 와 같은 취지).
- * OpenAI(GPT-5 계열)는 'minimal' 지원, xAI(Grok)·DeepSeek 는 'low' 를 쓴다.
+ * OpenAI/xAI 추론 모델의 추론 강도. 소설모드 RP/산문엔 깊은 추론이 득보다 비용·지연·
+ * 지시이탈을 키우므로 최소로 둔다(완전 차단 X — Google 의 thinkingBudget 와 같은 취지).
+ * OpenAI(GPT-5 계열)는 'minimal', xAI(Grok)는 'low' 를 쓴다. (DeepSeek 은 effort 로는
+ * 추론이 안 줄어 buildProviderOptions 에서 thinking:disabled 로 따로 끈다.)
  */
 const OPENAI_REASONING_EFFORT = 'minimal';
 const XAI_REASONING_EFFORT = 'low';
-const DEEPSEEK_REASONING_EFFORT = 'low';
 /**
  * 한 번에 보낼 수 있는 유저 메시지의 토큰 상한.
  * trimWindowToBudget 는 최신 메시지를 항상 보존하므로, 거대한 단일 메시지는
@@ -531,7 +531,9 @@ function buildProviderOptions(modelId: string): ProviderOptions {
 	} else if (modelId.startsWith('xai/')) {
 		opts.xai = { reasoningEffort: XAI_REASONING_EFFORT };
 	} else if (modelId.startsWith('deepseek/')) {
-		opts.deepseek = { reasoningEffort: DEEPSEEK_REASONING_EFFORT };
+		// DeepSeek 은 reasoningEffort:'low' 로도 추론을 거의 안 줄여(실측 ~400 토큰) 응답이 느리다.
+		// thinking:{type:'disabled'} 가 실제 off 스위치(추론 토큰 0) — 소설모드엔 추론 불필요.
+		opts.deepseek = { thinking: { type: 'disabled' } };
 	}
 	return opts;
 }
@@ -638,8 +640,8 @@ function userActsLine(level: number): string {
 
 /**
  * live window(DB 메시지)를 AI SDK 메시지로 변환(빈 내용 제거).
- * 유저 설정(분량·'나' 행동 생성 정도)은 마지막 유저 메시지 끝에만 덧붙인다
- * → 과거 메시지/시스템 prefix 는 그대로라 캐싱 유지.
+ * 유저 설정(분량·'나' 행동 생성 정도)은 맨 끝에 별도 user 메시지로 덧붙인다
+ * → 유저 발화와 분리돼 지시 준수율↑, 과거 메시지/시스템 prefix 는 그대로라 캐싱 유지.
  * memory(상시 기억)가 있으면 system 프롬프트와 history 사이(messages 맨 앞)에
  * system 롤 메시지로 끼워 넣는다 — 유저가 강제하는 항상 유효한 지침.
  */
@@ -663,15 +665,18 @@ function buildMessages(
 
 	const last = out[out.length - 1];
 	if (last && last.role === 'user') {
+		// 로어북(맥락)은 유저 메시지에 붙이고, 응답 지침(분량·행동)은 별도 trailing 메시지로 분리한다
+		// → 모델이 유저 발화와 구분된 독립 지시로 인식해 준수율이 오른다.
+		// role='user' 인 이유: system 으로 두면 Anthropic 등에서 상단 system 파라미터로 끌려가
+		// 맨 끝(recency) 위치가 깨진다. user 트레일링은 모든 provider 에서 끝에 유지된다.
+		// 둘 다 가변 영역(맨 끝)이라 prefix 캐시는 그대로 보존된다.
+		if (loreBlock) last.content = `${last.content}\n\n${loreBlock}`;
 		const directive = [
 			`[응답 지침]`,
 			`- 분량: 약 ${maxSentences}문장 내외로 작성하라.`,
 			userActsLine(userActs)
 		].join('\n');
-		// 로어북 블록은 맥락 → directive 는 지침 순서로, 둘 다 마지막 유저 메시지 끝(가변 영역)에 붙인다.
-		last.content = loreBlock
-			? `${last.content}\n\n${loreBlock}\n\n${directive}`
-			: `${last.content}\n\n${directive}`;
+		out.push({ role: 'user', content: directive });
 	}
 	return out;
 }
