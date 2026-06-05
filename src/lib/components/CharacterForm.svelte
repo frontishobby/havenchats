@@ -126,6 +126,22 @@
 	);
 	const namedCount = $derived(namedImages.length);
 
+	// 방식 전환. 떠나는 쪽에 등록된 이미지가 있으면 경고 — 저장 시엔 활성 방식 하나만
+	// 영속화되고 반대쪽 이미지는 R2 에서 정리되기 때문(둘은 공존 불가).
+	function switchMode(target: 'grid' | 'named') {
+		if (target === imageMode) return;
+		const leavingCount = imageMode === 'grid' ? sceneCount : namedCount;
+		if (leavingCount > 0) {
+			const fromLabel = imageMode === 'grid' ? '그리드' : '플랫';
+			const ok = confirm(
+				`${fromLabel} 방식에 등록한 이미지 ${leavingCount}개는 다른 방식으로 저장하면 삭제됩니다.\n` +
+					`한 캐릭터는 한 가지 방식만 쓸 수 있어요. 전환할까요?`
+			);
+			if (!ok) return;
+		}
+		imageMode = target;
+	}
+
 	function applyScenes(res: SceneApply) {
 		sceneAxes = res.axes;
 		sceneEntries = res.entries;
@@ -377,12 +393,12 @@
 				<button
 					type="button"
 					class:active={imageMode === 'grid'}
-					onclick={() => (imageMode = 'grid')}>그리드</button
+					onclick={() => switchMode('grid')}>그리드</button
 				>
 				<button
 					type="button"
 					class:active={imageMode === 'named'}
-					onclick={() => (imageMode = 'named')}>플랫</button
+					onclick={() => switchMode('named')}>플랫</button
 				>
 			</div>
 		</div>
