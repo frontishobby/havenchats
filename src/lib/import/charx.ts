@@ -153,6 +153,7 @@ export async function runImport(
 			greetings: card.greetings,
 			tags: card.tags,
 			lorebook: card.lorebook,
+			defaultVariables: card.defaultVariables,
 			contentRating: opts.contentRating,
 			audience: opts.audience
 		})

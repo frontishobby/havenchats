@@ -70,7 +70,23 @@ description/personality/scenario/system_prompt/post_history/mes_example → `des
 
 ---
 
-### 1-2. 변수 엔진 + 동적 CBS — **2순위, 토대**
+### 1-2. 변수 엔진 + 동적 CBS — **2순위, 토대** ✅ **구현됨 (2026-06-06)**
+
+> 구현: `src/lib/cbs.ts`(런타임 CBS 엔진 — evalCBS(text,ctx): getvar/setvar/addvar/calc/random/roll/#if,
+> 시드 RNG, resolveCBSStatic), `chat_sessions.script_state`·`characters.script_data` JSON 컬럼(migration 0015),
+> import 가 description·로어북의 CBS 를 **원시 보존**(평탄화 제거, greeting·notes 만 정적 평탄화) +
+> `extensions.risuai.defaultVariables` 추출, `/api/chat` 가 매 턴 ctx(세션변수∪기본변수+index+rng)로
+> description·로어북 evalCBS → setvar 변이를 턴 종료 후 `updateScriptState` 영속. CBS 없는 카드는 noop →
+> prefix 캐시 보존. 검증: check 0 · evalCBS 19/19 · import 변수체인 7/7 · build·dev 스모크. (아래는 설계 메모)
+>
+> **+ Tier 1 CBS 보강 (2026-06-06):** evalCBS 에 비교(greater/less/ge/le)·수학(round/floor/ceil/abs/
+> min/max/sum/average/pow/remaind/randint)·문자열(replace/trim/length/lower/upper/capitalize/starts·
+> endswith/contains/reverse/tonumber/split/join/spread/arraylength)·시간(time/date/unixtime/isotime/
+> isodate/datetimeformat, `ctx.now` 주입)·블록 `#when`(+`:else`)·이스케이프(decbo/decbc/bo/bc, 마스크
+> 복원)·주석(`//`,comment) 추가. RisuAI 176개 중 자료구조(배열/딕셔너리/`#each`/`#func`)·메시지참조·
+> char필드주입은 Tier 2(트리거와 함께), 에셋/감정/암호화/환경 매크로(~50개)는 우리 아키텍처에 무의미 →
+> 영구 스킵. 검증: Tier1 종합 테스트 통과.
+
 
 **무엇**: 세션별 상태 변수(`$호감도`, `$기분`...). 지금은 import 때 박제 → 런타임에 살아 움직이게.
 
@@ -123,6 +139,10 @@ description/personality/scenario/system_prompt/post_history/mes_example → `des
 > 구현: `src/lib/import/risum.ts`(RPack 디코더 + readModuleMeta), `src/lib/import/capabilities.ts`(scanUnsupported),
 > `charx.ts parseCharx` 에서 호출 → `card.warnings` 병합 → import 미리보기 UI 에 노출.
 > 실제 charx 3종(Catrina/Celis/무인도)으로 검증 — 트리거·정규식·모듈로어북 탐지 정상. (아래 본문은 설계 메모)
+>
+> **+ V1/V2/CJS 분리 (2026-06-06):** 트리거를 effect.type 의 `v2` 접두사로 분류 — V1(조건→효과, "지원 예정")
+> vs V2(블록 프로그래밍, "미지원"). CJS 는 JavaScript 로 명시. CBS 변수/로어북은 이제 동작하므로 경고에서 제외.
+> → 사용자가 "어떤 부분이 살고 죽는지" 정확히 알게 됨.
 
 
 **무엇**: import 시 카드에 우리가 미지원하는 요소가 들어있는지 **구조적으로 스캔**해서 사용자에게 명세.

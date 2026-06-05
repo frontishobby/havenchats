@@ -4,8 +4,13 @@ import { streamText, generateText, type ModelMessage } from 'ai';
 import type { ProviderOptions } from '@ai-sdk/provider-utils';
 import { createGateway, type GatewayProvider } from '@ai-sdk/gateway';
 import { findCharacter } from '$lib/server/characters';
-import { getCharacterPrompt, getCharacterLorebook } from '$lib/server/db/characters';
+import {
+	getCharacterPrompt,
+	getCharacterLorebook,
+	getCharacterDefaultVars
+} from '$lib/server/db/characters';
 import { buildLoreBlock } from '$lib/lorebook';
+import { evalCBS, makeRng, type CbsContext } from '$lib/cbs';
 import { MODEL_IDS, DEFAULT_MODEL_ID, getContextLimit, isReasoningModel } from '$lib/data/models';
 import {
 	getSession,
@@ -13,6 +18,7 @@ import {
 	appendMessage,
 	getWindow,
 	updateSummary,
+	updateScriptState,
 	estimateTokens
 } from '$lib/server/db/chats';
 import type { Character, ChatSession, StoredMessage } from '$lib/types';
@@ -92,10 +98,13 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		return json({ error: 'character not found' }, { status: 404 });
 	}
 	// imported 캐릭터는 description·lorebook 이 클라 노출 차단으로 비어 있음 → 조립용 원본을 서버에서 채운다.
+	// 기본 변수(defaultVariables)도 서버 전용 → 세션 변수 시딩·CBS 평가에 쓴다.
+	let characterDefaultVars: Record<string, string> | null = null;
 	if (character.imported) {
 		const raw = await getCharacterPrompt(db, character.id);
 		if (raw != null) character.description = raw;
 		character.lorebook = await getCharacterLorebook(db, character.id);
+		characterDefaultVars = await getCharacterDefaultVars(db, character.id);
 	}
 
 	const text = (body.text ?? '').trim();
@@ -130,18 +139,30 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			characterId: character.id,
 			model: modelId,
 			opening,
-			memory: body.memory
+			memory: body.memory,
+			defaultVariables: characterDefaultVars
 		});
 	}
 
 	// 유저 메시지 즉시 영속화 (스트림 끊겨도 유실 방지) + 세션 모델 갱신
-	await appendMessage(db, session.id, 'user', text, modelId, undefined, undefined, userMsgId);
+	const userSeq = await appendMessage(db, session.id, 'user', text, modelId, undefined, undefined, userMsgId);
 
 	// live window(seq > summary_upto_seq) — 방금 넣은 유저 메시지·오프닝 포함
 	const fullWindow = await getWindow(db, session.id, session.summaryUptoSeq);
 
+	// ── CBS 평가 컨텍스트 ── 세션 변수(=기본 변수 시드 ∪ 누적 상태) + 턴 index + 시드 RNG.
+	// description→lorebook 순서로 같은 ctx 를 공유해 평가(setvar 변이 전파). 턴 종료 후 영속.
+	const ctx: CbsContext = {
+		vars: { ...(characterDefaultVars ?? {}), ...(session.scriptState ?? {}) },
+		index: userSeq,
+		lang: 'ko',
+		rng: makeRng(`${session.id}:${userSeq}`),
+		now: Date.now()
+	};
+	const scriptStateBefore = JSON.stringify(session.scriptState ?? {});
+
 	// system 은 한 번만 만들어 토큰 추정과 호출에 함께 쓴다.
-	const systemPrompt = buildSystemPrompt(character, userName, userPersona, session.summary);
+	const systemPrompt = buildSystemPrompt(character, userName, userPersona, session.summary, ctx);
 	const systemTokens = estimateTokens(systemPrompt);
 
 	// ── 모델별 input 상한 하드 가드 ──
@@ -161,8 +182,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 
 	// 로어북: 최근 window 메시지의 키워드를 스캔해 매칭(+constant) 항목만 주입할 블록을 만든다.
-	// 마지막 유저 메시지 끝(directive 앞)에 붙으므로 시스템 prefix 캐시는 보존된다.
-	const loreBlock = buildLoreBlock(character.lorebook, window);
+	// content 의 CBS 도 같은 ctx 로 평가(description 이후). 마지막 유저 메시지 끝(directive 앞)에 붙어 prefix 캐시 보존.
+	const loreBlock = buildLoreBlock(character.lorebook, window, ctx);
 
 	const messages = buildMessages(window, maxSentences, userActs, session.memory, loreBlock);
 	// 이번 턴에 실제로 보낼 input 토큰 추정치(헤더로 즉시 반환 + usage 없을 때 폴백).
@@ -181,6 +202,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		const guarded = p.catch((e) => console.error('[chat] after-task error:', e));
 		if (platform?.context?.waitUntil) platform.context.waitUntil(guarded);
 	};
+
+	// CBS 평가로 변수 상태가 바뀌었으면(또는 기본변수 첫 시딩) 턴 종료 후 영속.
+	if (JSON.stringify(ctx.vars) !== scriptStateBefore) {
+		after(updateScriptState(db, session.id, ctx.vars));
+	}
 
 	// 턴별 input 토큰을 응답 헤더로 내려준다(추정치). 실측은 onFinish 에서 DB 저장.
 	const tokenHeaders = {
@@ -513,14 +539,18 @@ function buildSystemPrompt(
 	character: Character,
 	userName: string | null,
 	userPersona: string | null,
-	summary: string | null
+	summary: string | null,
+	ctx: CbsContext
 ): string {
 	const userLabel = (userName && userName.trim()) || '나';
 
 	// ① 제작자가 작성한 프롬프트 (전체 프레이밍·설정·형식)
+	//    CBS(변수/조건/랜덤)를 현재 세션 상태로 평가(evalCBS) → 그 다음 {{char}} 치환.
 	//    {{char}} 는 캐릭터-불변이라 prefix 에 직접 치환해도 교차-유저 캐싱 안전.
 	//    {{나}}/{{user}} 는 유저-가변이라 여기선 그대로 두고 아래 ②에서 의미만 설명(캐시 prefix 보존).
-	const lines: string[] = [fillCharName(character.description.trim(), character.name), ``];
+	//    CBS 없는 카드는 evalCBS 가 텍스트를 안 바꿔 prefix 캐시가 유지된다.
+	const evaluated = evalCBS(character.description, ctx).text;
+	const lines: string[] = [fillCharName(evaluated.trim(), character.name), ``];
 
 	// ①-b 장면 이미지 카탈로그 — 캐릭터 단위로 고정 → prefix 캐시 유지.
 	const catalog = buildImageCatalog(character.imageSet);

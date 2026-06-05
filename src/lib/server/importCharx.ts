@@ -6,7 +6,14 @@
  * 서버는 메타 검증 + R2 put + D1 쓰기만 담당한다.
  */
 
-import type { Audience, CharacterLorebook, ContentRating, NamedImage, Opening } from '$lib/types';
+import type {
+	Audience,
+	CharacterLorebook,
+	CharacterScriptData,
+	ContentRating,
+	NamedImage,
+	Opening
+} from '$lib/types';
 import { IMPORT_LIMITS, IMPORT_IMAGE_EXT } from '$lib/import/cardToCharacter';
 import { normalizeLoreEntries } from '$lib/lorebook';
 
@@ -22,6 +29,7 @@ export interface ImportMeta {
 	greetings: Opening[];
 	tags: string[];
 	lorebook: CharacterLorebook | null;
+	scriptData: CharacterScriptData | null;
 	contentRating: ContentRating;
 	audience: Audience;
 }
@@ -75,6 +83,20 @@ export function parseImportMeta(raw: unknown): MetaResult {
 
 	const lorebook = normalizeLoreEntries(o.lorebook);
 
+	// 기본 변수(키=소문자, 값=문자열) 정규화. 최대 100개.
+	let scriptData: CharacterScriptData | null = null;
+	if (o.defaultVariables && typeof o.defaultVariables === 'object' && !Array.isArray(o.defaultVariables)) {
+		const dv: Record<string, string> = {};
+		for (const [k, v] of Object.entries(o.defaultVariables as Record<string, unknown>)) {
+			const key = k.trim().toLowerCase().slice(0, 60);
+			if (key && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
+				dv[key] = String(v).slice(0, 1000);
+			}
+			if (Object.keys(dv).length >= 100) break;
+		}
+		if (Object.keys(dv).length > 0) scriptData = { defaultVariables: dv };
+	}
+
 	return {
 		ok: true,
 		data: {
@@ -85,6 +107,7 @@ export function parseImportMeta(raw: unknown): MetaResult {
 			greetings,
 			tags,
 			lorebook,
+			scriptData,
 			contentRating,
 			audience
 		}

@@ -24,10 +24,28 @@ interface SessionRow {
 	summary: string | null;
 	summary_upto_seq: number;
 	memory: string | null;
+	script_state: string | null;
 	message_count: number;
 	created_at: number;
 	updated_at: number;
 	last_message_at: number | null;
+}
+
+/** JSON 문자열을 변수 맵(Record<string,string>)으로 안전 파싱. 손상/빈 값이면 null. */
+function parseScriptState(json: string | null): Record<string, string> | null {
+	if (!json) return null;
+	try {
+		const parsed = JSON.parse(json) as unknown;
+		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+		const out: Record<string, string> = {};
+		for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+			if (typeof v === 'string') out[k] = v;
+			else if (typeof v === 'number' || typeof v === 'boolean') out[k] = String(v);
+		}
+		return Object.keys(out).length > 0 ? out : null;
+	} catch {
+		return null;
+	}
 }
 
 function rowToSession(r: SessionRow): ChatSession {
@@ -39,6 +57,7 @@ function rowToSession(r: SessionRow): ChatSession {
 		summary: r.summary,
 		summaryUptoSeq: r.summary_upto_seq,
 		memory: r.memory,
+		scriptState: parseScriptState(r.script_state),
 		messageCount: r.message_count,
 		createdAt: r.created_at,
 		updatedAt: r.updated_at,
@@ -47,7 +66,7 @@ function rowToSession(r: SessionRow): ChatSession {
 }
 
 const SESSION_COLS =
-	'id, user_id, character_id, model, summary, summary_upto_seq, memory, message_count, created_at, updated_at, last_message_at';
+	'id, user_id, character_id, model, summary, summary_upto_seq, memory, script_state, message_count, created_at, updated_at, last_message_at';
 
 /** 단일 세션 조회(소유권 확인 포함). */
 export async function getSession(
@@ -240,6 +259,8 @@ export async function createSession(
 		opening: string;
 		/** 첫 대화 전에 미리 설정한 상시 기억(최대 100자). 없으면 null. */
 		memory?: string | null;
+		/** 캐릭터 기본 변수(import defaultVariables). 세션 변수 상태 초기 시딩. 없으면 null. */
+		defaultVariables?: Record<string, string> | null;
 	}
 ): Promise<ChatSession> {
 	const now = Date.now();
@@ -249,15 +270,18 @@ export async function createSession(
 	const count = hasOpening ? 1 : 0;
 	const lastAt = hasOpening ? now : null;
 	const memVal = ((input.memory ?? '').trim().slice(0, MAX_MEMORY_CHARS) || null) as string | null;
+	const seedVars = input.defaultVariables ?? null;
+	const scriptStateVal =
+		seedVars && Object.keys(seedVars).length > 0 ? JSON.stringify(seedVars) : null;
 
 	const stmts = [
 		db
 			.prepare(
 				`INSERT INTO chat_sessions
-				 (id, user_id, character_id, model, summary, summary_upto_seq, memory, message_count, created_at, updated_at, last_message_at)
-				 VALUES (?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?)`
+				 (id, user_id, character_id, model, summary, summary_upto_seq, memory, script_state, message_count, created_at, updated_at, last_message_at)
+				 VALUES (?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?)`
 			)
-			.bind(id, input.userId, input.characterId, input.model, memVal, count, now, now, lastAt)
+			.bind(id, input.userId, input.characterId, input.model, memVal, scriptStateVal, count, now, now, lastAt)
 	];
 	if (hasOpening) {
 		stmts.push(
@@ -279,6 +303,7 @@ export async function createSession(
 		summary: null,
 		summaryUptoSeq: 0,
 		memory: memVal,
+		scriptState: seedVars && Object.keys(seedVars).length > 0 ? seedVars : null,
 		messageCount: count,
 		createdAt: now,
 		updatedAt: now,
@@ -368,6 +393,22 @@ export async function getWindow(
 		content: r.content,
 		tokenEst: r.token_est
 	}));
+}
+
+/**
+ * 세션 변수 상태 갱신(CBS setvar 결과). 빈 맵이면 NULL 로 저장.
+ * 턴 종료 후(waitUntil) 호출 — 매 턴 평가로 변이된 변수를 영속한다.
+ */
+export async function updateScriptState(
+	db: D1Database,
+	sessionId: string,
+	state: Record<string, string>
+): Promise<void> {
+	const val = Object.keys(state).length > 0 ? JSON.stringify(state) : null;
+	await db
+		.prepare('UPDATE chat_sessions SET script_state = ?, updated_at = ? WHERE id = ?')
+		.bind(val, Date.now(), sessionId)
+		.run();
 }
 
 /** 요약 갱신 — 새 summary 와 그것이 커버한 마지막 seq 를 저장(경계 전진). */

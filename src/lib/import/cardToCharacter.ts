@@ -7,7 +7,7 @@
  */
 
 import type { LoreEntry } from '$lib/types';
-import { resolveCBS } from './cbs';
+import { resolveCBSStatic } from '$lib/cbs';
 import type { RisuLoreEntry } from './risum';
 
 /** import 단계 상한 — 네이티브 폼(짧은 제약)과 달리 외부 카드라 넉넉하게. */
@@ -55,6 +55,8 @@ export interface MappedCard {
 	images: ImportImage[];
 	/** card.json character_book 에서 추출한 로어북(키워드 동적 설정). 서버에서 module.risum 과 머지. */
 	lorebook: LoreEntry[];
+	/** 기본 변수(extensions.risuai.defaultVariables) → 세션 변수 시딩. 없으면 빈 객체. */
+	defaultVariables: Record<string, string>;
 	/** 수동 확인 권장 경고(스크립팅 손실 등). */
 	warnings: string[];
 }
@@ -91,6 +93,7 @@ interface V3Data {
 	tags?: unknown;
 	assets?: unknown;
 	character_book?: { entries?: unknown };
+	extensions?: { risuai?: { defaultVariables?: unknown } };
 }
 export interface V3Card {
 	spec?: string;
@@ -110,6 +113,36 @@ function strArray(v: unknown): string[] {
 
 function genId(): string {
 	return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Math.random()}`;
+}
+
+/**
+ * RisuAI defaultVariables 파싱 → 변수 맵. 포맷이 제각각이라 방어적으로:
+ *  - JSON 객체 → 그대로
+ *  - 줄단위 문자열 → 각 줄 `name::value` / `name=value` (첫 구분자 기준)
+ * 키는 소문자 정규화. 값은 문자열.
+ */
+function parseDefaultVars(raw: unknown): Record<string, string> {
+	const out: Record<string, string> = {};
+	if (!raw) return out;
+	if (typeof raw === 'object' && !Array.isArray(raw)) {
+		for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+			const key = k.trim().toLowerCase();
+			if (key && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
+				out[key] = String(v);
+			}
+		}
+		return out;
+	}
+	if (typeof raw === 'string') {
+		for (const line of raw.split('\n')) {
+			const m = line.match(/^\s*([^=:]+?)\s*(?:::|=)\s*(.*)$/);
+			if (m) {
+				const key = m[1].trim().toLowerCase();
+				if (key) out[key] = m[2].trim();
+			}
+		}
+	}
+	return out;
 }
 
 function clip(s: string, max: number): string {
@@ -137,23 +170,17 @@ function uriToPath(uri: string): string {
 export function mapCardToCharacter(card: V3Card): MappedCard {
 	const d = card.data ?? {};
 	const warnings: string[] = [];
-	let scripting = false;
-
-	const cbs = (raw: string): string => {
-		const r = resolveCBS(raw);
-		if (r.usedScripting) scripting = true;
-		return r.text;
-	};
 
 	// ── 이름 ──
 	const name = clip(str(d.name) || str(d.nickname) || 'Unnamed', IMPORT_LIMITS.NAME_MAX).trim();
 
 	// ── description(시스템 프롬프트) = persona + personality + scenario + system_prompt
 	//    + post_history(이미지 문법·규칙) + 예시 대화 ──
-	//    (로어북은 description 에 접지 않고 별도 lorebook 으로 추출 → 채팅 시 키워드 동적 주입)
+	//    CBS 매크로는 **원시 그대로 보존**한다(평탄화 X) → 채팅 시 evalCBS 가 세션 변수로 동적 평가.
+	//    (로어북은 description 에 접지 않고 별도 lorebook 으로 추출)
 	const parts: string[] = [];
 	const push = (header: string, body: string) => {
-		const t = cbs(body).trim();
+		const t = body.trim();
 		if (t) parts.push(header ? `# ${header}\n${t}` : t);
 	};
 	push('', str(d.description));
@@ -161,17 +188,17 @@ export function mapCardToCharacter(card: V3Card): MappedCard {
 	push('상황', str(d.scenario));
 	if (str(d.system_prompt).trim()) push('시스템 지침', str(d.system_prompt));
 
-	// 로어북: enabled 인 모든 항목을 LoreEntry 로 추출(constant + 키워드형 모두). CBS 해소 적용.
+	// 로어북: enabled 인 모든 항목을 LoreEntry 로 추출(constant + 키워드형 모두). content 는 원시 CBS 보존.
 	const bookEntries = Array.isArray(d.character_book?.entries)
 		? (d.character_book!.entries as V3BookEntry[])
 		: [];
 	const lorebook: LoreEntry[] = [];
 	for (const e of bookEntries) {
 		if (!e || e.enabled === false) continue;
-		const content = cbs(str(e.content)).trim();
+		const content = str(e.content).trim();
 		if (!content) continue;
 		const constant = e.constant === true;
-		const keys = [...strArray(e.keys), ...strArray(e.secondary_keys)].map((k) => cbs(k).trim());
+		const keys = [...strArray(e.keys), ...strArray(e.secondary_keys)].map((k) => k.trim());
 		const cleanKeys = keys.filter(Boolean);
 		if (!constant && cleanKeys.length === 0) continue; // 영영 안 켜지는 항목은 버림
 		lorebook.push({
@@ -188,8 +215,11 @@ export function mapCardToCharacter(card: V3Card): MappedCard {
 
 	const description = clip(parts.join('\n\n').trim(), IMPORT_LIMITS.DESC_MAX);
 
-	// ── 소개/설명 ──
-	const notes = cbs(str(d.creator_notes)).trim();
+	// 기본 변수(extensions.risuai.defaultVariables) → 세션 변수 시딩.
+	const defaultVariables = parseDefaultVars(d.extensions?.risuai?.defaultVariables);
+
+	// ── 소개/설명(표시용 — 정적 평탄화) ──
+	const notes = resolveCBSStatic(str(d.creator_notes)).trim();
 	const intro = clip(notes, IMPORT_LIMITS.INTRO_MAX);
 	// tagline: 마크업(헤더/코드/인용/리스트/표)·짧은 줄을 건너뛰고 첫 산문 줄. 없으면 기본값.
 	const prose = notes
@@ -204,7 +234,8 @@ export function mapCardToCharacter(card: V3Card): MappedCard {
 		for (const g of d.alternate_greetings) rawGreetings.push(str(g));
 	}
 	const greetings = rawGreetings
-		.map((g) => clip(cbs(g).trim(), IMPORT_LIMITS.GREETING_MAX))
+		// 오프닝은 세션 시작 시 seq=1 로 박제 → 정적 평탄화(현재 상태 없음).
+		.map((g) => clip(resolveCBSStatic(g).trim(), IMPORT_LIMITS.GREETING_MAX))
 		.filter((g) => g.length >= 20) // CBS 분기 후 빈/잔여 오프닝 제거
 		.slice(0, IMPORT_LIMITS.GREETINGS_MAX)
 		.map((content, i) => ({ name: i === 0 ? '기본' : `상황 ${i + 1}`, content }));
@@ -245,11 +276,7 @@ export function mapCardToCharacter(card: V3Card): MappedCard {
 		images.push({ name: token, srcPath: path, ext: normExt });
 	}
 
-	if (scripting) {
-		warnings.push(
-			'이 카드는 스크립팅(CBS)을 사용해요. 흔한 패턴은 자동 정리했지만 프롬프트·오프닝 일부는 직접 확인해 주세요.'
-		);
-	}
+	// CBS(변수/조건/랜덤)는 이제 채팅 시 동적 평가되므로 별도 경고 없음(트리거/정규식/CJS 경고는 capabilities 가 담당).
 
 	return {
 		name,
@@ -262,6 +289,7 @@ export function mapCardToCharacter(card: V3Card): MappedCard {
 		iconExt,
 		images,
 		lorebook,
+		defaultVariables,
 		warnings
 	};
 }

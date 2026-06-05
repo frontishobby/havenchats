@@ -3,6 +3,7 @@ import type {
 	Character,
 	CharacterImageSet,
 	CharacterLorebook,
+	CharacterScriptData,
 	ContentRating,
 	LoreEntry,
 	Opening,
@@ -31,6 +32,8 @@ export interface NewCharacter {
 	imageSet: CharacterImageSet | null;
 	/** 로어북(키워드 동적 설정). 없으면 null. */
 	lorebook: CharacterLorebook | null;
+	/** 스크립트 설정(기본 변수 등, 서버 전용). 없으면 null. */
+	scriptData: CharacterScriptData | null;
 	/** charx import 캐릭터 여부(프롬프트 숨김·비공개·수정 불가). 기본 false. */
 	imported?: boolean;
 }
@@ -328,6 +331,40 @@ export async function getCharacterLorebook(
 	return row ? parseLorebook(row.lorebook) : null;
 }
 
+/** script_data JSON → CharacterScriptData(defaultVariables 만 안전 파싱). 손상/빈 값이면 null. */
+function parseScriptData(json: string | null): CharacterScriptData | null {
+	if (!json) return null;
+	try {
+		const parsed = JSON.parse(json) as unknown;
+		if (!parsed || typeof parsed !== 'object') return null;
+		const dv = (parsed as { defaultVariables?: unknown }).defaultVariables;
+		if (!dv || typeof dv !== 'object' || Array.isArray(dv)) return null;
+		const out: Record<string, string> = {};
+		for (const [k, v] of Object.entries(dv as Record<string, unknown>)) {
+			if (typeof v === 'string') out[k.toLowerCase()] = v;
+			else if (typeof v === 'number' || typeof v === 'boolean') out[k.toLowerCase()] = String(v);
+		}
+		return Object.keys(out).length > 0 ? { defaultVariables: out } : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * 세션 변수 시딩용 캐릭터 기본 변수(서버 전용). 채팅 조립·세션 생성 시에만 읽는다.
+ * 캐릭터 없거나 기본 변수 없으면 null.
+ */
+export async function getCharacterDefaultVars(
+	db: D1Database,
+	id: string
+): Promise<Record<string, string> | null> {
+	const row = await db
+		.prepare(`SELECT script_data FROM characters WHERE id = ?`)
+		.bind(id)
+		.first<{ script_data: string | null }>();
+	return row ? (parseScriptData(row.script_data)?.defaultVariables ?? null) : null;
+}
+
 /** 단일 유저 캐릭터 조회. */
 export async function getCharacterById(db: D1Database, id: string): Promise<Character | null> {
 	const row = await db
@@ -353,6 +390,8 @@ export interface CharacterUpdate {
 	imageSet: CharacterImageSet | null;
 	/** 로어북(현재 상태 전체). 없으면 null. */
 	lorebook: CharacterLorebook | null;
+	/** 스크립트 설정(기본 변수 등). 없으면 null. */
+	scriptData: CharacterScriptData | null;
 	/** 새 이미지 키. undefined 면 썸네일 변경 없음. */
 	thumbnailKey?: string;
 }
@@ -369,7 +408,7 @@ export async function updateCharacter(
 		.prepare(
 			`UPDATE characters SET
 			   name = ?, tagline = ?, intro = ?, description = ?,
-			   audience = ?, content_rating = ?, visibility = ?, tags = ?, greetings = ?, image_set = ?, lorebook = ?,
+			   audience = ?, content_rating = ?, visibility = ?, tags = ?, greetings = ?, image_set = ?, lorebook = ?, script_data = ?,
 			   ${setThumb ? 'thumbnail_key = ?,' : ''}
 			   updated_at = ?
 			 WHERE id = ?`
@@ -387,6 +426,7 @@ export async function updateCharacter(
 				JSON.stringify(c.greetings),
 				c.imageSet ? JSON.stringify(c.imageSet) : null,
 				c.lorebook ? JSON.stringify(c.lorebook) : null,
+				c.scriptData ? JSON.stringify(c.scriptData) : null,
 				...(setThumb ? [c.thumbnailKey] : []),
 				now,
 				id
@@ -418,8 +458,8 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 	await db
 		.prepare(
 			`INSERT INTO characters
-			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, lorebook, imported, chats, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, lorebook, script_data, imported, chats, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
 		)
 		.bind(
 			c.id,
@@ -436,6 +476,7 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 			JSON.stringify(c.greetings),
 			c.imageSet ? JSON.stringify(c.imageSet) : null,
 			c.lorebook ? JSON.stringify(c.lorebook) : null,
+			c.scriptData ? JSON.stringify(c.scriptData) : null,
 			c.imported ? 1 : 0,
 			now,
 			now

@@ -8,6 +8,7 @@
  */
 
 import type { CharacterLorebook, LoreEntry } from '$lib/types';
+import { evalCBS, type CbsContext } from '$lib/cbs';
 
 // ── 저장 한도(폼/import 공용) ──
 export const LORE_ENTRIES_MAX = 100; // 캐릭터당 항목 수
@@ -100,14 +101,18 @@ export function formatLoreBlock(entries: LoreEntry[]): string | null {
 }
 
 /**
- * 채팅 핸들러용 헬퍼: 최근 window 메시지 content 를 스캔 텍스트로 만들어 선택→포맷까지 한 번에.
- * 주입할 게 없으면 null.
+ * 채팅 핸들러용 헬퍼: 최근 window 메시지 content 를 스캔 텍스트로 만들어 선택→(CBS 평가)→포맷.
+ * 선택된 항목 content 의 CBS 는 ctx 로 평가(description 이후 같은 ctx — setvar 변이 공유). 없으면 null.
  */
 export function buildLoreBlock(
 	lorebook: CharacterLorebook | null,
-	recentMessages: { content: string }[]
+	recentMessages: { content: string }[],
+	ctx: CbsContext
 ): string | null {
 	if (!lorebook) return null;
 	const recentText = recentMessages.slice(-LORE_SCAN_DEPTH).map((m) => m.content).join('\n');
-	return formatLoreBlock(selectLoreEntries(lorebook, recentText));
+	const selected = selectLoreEntries(lorebook, recentText)
+		.map((e) => ({ ...e, content: evalCBS(e.content, ctx).text.trim() }))
+		.filter((e) => e.content !== '');
+	return formatLoreBlock(selected);
 }

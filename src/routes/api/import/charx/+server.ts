@@ -63,6 +63,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			greetings: meta.data.greetings,
 			imageSet: null, // 이미지 업로드 후 /finalize 에서 확정
 			lorebook: meta.data.lorebook,
+			scriptData: meta.data.scriptData,
 			imported: true // 프롬프트 숨김·비공개·수정 불가
 		});
 	} catch (e) {

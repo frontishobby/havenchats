@@ -41,6 +41,15 @@ export interface CharacterLorebook {
 	entries: LoreEntry[];
 }
 
+/**
+ * 캐릭터 스크립트 설정(서버 전용 — 프롬프트 조립에만 사용, 클라이언트 미노출).
+ * 지금은 import 한 기본 변수만. 3·4순위에서 triggers/regex 로 확장.
+ */
+export interface CharacterScriptData {
+	/** 세션 시작 시 변수 상태를 시딩하는 기본 변수(키=변수명 소문자). */
+	defaultVariables?: Record<string, string>;
+}
+
 export interface Character {
 	id: string;
 	name: string;
@@ -188,6 +197,8 @@ export interface ChatSession {
 	summaryUptoSeq: number;
 	/** 유저가 직접 넣는 "상시 기억"(최대 100자). 존재 시 system↔history 사이에 주입. */
 	memory: string | null;
+	/** 세션 변수 상태(CBS getvar/setvar). 키=변수명(소문자), 값=문자열. 없으면 null. */
+	scriptState: Record<string, string> | null;
 	messageCount: number;
 	createdAt: number;
 	updatedAt: number;
