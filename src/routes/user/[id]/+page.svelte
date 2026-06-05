@@ -84,7 +84,7 @@
 				{#each items as c (c.id)}
 					<li class="row">
 						<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-						<button class="row-main" type="button" onclick={() => edit(c)}>
+						<button class="row-main" type="button" onclick={() => (detail = c)}>
 							<img class="thumb" src={c.avatarUrl} alt={c.name} />
 							<span class="info">
 								<span class="name-line">
@@ -94,8 +94,8 @@
 								<span class="tagline">{c.tagline}</span>
 								<span class="meta">💬 {c.chats}</span>
 							</span>
-							<span class="edit-hint">수정 ›</span>
 						</button>
+						<button class="edit" type="button" onclick={() => edit(c)}>수정</button>
 						<button
 							class="del"
 							type="button"
@@ -300,11 +300,20 @@
 		font-size: 0.72rem;
 		color: var(--text-faint);
 	}
-	.edit-hint {
+	.edit {
 		flex-shrink: 0;
-		font-size: 0.8rem;
-		font-weight: 600;
+		padding: 0 16px;
+		border: none;
+		border-left: 1px solid var(--border);
+		background: transparent;
 		color: var(--accent);
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: background 0.15s ease;
+	}
+	.edit:hover {
+		background: var(--accent-soft);
 	}
 	.del {
 		flex-shrink: 0;
