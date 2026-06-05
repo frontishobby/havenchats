@@ -51,9 +51,9 @@
 		}
 	}
 
-	// 비용(USD)을 소수점 3째 자리에서 반올림해 2자리로 표시. 예: 0.0270609 → "$0.03".
+	// 비용(USD)을 소수점 2자리로 올림 표시. 예: 0.0270609 → "$0.03", 0.0001 → "$0.01".
 	function formatCost(cost: number): string {
-		return `$${cost.toFixed(2)}`;
+		return `$${(Math.ceil(cost * 100) / 100).toFixed(2)}`;
 	}
 
 	let { data }: { data: PageData } = $props();
