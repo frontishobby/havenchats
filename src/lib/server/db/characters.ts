@@ -103,15 +103,20 @@ function parseImageSet(json: string | null): CharacterImageSet | null {
 		if (!parsed || typeof parsed !== 'object') return null;
 		const obj = parsed as { kind?: unknown };
 		return obj.kind === 'named'
-			? parseNamedSet(obj as { images?: unknown })
-			: parseGridSet(obj as { axes?: unknown; entries?: unknown });
+			? parseNamedSet(obj as { images?: unknown; storage?: unknown })
+			: parseGridSet(obj as { axes?: unknown; entries?: unknown; storage?: unknown });
 	} catch {
 		return null;
 	}
 }
 
+/** image_set JSON 의 storage 필드 해석. 'local' 만 인정, 그 외는 미지정(클라우드). */
+function parseStorage(v: unknown): 'local' | undefined {
+	return v === 'local' ? 'local' : undefined;
+}
+
 /** 그리드 세트 파싱. 축 개수와 각 combo 길이가 안 맞는 엔트리는 버린다(방어적). */
-function parseGridSet(obj: { axes?: unknown; entries?: unknown }): CharacterImageSet | null {
+function parseGridSet(obj: { axes?: unknown; entries?: unknown; storage?: unknown }): CharacterImageSet | null {
 	if (!Array.isArray(obj.axes) || !Array.isArray(obj.entries)) return null;
 
 	const axes = obj.axes
@@ -145,11 +150,12 @@ function parseGridSet(obj: { axes?: unknown; entries?: unknown }): CharacterImag
 		);
 	if (entries.length === 0) return null;
 
-	return { kind: 'grid', axes, entries };
+	const storage = parseStorage(obj.storage);
+	return { kind: 'grid', axes, entries, ...(storage ? { storage } : {}) };
 }
 
 /** 플랫 네임드 세트 파싱. id·name·ext 가 온전한 이미지만 남긴다. */
-function parseNamedSet(obj: { images?: unknown }): CharacterImageSet | null {
+function parseNamedSet(obj: { images?: unknown; storage?: unknown }): CharacterImageSet | null {
 	if (!Array.isArray(obj.images)) return null;
 	const images = obj.images
 		.map((i) => {
@@ -161,7 +167,8 @@ function parseNamedSet(obj: { images?: unknown }): CharacterImageSet | null {
 		})
 		.filter((i) => i.id && i.name && i.ext);
 	if (images.length === 0) return null;
-	return { kind: 'named', images };
+	const storage = parseStorage(obj.storage);
+	return { kind: 'named', images, ...(storage ? { storage } : {}) };
 }
 
 function rowToCharacter(row: CharacterRow): Character {

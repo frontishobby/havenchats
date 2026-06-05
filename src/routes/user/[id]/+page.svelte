@@ -3,6 +3,9 @@
 	import CharacterCard from '$lib/components/CharacterCard.svelte';
 	import CharacterDetailModal from '$lib/components/CharacterDetailModal.svelte';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
+	import { isLocalSet } from '$lib/imageCodes';
+	import { promoteLocalCharacter, type PromoteProgress } from '$lib/import/promote';
+	import { deleteLocalScenes } from '$lib/import/localImages';
 	import type { Character } from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -12,6 +15,15 @@
 	let items = $state<Character[]>(data.characters);
 	let deleting = $state<string | null>(null);
 	let avatarFailed = $state(false);
+
+	// 기기간 공유(promote) 진행 상태.
+	let promoting = $state<string | null>(null);
+	let promoteProg = $state<PromoteProgress | null>(null);
+
+	// charx(로컬·기기 한정) 캐릭터 — 수정 불가, '기기간 공유'로만 클라우드 전환.
+	function isLocal(c: Character): boolean {
+		return isLocalSet(c.imageSet);
+	}
 
 	// 방문자 모드: 상세 모달.
 	let detail = $state<Character | null>(null);
@@ -38,11 +50,35 @@
 		try {
 			const res = await fetch(`/api/characters/${c.id}`, { method: 'DELETE' });
 			if (!res.ok) throw new Error();
+			// 로컬(IndexedDB) 장면 이미지도 함께 정리(charx 로컬 캐릭터).
+			await deleteLocalScenes(c.id);
 			items = items.filter((x) => x.id !== c.id);
 		} catch {
 			alert('삭제에 실패했어요. 잠시 후 다시 시도해 주세요.');
 		} finally {
 			deleting = null;
+		}
+	}
+
+	// 로컬 charx 캐릭터를 클라우드로 올려 기기간 공유 가능하게 전환.
+	async function promote(c: Character) {
+		if (promoting || !c.imageSet) return;
+		if (!confirm(`'${c.name}'을(를) 클라우드에 올려 다른 기기에서도 보이게 할까요?`)) return;
+		promoting = c.id;
+		promoteProg = null;
+		try {
+			await promoteLocalCharacter(c.id, c.imageSet, (p) => (promoteProg = p));
+			// 전환 성공 → storage 플래그 제거(이제 일반 캐릭터처럼 수정·공개 가능).
+			items = items.map((x) =>
+				x.id === c.id && x.imageSet
+					? { ...x, imageSet: { ...x.imageSet, storage: undefined } }
+					: x
+			);
+		} catch (e) {
+			alert(e instanceof Error ? e.message : '올리기에 실패했어요.');
+		} finally {
+			promoting = null;
+			promoteProg = null;
 		}
 	}
 
@@ -95,7 +131,23 @@
 								<span class="meta">💬 {c.chats}</span>
 							</span>
 						</button>
-						<button class="edit" type="button" onclick={() => edit(c)}>수정</button>
+						{#if isLocal(c)}
+							<button
+								class="edit promote"
+								type="button"
+								onclick={() => promote(c)}
+								disabled={!!promoting}
+								title="클라우드에 올려 다른 기기에서도 보기"
+							>
+								{#if promoting === c.id}
+									{promoteProg ? `${promoteProg.uploaded}/${promoteProg.total}` : '올리는 중…'}
+								{:else}
+									⬆ 기기간 공유
+								{/if}
+							</button>
+						{:else}
+							<button class="edit" type="button" onclick={() => edit(c)}>수정</button>
+						{/if}
 						<button
 							class="del"
 							type="button"
@@ -314,6 +366,14 @@
 	}
 	.edit:hover {
 		background: var(--accent-soft);
+	}
+	.edit:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.edit.promote {
+		white-space: nowrap;
+		font-size: 0.8rem;
 	}
 	.del {
 		flex-shrink: 0;

@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { parseCharx, runImport, type ParsedCharx, type ImportProgress } from '$lib/import/charx';
+	import type { PageData } from './$types';
+
+	let { data }: { data: PageData } = $props();
 
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let parsing = $state(false);
@@ -55,8 +58,8 @@
 			const res = await runImport(parsed, { contentRating: nsfw ? 'nsfw' : 'sfw', audience }, (p) => {
 				progress = p;
 			});
-			// 검수/공개를 위해 수정 페이지로.
-			await goto(`/characters/${res.id}/edit`);
+			// charx 캐릭터는 비공개·기기 한정 → 수정 불가. 내 캐릭터 목록으로 이동(채팅/삭제/기기간 공유).
+			await goto(`/user/${data.user.id}`);
 		} catch (err) {
 			error = err instanceof Error ? err.message : '가져오기에 실패했어요.';
 			importing = false;
@@ -68,7 +71,7 @@
 	);
 	const phaseLabel: Record<ImportProgress['phase'], string> = {
 		creating: '캐릭터 생성 중…',
-		uploading: '이미지 업로드 중…',
+		storing: '이미지 저장 중…',
 		finalizing: '마무리 중…',
 		done: '완료'
 	};
@@ -81,7 +84,10 @@
 <div class="page">
 	<header class="head">
 		<h1>charx 가져오기</h1>
-		<p class="sub">캐릭터 카드(.charx)를 Haven 캐릭터로 가져와요. 가져온 캐릭터는 <b>비공개</b>로 시작해요.</p>
+		<p class="sub">
+			캐릭터 카드(.charx)를 Haven 캐릭터로 가져와요. 장면 이미지는 <b>이 기기에만</b> 저장되고
+			캐릭터는 <b>비공개</b>예요. 나중에 '기기간 공유'를 누르면 클라우드에 올려 다른 기기에서도 볼 수 있어요.
+		</p>
 	</header>
 
 	{#if error}<p class="error">{error}</p>{/if}

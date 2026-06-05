@@ -55,6 +55,22 @@ export function hasScenes(set: CharacterImageSet | null | undefined): set is Cha
 	return isGrid(set) || isNamed(set);
 }
 
+/**
+ * 바이트가 로컬(브라우저 IndexedDB)에만 있는 세트인지(charx import 직후).
+ * true 면 R2(/img) 가 아니라 IndexedDB 에서 blob 을 읽어 렌더해야 한다.
+ */
+export function isLocalSet(set: CharacterImageSet | null | undefined): boolean {
+	return !!set && set.storage === 'local';
+}
+
+/**
+ * 로컬(IndexedDB) 장면 이미지 키 — `<characterId>/<id>`.
+ * localImages.ts 의 localSceneKey 와 동일 포맷(순수 함수라 여기에 둬 클라/서버 공용 해석).
+ */
+export function localSceneKey(characterId: string, id: string): string {
+	return `${characterId}/${id}`;
+}
+
 // ─────────────────────────────────────────────────────────────
 // 그리드(축×조합) — 위치코드
 // ─────────────────────────────────────────────────────────────
@@ -212,8 +228,23 @@ export function pinSceneCodes(text: string, set: CharacterImageSet | null | unde
 
 /** 해석된 장면 이미지 한 장(렌더용). */
 export interface ResolvedScene {
+	/** R2 servable URL. 로컬 세트면 빈 문자열(대신 localKey 로 IndexedDB 에서 읽는다). */
 	url: string;
 	alt: string;
+	/** 로컬(IndexedDB) 세트일 때만 — blob 조회 키(`<characterId>/<id>`). */
+	localKey?: string;
+}
+
+/** R2 URL 기반 ResolvedScene 을 로컬 세트면 localKey 형태로 보정. */
+function decorateScene(
+	scene: ResolvedScene,
+	id: string,
+	characterId: string,
+	set: CharacterImageSet
+): ResolvedScene {
+	return isLocalSet(set)
+		? { url: '', alt: scene.alt, localKey: localSceneKey(characterId, id) }
+		: scene;
 }
 
 /** 고정 토큰 {#id} 해석(grid·named 공용). */
@@ -224,11 +255,13 @@ function resolvePinned(
 ): ResolvedScene | null {
 	if (isGrid(set)) {
 		const entry = findEntryById(set, id);
-		return entry ? { url: entryUrl(characterId, entry), alt: entryAlt(set, entry) } : null;
+		if (!entry) return null;
+		return decorateScene({ url: entryUrl(characterId, entry), alt: entryAlt(set, entry) }, id, characterId, set);
 	}
 	if (isNamed(set)) {
 		const img = findNamedById(set, id);
-		return img ? { url: namedUrl(characterId, img), alt: img.name } : null;
+		if (!img) return null;
+		return decorateScene({ url: namedUrl(characterId, img), alt: img.name }, id, characterId, set);
 	}
 	return null;
 }
@@ -252,7 +285,8 @@ export function resolveSceneLine(
 		const pos = POSITIONAL_LINE.exec(line);
 		if (pos) {
 			const entry = findEntryByCode(set, pos[1]);
-			return entry ? { url: entryUrl(characterId, entry), alt: entryAlt(set, entry) } : null;
+			if (!entry) return null;
+			return decorateScene({ url: entryUrl(characterId, entry), alt: entryAlt(set, entry) }, entry.id, characterId, set);
 		}
 	}
 
@@ -260,7 +294,8 @@ export function resolveSceneLine(
 		const img = IMG_LINE.exec(line);
 		if (img) {
 			const found = findNamedByName(set, img[1].trim());
-			return found ? { url: namedUrl(characterId, found), alt: found.name } : null;
+			if (!found) return null;
+			return decorateScene({ url: namedUrl(characterId, found), alt: found.name }, found.id, characterId, set);
 		}
 	}
 

@@ -57,6 +57,14 @@ export interface Character {
 }
 
 /**
+ * 장면 이미지 바이트의 저장 위치.
+ *  - 'r2'(또는 미지정): Cloudflare R2(charimg/<charId>/<id>.<ext>) — `/img` 로 서빙. 기본·기기간 공유.
+ *  - 'local': 브라우저 IndexedDB 에만 존재(charx import 직후). 가져온 그 기기에서만 보이며,
+ *             '기기간 공유'(promote)로 R2 에 올리면 'r2' 로 전환된다. 비공개 고정.
+ */
+export type ImageStorage = 'local' | 'r2';
+
+/**
  * 장면 이미지 — 축(열) 하나. label=축 이름(예: "표정"), values=구분값 라벨 목록.
  * values 의 순서가 곧 코드 글자(0→A, 1→B …). 축당 최대 26개.
  */
@@ -98,6 +106,8 @@ export interface GridImageSet {
 	kind: 'grid';
 	axes: ImageAxis[];
 	entries: ImageEntry[];
+	/** 바이트 저장 위치. 'local'이면 IndexedDB(기기 한정), 미지정/'r2'면 클라우드. */
+	storage?: ImageStorage;
 }
 
 /**
@@ -107,6 +117,8 @@ export interface GridImageSet {
 export interface NamedImageSet {
 	kind: 'named';
 	images: NamedImage[];
+	/** 바이트 저장 위치. 'local'이면 IndexedDB(기기 한정), 미지정/'r2'면 클라우드. */
+	storage?: ImageStorage;
 }
 
 /**

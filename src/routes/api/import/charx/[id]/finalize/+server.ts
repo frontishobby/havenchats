@@ -6,8 +6,9 @@ import type { NamedImage } from '$lib/types';
 
 /**
  * charx import — ③ 마무리.
- * 실제로 업로드에 성공한 이미지 목록만 받아 image_set(kind:'named') 으로 확정한다.
- * (업로드 실패분은 제외 → 깨진 참조 방지.) 소유자 본인만.
+ * 실제로 저장(로컬 IndexedDB)에 성공한 이미지 목록만 받아 image_set(kind:'named') 으로 확정한다.
+ * (실패분은 제외 → 깨진 참조 방지.) storage:'local' 이면 바이트가 브라우저에만 있다는 표시.
+ * 소유자 본인만.
  */
 export const POST: RequestHandler = async ({ params, request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
@@ -28,6 +29,8 @@ export const POST: RequestHandler = async ({ params, request, locals, platform }
 	}
 	const rawImages = (body as { images?: unknown })?.images;
 	const arr = Array.isArray(rawImages) ? rawImages : [];
+	// 바이트가 브라우저 IndexedDB 에만 있는 경우(charx import) storage:'local'.
+	const storage = (body as { storage?: unknown })?.storage === 'local' ? 'local' : undefined;
 
 	const images: NamedImage[] = [];
 	const seen = new Set<string>();
@@ -42,7 +45,11 @@ export const POST: RequestHandler = async ({ params, request, locals, platform }
 		if (images.length >= NAMED_LIMITS.MAX_IMAGES) break;
 	}
 
-	await updateImageSet(db, cid, images.length > 0 ? { kind: 'named', images } : null);
+	await updateImageSet(
+		db,
+		cid,
+		images.length > 0 ? { kind: 'named', images, ...(storage ? { storage } : {}) } : null
+	);
 
 	return json({ ok: true, count: images.length });
 };

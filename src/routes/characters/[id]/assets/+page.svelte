@@ -7,8 +7,11 @@
 		hasScenes,
 		isGrid,
 		isNamed,
+		isLocalSet,
+		localSceneKey,
 		namedUrl
 	} from '$lib/imageCodes';
+	import { localSceneURL } from '$lib/import/localImages';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import type { PageData } from './$types';
 
@@ -17,6 +20,8 @@
 	const character = $derived(data.character);
 	const set = $derived(character.imageSet);
 	const hasAssets = $derived(hasScenes(set));
+	// 로컬(IndexedDB) 세트면 R2 URL 대신 blob URL 로 렌더.
+	const local = $derived(isLocalSet(set));
 
 	function letter(i: number): string {
 		return String.fromCharCode(65 + i);
@@ -78,7 +83,13 @@
 			{#each set.images as img (img.id)}
 				<figure class="card">
 					<div class="img">
-						<img src={namedUrl(character.id, img)} alt={img.name} loading="lazy" />
+						{#if local}
+							{#await localSceneURL(localSceneKey(character.id, img.id)) then url}
+								{#if url}<img src={url} alt={img.name} loading="lazy" />{/if}
+							{/await}
+						{:else}
+							<img src={namedUrl(character.id, img)} alt={img.name} loading="lazy" />
+						{/if}
 					</div>
 					<figcaption>{img.name}</figcaption>
 				</figure>

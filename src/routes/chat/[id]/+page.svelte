@@ -5,6 +5,7 @@
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import { resolveSceneLine, looksLikeSceneToken } from '$lib/imageCodes';
+	import { localSceneURL } from '$lib/import/localImages';
 	import { personalize as fillPlaceholders } from '$lib/placeholders';
 	import type { ChatMessage } from '$lib/types';
 	import type { PageData } from './$types';
@@ -791,7 +792,17 @@
 				{@const scene = resolveSceneLine(line, character.id, character.imageSet)}
 				{#if scene}
 					<!-- 장면 이미지 토큰({AAB}/{#id}) → 이미지 블록 -->
-					<img class="scene-img" src={scene.url} alt={scene.alt} title={scene.alt} loading="lazy" />
+					{#if scene.localKey}
+						{@const lk = scene.localKey}
+						<!-- 로컬(IndexedDB) 이미지: blob URL 로 해석(이 기기에 없으면 숨김) -->
+						{#await localSceneURL(lk) then url}
+							{#if url}
+								<img class="scene-img" src={url} alt={scene.alt} title={scene.alt} loading="lazy" />
+							{/if}
+						{/await}
+					{:else}
+						<img class="scene-img" src={scene.url} alt={scene.alt} title={scene.alt} loading="lazy" />
+					{/if}
 				{:else if looksLikeSceneToken(line)}
 					<!-- 알 수 없거나 스트리밍 중 미완성 토큰 → 숨김(원문 노출 방지) -->
 				{:else}

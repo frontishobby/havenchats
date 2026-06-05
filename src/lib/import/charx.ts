@@ -8,6 +8,7 @@
 
 import { unzip, strFromU8, type Unzipped } from 'fflate';
 import { mapCardToCharacter, isV3Card, type MappedCard } from './cardToCharacter';
+import { putLocalScene, requestPersist } from './localImages';
 
 export interface ParsedCharx {
 	card: MappedCard;
@@ -59,7 +60,7 @@ function fileFrom(bytes: Uint8Array, name: string, ext: string): File {
 }
 
 export interface ImportProgress {
-	phase: 'creating' | 'uploading' | 'finalizing' | 'done';
+	phase: 'creating' | 'storing' | 'finalizing' | 'done';
 	uploaded: number;
 	total: number;
 }
@@ -72,13 +73,13 @@ export interface ImportResult {
 	warnings: string[];
 }
 
-// 배치 한도 — 본문/서브리퀘스트 안전선(수십 장, 누적 ~15MB).
-const BATCH_MAX_COUNT = 40;
-const BATCH_MAX_BYTES = 15 * 1024 * 1024;
-
 /**
- * 파싱 결과를 서버에 import 한다(생성→배치 업로드→finalize). onProgress 로 진행률 보고.
+ * 파싱 결과를 import 한다(생성 → 장면 이미지 로컬 저장 → finalize). onProgress 로 진행률 보고.
  * contentRating/audience 는 UI 선택값을 override 로 받는다.
+ *
+ * 장면 이미지는 **R2 에 올리지 않고 브라우저 IndexedDB 에 저장**한다(charx 는 비공개·기기 한정).
+ * 서버엔 메타(id·name·ext)만 storage:'local' 로 기록. → import 가 빠르고 R2 중복이 없다.
+ * 이후 '기기간 공유'(promote)를 누르면 그때 R2 로 올려 일반 캐릭터처럼 전환한다(lib/import/promote.ts).
  */
 export async function runImport(
 	parsed: ParsedCharx,
@@ -129,60 +130,44 @@ export async function runImport(
 	// name → srcPath 매핑(바이트 조회용).
 	const pathByName = new Map(present.map((i) => [i.name, i.srcPath]));
 
-	// ② 배치 업로드.
-	const uploadedOk: { id: string; name: string; ext: string }[] = [];
+	// ② 장면 이미지를 로컬(IndexedDB)에 저장 — 네트워크 없음. 키 = `<cid>/<id>`.
+	await requestPersist(); // 용량 압박 시 비워지지 않도록(best-effort).
+	const storedOk: { id: string; name: string; ext: string }[] = [];
 	let failed = 0;
 	let done = 0;
 
-	let batch: typeof assigned = [];
-	let batchBytes = 0;
-
-	const flush = async () => {
-		if (batch.length === 0) return;
-		const form = new FormData();
-		for (const img of batch) {
-			const srcPath = pathByName.get(img.name);
-			const bytes = srcPath ? getFile(files, srcPath) : null;
-			if (!bytes) {
-				failed++;
-				continue;
-			}
-			form.set(`img:${img.id}.${img.ext}`, fileFrom(bytes, `${img.id}.${img.ext}`, img.ext));
-		}
-		const res = await fetch(`/api/import/charx/${cid}/assets`, { method: 'POST', body: form });
-		const out = (await res.json().catch(() => ({}))) as { uploaded?: string[]; failed?: string[] };
-		const okIds = new Set(out.uploaded ?? []);
-		for (const img of batch) {
-			if (okIds.has(img.id)) uploadedOk.push(img);
-			else failed++;
-		}
-		done += batch.length;
-		onProgress?.({ phase: 'uploading', uploaded: done, total });
-		batch = [];
-		batchBytes = 0;
-	};
-
 	for (const img of assigned) {
 		const srcPath = pathByName.get(img.name);
-		const sz = srcPath ? getFile(files, srcPath)?.byteLength ?? 0 : 0;
-		if (batch.length >= BATCH_MAX_COUNT || batchBytes + sz > BATCH_MAX_BYTES) await flush();
-		batch.push(img);
-		batchBytes += sz;
+		const bytes = srcPath ? getFile(files, srcPath) : null;
+		if (bytes) {
+			try {
+				const blob = new Blob([bytes as BlobPart], {
+					type: MIME[img.ext] ?? 'application/octet-stream'
+				});
+				await putLocalScene(cid, img.id, blob);
+				storedOk.push(img);
+			} catch {
+				failed++;
+			}
+		} else {
+			failed++;
+		}
+		done++;
+		onProgress?.({ phase: 'storing', uploaded: done, total });
 	}
-	await flush();
 
-	// ③ finalize.
+	// ③ finalize — storage:'local' 로 image_set 확정(메타만 서버에 기록).
 	onProgress?.({ phase: 'finalizing', uploaded: done, total });
 	await fetch(`/api/import/charx/${cid}/finalize`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ images: uploadedOk })
+		body: JSON.stringify({ images: storedOk, storage: 'local' })
 	});
 
-	onProgress?.({ phase: 'done', uploaded: uploadedOk.length, total });
+	onProgress?.({ phase: 'done', uploaded: storedOk.length, total });
 	return {
 		id: cid,
-		uploadedImages: uploadedOk.length,
+		uploadedImages: storedOk.length,
 		totalImages: total,
 		failed,
 		warnings: card.warnings
