@@ -8,6 +8,8 @@
 
 import { unzip, strFromU8, type Unzipped } from 'fflate';
 import { mapCardToCharacter, isV3Card, type MappedCard } from './cardToCharacter';
+import { readModuleMeta } from './risum';
+import { scanUnsupported } from './capabilities';
 import { putLocalScene, requestPersist } from './localImages';
 
 export interface ParsedCharx {
@@ -43,6 +45,15 @@ export async function parseCharx(file: File): Promise<ParsedCharx> {
 	if (!isV3Card(cardJson)) throw new Error('지원하지 않는 카드 형식이에요 (Character Card V3 아님).');
 
 	const card = mapCardToCharacter(cardJson);
+
+	// module.risum(있으면) + extensions 스캔 → 재현 안 되는 동적 기능(트리거/정규식/CJS/모듈로어북)
+	// 을 경고로 노출한다. charx 는 트리거/정규식을 risum 으로 옮기므로 디코드가 필수.
+	const moduleKey = Object.keys(files).find(
+		(k) => k === 'module.risum' || k.endsWith('/module.risum')
+	);
+	const moduleMeta = moduleKey ? readModuleMeta(files[moduleKey]) : null;
+	card.warnings.push(...scanUnsupported(cardJson, moduleMeta));
+
 	return { card, files };
 }
 
