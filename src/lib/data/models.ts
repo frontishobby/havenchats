@@ -18,7 +18,9 @@ export const MODELS: ModelOption[] = [
 	{ id: 'alibaba/qwen3.7-plus', label: 'Qwen 3.7 Plus', icon: '/models/qwen.avif', contextLimit: 1_000_000 },
 	{ id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true },
 	{ id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true },
-	{ id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', icon: '/models/claude.avif', contextLimit: 1_000_000 }
+	{ id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', icon: '/models/claude.avif', contextLimit: 1_000_000 },
+	{ id: 'openai/gpt-5.5', label: 'GPT-5.5', icon: '/models/openai.avif', contextLimit: 1_000_000, reasoning: true },
+	{ id: 'xai/grok-4.3', label: 'Grok 4.3', icon: '/models/xai.avif', contextLimit: 1_000_000, reasoning: true }
 ];
 
 export const DEFAULT_MODEL_ID = MODELS[0].id;

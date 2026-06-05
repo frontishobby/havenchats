@@ -47,6 +47,14 @@ const REASONING_HEADROOM = 8000;
  */
 const GOOGLE_THINKING_BUDGET = 1024;
 /**
+ * OpenAI/xAI/DeepSeek 추론 모델의 추론 강도. 소설모드 RP/산문엔 깊은 추론이 득보다 비용·
+ * 지연·지시이탈을 키우므로 최소로 둔다(완전 차단 X — Google 의 thinkingBudget 와 같은 취지).
+ * OpenAI(GPT-5 계열)는 'minimal' 지원, xAI(Grok)·DeepSeek 는 'low' 를 쓴다.
+ */
+const OPENAI_REASONING_EFFORT = 'minimal';
+const XAI_REASONING_EFFORT = 'low';
+const DEEPSEEK_REASONING_EFFORT = 'low';
+/**
  * 한 번에 보낼 수 있는 유저 메시지의 토큰 상한.
  * trimWindowToBudget 는 최신 메시지를 항상 보존하므로, 거대한 단일 메시지는
  * 누적 가드를 우회한다. 여기서 입력 단계에서 직접 막아 한 턴 비용 폭주를 방지한다.
@@ -518,6 +526,12 @@ function buildProviderOptions(modelId: string): ProviderOptions {
 		opts.google = {
 			thinkingConfig: { thinkingBudget: GOOGLE_THINKING_BUDGET, includeThoughts: false }
 		};
+	} else if (modelId.startsWith('openai/')) {
+		opts.openai = { reasoningEffort: OPENAI_REASONING_EFFORT };
+	} else if (modelId.startsWith('xai/')) {
+		opts.xai = { reasoningEffort: XAI_REASONING_EFFORT };
+	} else if (modelId.startsWith('deepseek/')) {
+		opts.deepseek = { reasoningEffort: DEEPSEEK_REASONING_EFFORT };
 	}
 	return opts;
 }
