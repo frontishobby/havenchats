@@ -222,8 +222,9 @@
 		if (savedActs !== null) userActs = Math.min(2, Math.max(0, Number(savedActs)));
 		// 터치 기반(소프트 키보드) 기기 감지 → Enter 는 개행으로
 		isTouch = window.matchMedia('(pointer: coarse)').matches;
-		// 새로고침/직접 진입(컴포넌트 미재사용) 시에도 최신 메시지로 스크롤.
-		if (messages.length > 0) tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
+		// 이어가는 세션은 최신 메시지(맨 아래)로, 새 채팅(오프닝만)은 맨 위로.
+		if (messages.length > 0)
+			tick().then(() => scroller?.scrollTo({ top: data.sessionId ? scroller.scrollHeight : 0 }));
 		checkLocalImages();
 	});
 	$effect(() => {
@@ -266,8 +267,9 @@
 		memoryDraft = '';
 		summary = null;
 		summaryDraft = '';
-		// 이어가는 세션은 맨 아래(최신 메시지)로 즉시 이동
-		if (messages.length > 0) tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
+		// 이어가는 세션은 맨 아래(최신 메시지)로, 새 채팅(오프닝만)은 맨 위로 즉시 이동
+		if (messages.length > 0)
+			tick().then(() => scroller?.scrollTo({ top: data.sessionId ? scroller.scrollHeight : 0 }));
 		// 다른 캐릭터로 이동했을 수 있으니 로컬 이미지 보유 여부 재확인.
 		checkLocalImages();
 	});
