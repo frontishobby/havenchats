@@ -1,6 +1,7 @@
 import type {
 	Audience,
 	CharacterLorebook,
+	CharacterScriptData,
 	ContentRating,
 	ImageAxis,
 	Opening,
@@ -27,6 +28,10 @@ const TAGS_MAX = 5;
 const GREETING_MAX = 4000;
 const GREETING_NAME_MAX = 30;
 const GREETINGS_MAX = 5;
+// 스크립트 기본 변수(import 캐릭터): 관리자 편집 전용. 폭주 방지용 상한.
+const SCRIPT_VARS_MAX = 100;
+const SCRIPT_VAR_KEY_MAX = 80;
+const SCRIPT_VAR_VALUE_MAX = 4000;
 
 export interface ParsedCharacterForm {
 	name: string;
@@ -40,6 +45,8 @@ export interface ParsedCharacterForm {
 	greetings: Opening[];
 	/** 로어북(키워드 동적 설정). 없으면 null. */
 	lorebook: CharacterLorebook | null;
+	/** 스크립트 기본 변수(import 캐릭터의 defaultVariables). 폼에 없거나 비면 null. */
+	scriptData: CharacterScriptData | null;
 	/** 업로드된 이미지(있으면). 없으면 null. */
 	image: File | null;
 }
@@ -86,6 +93,10 @@ export function parseCharacterForm(form: FormData): ParseResult {
 	} catch {
 		// 무시 — null 유지
 	}
+
+	// 스크립트 기본 변수(선택, 관리자 import 편집 전용): {defaultVariables:{key:value}}.
+	// 필드가 아예 없으면 null(=호출부에서 기존 값 보존), 있으면 키 정규화·clamp 후 반영.
+	const scriptData = parseScriptDataField(form.get('scriptData'));
 
 	// ── 검증 ──
 	if (!name) return { ok: false, error: '제목을 입력해 주세요.' };
@@ -139,8 +150,35 @@ export function parseCharacterForm(form: FormData): ParseResult {
 
 	return {
 		ok: true,
-		data: { name, tagline, intro, description, audience, contentRating, visibility, tags: tagsClean, greetings, lorebook, image }
+		data: { name, tagline, intro, description, audience, contentRating, visibility, tags: tagsClean, greetings, lorebook, scriptData, image }
 	};
+}
+
+/** scriptData 폼 필드(JSON) → 기본 변수 맵. 손상/빈값이면 null. 키는 소문자, 길이·개수 clamp. */
+function parseScriptDataField(raw: FormDataEntryValue | null): CharacterScriptData | null {
+	if (typeof raw !== 'string' || raw.trim() === '') return null;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	const dv = (parsed as { defaultVariables?: unknown } | null)?.defaultVariables;
+	if (!dv || typeof dv !== 'object' || Array.isArray(dv)) return null;
+	const out: Record<string, string> = {};
+	for (const [k, v] of Object.entries(dv as Record<string, unknown>)) {
+		const key = k.trim().toLowerCase().slice(0, SCRIPT_VAR_KEY_MAX);
+		if (!key) continue;
+		const val =
+			typeof v === 'string'
+				? v
+				: typeof v === 'number' || typeof v === 'boolean'
+					? String(v)
+					: '';
+		out[key] = val.slice(0, SCRIPT_VAR_VALUE_MAX);
+		if (Object.keys(out).length >= SCRIPT_VARS_MAX) break;
+	}
+	return Object.keys(out).length > 0 ? { defaultVariables: out } : null;
 }
 
 // ─────────────────────────────────────────────────────────────

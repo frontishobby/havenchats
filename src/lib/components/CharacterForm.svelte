@@ -41,6 +41,8 @@
 		imageSet?: CharacterImageSet | null;
 		/** 기존 로어북(수정 시). */
 		lorebook?: CharacterLorebook | null;
+		/** 기존 스크립트 기본 변수(관리자 import 편집 시). */
+		defaultVariables?: Record<string, string> | null;
 	}
 
 	let {
@@ -48,7 +50,8 @@
 		characterId,
 		initial,
 		returnTo = '/',
-		returnLabel = '탐색으로'
+		returnLabel = '탐색으로',
+		allowScriptVars = false
 	}: {
 		mode: 'create' | 'edit';
 		characterId?: string;
@@ -57,6 +60,8 @@
 		returnTo?: string;
 		/** 뒤로 가기 링크 라벨. */
 		returnLabel?: string;
+		/** 스크립트 기본 변수 편집 노출 여부(관리자 import 편집 전용). */
+		allowScriptVars?: boolean;
 	} = $props();
 
 	const NAME_MAX = 15;
@@ -153,6 +158,20 @@
 	function applyLore(entries: LoreEntry[]) {
 		loreEntries = entries;
 		loreOpen = false;
+	}
+
+	// ── 스크립트 기본 변수 (관리자 import 편집 전용) ──
+	// import 캐릭터의 defaultVariables 를 키=값 행으로 노출/편집. 세션 시작 시 변수 시딩에 쓰인다.
+	let scriptVars = $state<{ key: string; value: string }[]>(
+		initial?.defaultVariables
+			? Object.entries(initial.defaultVariables).map(([key, value]) => ({ key, value }))
+			: []
+	);
+	function addScriptVar() {
+		scriptVars = [...scriptVars, { key: '', value: '' }];
+	}
+	function removeScriptVar(i: number) {
+		scriptVars = scriptVars.filter((_, idx) => idx !== i);
 	}
 
 	// 방식 전환. 떠나는 쪽에 등록된 이미지가 있으면 경고 — 저장 시엔 활성 방식 하나만
@@ -303,6 +322,17 @@
 
 			// 로어북(키워드 동적 설정) 전달.
 			fd.set('lorebook', JSON.stringify(loreEntries));
+
+			// 스크립트 기본 변수(관리자 import 편집 전용). 필드 존재 자체가 "변수 갱신" 신호 —
+			// 빈 객체여도 전송해 모두 삭제를 반영할 수 있게 한다.
+			if (allowScriptVars) {
+				const dv: Record<string, string> = {};
+				for (const { key, value } of scriptVars) {
+					const k = key.trim().toLowerCase();
+					if (k) dv[k] = value;
+				}
+				fd.set('scriptData', JSON.stringify({ defaultVariables: dv }));
+			}
 
 			// 장면 이미지 방식(grid|named) 전달.
 			fd.set('imageMode', imageMode);
@@ -493,6 +523,44 @@
 			항상 반영할 항목은 “항상 켜기”로 둘 수 있어요.
 		</p>
 	</div>
+
+	<!-- 스크립트 기본 변수 (관리자 import 편집 전용) -->
+	{#if allowScriptVars}
+		<div class="field">
+			<div class="label-row">
+				<span class="field-label">스크립트 변수 <span class="opt">(가져온 캐릭터)</span></span>
+				<span class="count">{scriptVars.length}개</span>
+			</div>
+			<p class="field-hint top">
+				가져온 캐릭터의 기본 변수예요. 새 대화를 시작할 때 변수 초기값으로 시딩돼요. 키는 소문자로 저장돼요.
+			</p>
+			<div class="scriptvars">
+				{#each scriptVars as _, i (i)}
+					<div class="scriptvar-row">
+						<input
+							class="sv-key"
+							type="text"
+							placeholder="변수명"
+							bind:value={scriptVars[i].key}
+						/>
+						<input
+							class="sv-val"
+							type="text"
+							placeholder="기본값"
+							bind:value={scriptVars[i].value}
+						/>
+						<button
+							type="button"
+							class="sv-del"
+							onclick={() => removeScriptVar(i)}
+							aria-label="변수 삭제">✕</button
+						>
+					</div>
+				{/each}
+			</div>
+			<button type="button" class="add-greeting" onclick={addScriptVar}>+ 변수 추가</button>
+		</div>
+	{/if}
 
 	<!-- 제목 -->
 	<div class="field">
@@ -999,6 +1067,42 @@
 	.add-greeting:hover {
 		border-color: var(--accent);
 		color: var(--text);
+	}
+
+	/* 스크립트 변수 */
+	.scriptvars {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.scriptvar-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.sv-key {
+		flex: 0 0 36%;
+		min-width: 0;
+	}
+	.sv-val {
+		flex: 1;
+		min-width: 0;
+	}
+	.sv-del {
+		flex-shrink: 0;
+		border: none;
+		background: transparent;
+		color: var(--text-faint);
+		font-size: 0.72rem;
+		width: 28px;
+		height: 28px;
+		display: grid;
+		place-items: center;
+		border-radius: 50%;
+	}
+	.sv-del:hover {
+		background: var(--bg-elev);
+		color: var(--nsfw);
 	}
 
 	/* 드롭존 */

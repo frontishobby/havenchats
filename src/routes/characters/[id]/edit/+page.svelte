@@ -15,6 +15,7 @@
 	characterId={c.id}
 	returnTo={`/user/${data.ownerId}`}
 	returnLabel="내 캐릭터"
+	allowScriptVars={data.allowScriptVars}
 	initial={{
 		name: c.name,
 		tagline: c.tagline,
@@ -27,6 +28,7 @@
 		greetings: c.greetings,
 		avatarUrl: c.avatarUrl,
 		imageSet: c.imageSet,
-		lorebook: c.lorebook
+		lorebook: c.lorebook,
+		defaultVariables: data.defaultVariables
 	}}
 />

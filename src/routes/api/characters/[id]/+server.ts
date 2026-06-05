@@ -2,11 +2,13 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import {
 	deleteCharacter,
 	getCharacterById,
+	getCharacterDefaultVars,
 	getCharacterOwnership,
 	updateCharacter
 } from '$lib/server/db/characters';
 import { ALLOWED_IMAGE, parseCharacterForm } from '$lib/server/characterForm';
 import { commitSceneImages, deleteAllSceneImages, deleteKeys } from '$lib/server/imageStore';
+import { isAdmin } from '$lib/server/auth';
 
 /** 유저 캐릭터 id 는 uuid. 그 외 형식은 편집 대상이 아님. */
 function isUserCharacterId(id: string): boolean {
@@ -39,10 +41,13 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 
 	// 기존 캐릭터(장면 세트 diff + charx import 여부 확인).
 	const existing = await getCharacterById(db, id);
-	// charx import 캐릭터는 수정 불가(프롬프트 숨김·영구 비공개).
-	if (existing?.imported) {
+	// charx import 캐릭터는 수정 불가(프롬프트 숨김·영구 비공개). 단, 관리자는 프롬프트 편집 허용.
+	if (existing?.imported && !isAdmin(locals.user.email)) {
 		return json({ error: '가져온 캐릭터는 수정할 수 없어요.' }, { status: 403 });
 	}
+
+	// imported 캐릭터의 기본 변수(scriptData)는 폼에서 다루지 않으므로 관리자 편집 시 기존 값을 보존.
+	const existingVars = existing?.imported ? await getCharacterDefaultVars(db, id) : null;
 
 	const form = await request.formData();
 	const parsed = parseCharacterForm(form);
@@ -84,7 +89,13 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 			greetings: c.greetings,
 			imageSet,
 			lorebook: c.lorebook,
-			scriptData: null,
+			// 폼이 scriptData 를 실어 보냈으면(관리자 import 편집) 그 값을 쓰고,
+			// 아니면 기존 기본 변수를 보존(폼에서 다루지 않는 일반 수정).
+			scriptData: form.has('scriptData')
+				? c.scriptData
+				: existingVars
+					? { defaultVariables: existingVars }
+					: null,
 			thumbnailKey: newKey
 		});
 	} catch (e) {

@@ -129,6 +129,10 @@
 				</button>
 				{#if c.imported}
 					<!-- 가져온(charx) 캐릭터: 수정 불가. 로컬이면 '기기간 공유'로 클라우드 전환만 가능. -->
+					<!-- 단, 관리자는 가져온 캐릭터의 프롬프트도 편집할 수 있다. -->
+					{#if data.isAdmin}
+						<button class="edit" type="button" onclick={() => edit(c)}>수정</button>
+					{/if}
 					{#if isLocal(c)}
 						<button
 							class="edit promote"

@@ -29,6 +29,14 @@ export function isEmailAllowed(email: string): boolean {
 	return list.includes(email.trim().toLowerCase());
 }
 
+/** 관리자 이메일. import 캐릭터 프롬프트 편집 등 일부 제한을 우회한다. */
+export const ADMIN_EMAIL = 'owner@example.com';
+
+/** 관리자 여부. (대소문자·공백 무시) */
+export function isAdmin(email: string | null | undefined): boolean {
+	return !!email && email.trim().toLowerCase() === ADMIN_EMAIL;
+}
+
 /** 요청 origin 기준으로 Google OAuth 클라이언트 생성. (GOOGLE_REDIRECT_URI 로 override 가능) */
 export function createGoogle(origin: string): Google {
 	const redirectURI = env.GOOGLE_REDIRECT_URI || `${origin}/auth/google/callback`;
