@@ -30,11 +30,30 @@
 	function back() {
 		history.length > 1 ? history.back() : goto('/');
 	}
+
+	// 확대 보기(라이트박스) — 클릭한 이미지의 src·alt 를 담는다.
+	let zoom = $state<{ src: string; alt: string } | null>(null);
+
+	function openZoom(src: string, alt: string) {
+		zoom = { src, alt };
+	}
+
+	// 로컬(IndexedDB) 이미지는 blob URL 을 먼저 풀어서 연다.
+	async function openLocalZoom(key: string, alt: string) {
+		const url = await localSceneURL(key);
+		if (url) zoom = { src: url, alt };
+	}
+
+	function onKey(e: KeyboardEvent) {
+		if (e.key === 'Escape') zoom = null;
+	}
 </script>
 
 <svelte:head>
 	<title>{character.name} · 에셋</title>
 </svelte:head>
+
+<svelte:window onkeydown={onKey} />
 
 <div class="page">
 	<button class="back" onclick={back}>← 돌아가기</button>
@@ -67,10 +86,15 @@
 		<section class="grid">
 			{#each set.entries as entry (entry.id)}
 				<figure class="card">
-					<div class="img">
+					<button
+						class="img"
+						type="button"
+						onclick={() => openZoom(entryUrl(character.id, entry), entryAlt(set, entry))}
+						aria-label={`${entryAlt(set, entry)} 확대 보기`}
+					>
 						<img src={entryUrl(character.id, entry)} alt={entryAlt(set, entry)} loading="lazy" />
 						<span class="code">{comboToCode(entry.combo)}</span>
-					</div>
+					</button>
 					<figcaption>{entryAlt(set, entry)}</figcaption>
 				</figure>
 			{/each}
@@ -82,15 +106,27 @@
 		<section class="grid">
 			{#each set.images as img (img.id)}
 				<figure class="card">
-					<div class="img">
-						{#if local}
+					{#if local}
+						<button
+							class="img"
+							type="button"
+							onclick={() => openLocalZoom(localSceneKey(character.id, img.id), img.name)}
+							aria-label={`${img.name} 확대 보기`}
+						>
 							{#await localSceneURL(localSceneKey(character.id, img.id)) then url}
 								{#if url}<img src={url} alt={img.name} loading="lazy" />{/if}
 							{/await}
-						{:else}
+						</button>
+					{:else}
+						<button
+							class="img"
+							type="button"
+							onclick={() => openZoom(namedUrl(character.id, img), img.name)}
+							aria-label={`${img.name} 확대 보기`}
+						>
 							<img src={namedUrl(character.id, img)} alt={img.name} loading="lazy" />
-						{/if}
-					</div>
+						</button>
+					{/if}
 					<figcaption>{img.name}</figcaption>
 				</figure>
 			{/each}
@@ -99,6 +135,16 @@
 		<p class="count">{set.images.length}장</p>
 	{/if}
 </div>
+
+{#if zoom}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div class="lightbox" onclick={() => (zoom = null)} role="presentation">
+		<button class="lb-close" onclick={() => (zoom = null)} aria-label="닫기">✕</button>
+		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+		<img class="lb-img" src={zoom.src} alt={zoom.alt} onclick={(e) => e.stopPropagation()} />
+		{#if zoom.alt}<span class="lb-caption">{zoom.alt}</span>{/if}
+	</div>
+{/if}
 
 <style>
 	.page {
@@ -207,14 +253,23 @@
 	}
 	.img {
 		position: relative;
+		display: block;
+		width: 100%;
 		aspect-ratio: 1;
+		padding: 0;
+		border: none;
 		background: var(--bg-elev);
+		cursor: zoom-in;
 	}
 	.img img {
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
 		display: block;
+		transition: opacity 0.15s ease;
+	}
+	.img:hover img {
+		opacity: 0.85;
 	}
 	.code {
 		position: absolute;
@@ -239,5 +294,61 @@
 		font-size: 0.78rem;
 		color: var(--text-faint);
 		text-align: right;
+	}
+
+	/* 확대 보기(라이트박스) */
+	.lightbox {
+		position: fixed;
+		inset: 0;
+		z-index: 200;
+		display: grid;
+		place-items: center;
+		padding: 32px;
+		background: rgba(0, 0, 0, 0.82);
+		backdrop-filter: blur(4px);
+		cursor: zoom-out;
+	}
+	.lb-img {
+		max-width: 100%;
+		max-height: calc(100vh - 64px);
+		object-fit: contain;
+		border-radius: var(--radius-sm);
+		box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+		cursor: default;
+	}
+	.lb-close {
+		position: fixed;
+		top: 16px;
+		right: 16px;
+		width: 40px;
+		height: 40px;
+		display: grid;
+		place-items: center;
+		border: none;
+		border-radius: 50%;
+		background: rgba(255, 255, 255, 0.12);
+		color: #fff;
+		font-size: 1.1rem;
+		cursor: pointer;
+		transition: background 0.15s ease;
+	}
+	.lb-close:hover {
+		background: rgba(255, 255, 255, 0.24);
+	}
+	.lb-caption {
+		position: fixed;
+		bottom: 20px;
+		left: 50%;
+		transform: translateX(-50%);
+		max-width: 90vw;
+		padding: 6px 14px;
+		border-radius: 999px;
+		background: rgba(0, 0, 0, 0.55);
+		color: #fff;
+		font-size: 0.82rem;
+		text-align: center;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 </style>
