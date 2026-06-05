@@ -991,6 +991,10 @@
 	.modal {
 		width: 100%;
 		max-width: 380px;
+		max-height: calc(100dvh - 40px);
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		-webkit-overflow-scrolling: touch;
 		background: var(--bg-card);
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
