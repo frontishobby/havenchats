@@ -83,6 +83,10 @@
 	}
 
 	const initial = $derived((data.profile.name ?? '?').charAt(0).toUpperCase());
+
+	// 소유자 관리 화면: 직접 만든 캐릭터와 가져온(charx) 캐릭터를 섹션으로 분리.
+	const createdItems = $derived(items.filter((c) => !c.imported));
+	const importedItems = $derived(items.filter((c) => c.imported));
 </script>
 
 <svelte:head>
@@ -109,6 +113,52 @@
 	{#if data.isOwner}
 		<a class="create-btn" href="/create">+ 캐릭터 만들기</a>
 
+		{#snippet ownerRow(c: Character)}
+			<li class="row">
+				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+				<button class="row-main" type="button" onclick={() => (detail = c)}>
+					<img class="thumb" src={c.avatarUrl} alt={c.name} />
+					<span class="info">
+						<span class="name-line">
+							<span class="name">{c.name}</span>
+							{#if c.contentRating === 'nsfw'}<NsfwBadge size={15} />{/if}
+						</span>
+						<span class="tagline">{c.tagline}</span>
+						<span class="meta">💬 {c.chats}</span>
+					</span>
+				</button>
+				{#if c.imported}
+					<!-- 가져온(charx) 캐릭터: 수정 불가. 로컬이면 '기기간 공유'로 클라우드 전환만 가능. -->
+					{#if isLocal(c)}
+						<button
+							class="edit promote"
+							type="button"
+							onclick={() => promote(c)}
+							disabled={!!promoting}
+							title="클라우드에 올려 다른 기기에서도 보기"
+						>
+							{#if promoting === c.id}
+								{promoteProg ? `${promoteProg.uploaded}/${promoteProg.total}` : '올리는 중…'}
+							{:else}
+								⬆ 기기간 공유
+							{/if}
+						</button>
+					{/if}
+				{:else}
+					<button class="edit" type="button" onclick={() => edit(c)}>수정</button>
+				{/if}
+				<button
+					class="del"
+					type="button"
+					onclick={() => remove(c)}
+					disabled={deleting === c.id}
+					aria-label="캐릭터 삭제"
+				>
+					{deleting === c.id ? '…' : '×'}
+				</button>
+			</li>
+		{/snippet}
+
 		{#if items.length === 0}
 			<div class="empty">
 				<span class="empty-icon">✦</span>
@@ -116,53 +166,24 @@
 				<span class="empty-sub">위 버튼으로 첫 캐릭터를 만들어보세요.</span>
 			</div>
 		{:else}
-			<ul class="list">
-				{#each items as c (c.id)}
-					<li class="row">
-						<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-						<button class="row-main" type="button" onclick={() => (detail = c)}>
-							<img class="thumb" src={c.avatarUrl} alt={c.name} />
-							<span class="info">
-								<span class="name-line">
-									<span class="name">{c.name}</span>
-									{#if c.contentRating === 'nsfw'}<NsfwBadge size={15} />{/if}
-								</span>
-								<span class="tagline">{c.tagline}</span>
-								<span class="meta">💬 {c.chats}</span>
-							</span>
-						</button>
-						{#if c.imported}
-							<!-- 가져온(charx) 캐릭터: 수정 불가. 로컬이면 '기기간 공유'로 클라우드 전환만 가능. -->
-							{#if isLocal(c)}
-								<button
-									class="edit promote"
-									type="button"
-									onclick={() => promote(c)}
-									disabled={!!promoting}
-									title="클라우드에 올려 다른 기기에서도 보기"
-								>
-									{#if promoting === c.id}
-										{promoteProg ? `${promoteProg.uploaded}/${promoteProg.total}` : '올리는 중…'}
-									{:else}
-										⬆ 기기간 공유
-									{/if}
-								</button>
-							{/if}
-						{:else}
-							<button class="edit" type="button" onclick={() => edit(c)}>수정</button>
-						{/if}
-						<button
-							class="del"
-							type="button"
-							onclick={() => remove(c)}
-							disabled={deleting === c.id}
-							aria-label="캐릭터 삭제"
-						>
-							{deleting === c.id ? '…' : '×'}
-						</button>
-					</li>
-				{/each}
-			</ul>
+			{#if createdItems.length > 0}
+				<h2 class="section-label">내가 만든 캐릭터 {createdItems.length}</h2>
+				<ul class="list">
+					{#each createdItems as c (c.id)}
+						{@render ownerRow(c)}
+					{/each}
+				</ul>
+			{/if}
+			{#if importedItems.length > 0}
+				<h2 class="section-label" class:has-divider={createdItems.length > 0}>
+					가져온 캐릭터 {importedItems.length}
+				</h2>
+				<ul class="list">
+					{#each importedItems as c (c.id)}
+						{@render ownerRow(c)}
+					{/each}
+				</ul>
+			{/if}
 		{/if}
 	{:else if items.length === 0}
 		<div class="empty">
@@ -281,6 +302,22 @@
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
 		gap: 18px;
+	}
+
+	/* 소유자: 섹션 제목(만든 캐릭터 / 가져온 캐릭터 구분) */
+	.section-label {
+		margin: 0 0 12px;
+		font-size: 0.82rem;
+		font-weight: 700;
+		letter-spacing: 0.01em;
+		color: var(--text-dim);
+		text-transform: none;
+	}
+	/* 두 섹션 사이 구분선 — 가져온 캐릭터 섹션이 만든 캐릭터 아래에 올 때만. */
+	.section-label.has-divider {
+		margin-top: 28px;
+		padding-top: 24px;
+		border-top: 1px solid var(--border);
 	}
 
 	/* 소유자: 관리 리스트 */
