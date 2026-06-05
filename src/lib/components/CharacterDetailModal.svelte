@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import NsfwBadge from './NsfwBadge.svelte';
-	import { hasScenes } from '$lib/imageCodes';
+	import { hasScenes, looksLikeSceneToken } from '$lib/imageCodes';
 	import type { Character } from '$lib/types';
 
 	let { character, onclose }: { character: Character | null; onclose: () => void } = $props();
@@ -54,6 +54,24 @@
 		starting = true;
 		const multi = character.greetings.length > 1;
 		goto(`/chat/${character.id}${multi ? `?o=${selected}` : ''}`);
+	}
+
+	/**
+	 * 오프닝 본문 → 미리보기용 짧은 문구. 장면 이미지 토큰 줄을 걸러내고,
+	 * `발화자 | "대사"` 표기의 `|`·강조 마크(* _)·{{나}} 를 정리해 첫 부분만 보여준다.
+	 */
+	const PREVIEW_MAX = 160;
+	function previewOf(content: string): string {
+		const cleaned = content
+			.split('\n')
+			.filter((l) => !looksLikeSceneToken(l.trim()))
+			.join(' ')
+			.replace(/\{\{\s*나\s*\}\}/g, '나')
+			.replace(/\s*\|\s*/g, ' ') // 발화자 구분자 제거
+			.replace(/[*_~`]/g, '') // 강조/기울임 마크 제거
+			.replace(/\s+/g, ' ')
+			.trim();
+		return cleaned.length > PREVIEW_MAX ? cleaned.slice(0, PREVIEW_MAX).trimEnd() + '…' : cleaned;
 	}
 
 	// 등록된 장면 이미지(에셋)가 있을 때만 미리보기 버튼 노출.
@@ -151,6 +169,9 @@
 							</ul>
 						{/if}
 					</div>
+					{#if previewOf(sel.content)}
+						<p class="opening-preview">{previewOf(sel.content)}</p>
+					{/if}
 				</div>
 			{/if}
 
@@ -330,6 +351,18 @@
 		font-weight: 700;
 		color: var(--text);
 		margin-bottom: 10px;
+	}
+	/* 선택한 첫 상황의 도입부 미리보기(2줄까지). */
+	.opening-preview {
+		margin: 10px 2px 0;
+		font-size: 0.82rem;
+		line-height: 1.5;
+		color: var(--text-faint);
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
 	}
 	/* 상황 이름 드롭다운 — 스크롤 영역(.body) 밖이라 펼쳐도 내부 스크롤 안 생김 */
 	.pick {
