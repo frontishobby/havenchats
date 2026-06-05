@@ -6,6 +6,7 @@
 	import { isLocalSet } from '$lib/imageCodes';
 	import { promoteLocalCharacter, type PromoteProgress } from '$lib/import/promote';
 	import { deleteLocalScenes } from '$lib/import/localImages';
+	import { addAssetsFromZip, type AddAssetsProgress } from '$lib/import/addAssets';
 	import type { Character } from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -19,6 +20,12 @@
 	// 기기간 공유(promote) 진행 상태.
 	let promoting = $state<string | null>(null);
 	let promoteProg = $state<PromoteProgress | null>(null);
+
+	// 에셋 추가(.zip) 진행 상태. assetTarget = 클릭한 캐릭터(공용 input 으로 처리).
+	let addingAssets = $state<string | null>(null);
+	let assetProg = $state<AddAssetsProgress | null>(null);
+	let assetInput = $state<HTMLInputElement | null>(null);
+	let assetTarget = $state<Character | null>(null);
 
 	// charx(로컬·기기 한정) 캐릭터 — 수정 불가, '기기간 공유'로만 클라우드 전환.
 	function isLocal(c: Character): boolean {
@@ -82,6 +89,39 @@
 		}
 	}
 
+	// 가져온 캐릭터에 장면 이미지(.zip)를 추가. 공용 파일 input 을 캐릭터별로 트리거.
+	function pickAssets(c: Character) {
+		if (addingAssets) return;
+		assetTarget = c;
+		if (assetInput) {
+			assetInput.value = ''; // 같은 파일 재선택 허용
+			assetInput.click();
+		}
+	}
+
+	async function onAssetPick(e: Event) {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		const c = assetTarget;
+		if (!file || !c) return;
+		addingAssets = c.id;
+		assetProg = null;
+		try {
+			const res = await addAssetsFromZip(c.id, c.imageSet, file, (p) => (assetProg = p));
+			// 갱신된 세트를 로컬 상태에 반영.
+			items = items.map((x) => (x.id === c.id ? { ...x, imageSet: res.newSet } : x));
+			alert(
+				`'${c.name}'에 이미지 ${res.added}장을 추가했어요.` +
+					(res.skipped > 0 ? ` (${res.skipped}개 건너뜀)` : '')
+			);
+		} catch (err) {
+			alert(err instanceof Error ? err.message : '에셋 추가에 실패했어요.');
+		} finally {
+			addingAssets = null;
+			assetProg = null;
+			assetTarget = null;
+		}
+	}
+
 	const initial = $derived((data.profile.name ?? '?').charAt(0).toUpperCase());
 
 	// 소유자 관리 화면: 직접 만든 캐릭터와 가져온(charx) 캐릭터를 섹션으로 분리.
@@ -133,6 +173,19 @@
 					{#if data.isAdmin}
 						<button class="edit" type="button" onclick={() => edit(c)}>수정</button>
 					{/if}
+					<button
+						class="edit"
+						type="button"
+						onclick={() => pickAssets(c)}
+						disabled={!!addingAssets}
+						title=".zip 으로 장면 이미지 추가"
+					>
+						{#if addingAssets === c.id}
+							{assetProg ? `${assetProg.uploaded}/${assetProg.total}` : '추가 중…'}
+						{:else}
+							＋에셋
+						{/if}
+					</button>
 					{#if isLocal(c)}
 						<button
 							class="edit promote"
@@ -202,6 +255,15 @@
 		</div>
 	{/if}
 </div>
+
+<!-- 가져온 캐릭터 에셋 추가용 공용 파일 입력(행 버튼이 트리거). -->
+<input
+	bind:this={assetInput}
+	type="file"
+	accept=".zip,application/zip,application/octet-stream"
+	onchange={onAssetPick}
+	hidden
+/>
 
 <CharacterDetailModal character={detail} onclose={() => (detail = null)} />
 

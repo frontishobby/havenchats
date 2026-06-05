@@ -38,7 +38,7 @@ function getFile(files: Unzipped, path: string): Uint8Array | null {
  * macOS 압축유틸/unzip 은 prefix 를 자동 보정하지만 fflate 는 안 함 → 파싱 실패.
  * EOCD 의 저장 오프셋과 실제 위치 차이로 prefix 길이를 구해 잘라내면 오프셋이 그대로 맞는다.
  */
-function stripZipPrefix(buf: Uint8Array): Uint8Array {
+export function stripZipPrefix(buf: Uint8Array): Uint8Array {
 	const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
 	// EOCD 시그니처(PK\x05\x06)를 뒤에서 탐색(코멘트 최대 65535).
 	const min = Math.max(0, buf.length - 22 - 0xffff);
