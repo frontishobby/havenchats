@@ -168,6 +168,12 @@
 		grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
 		gap: 18px;
 	}
+	@media (max-width: 640px) {
+		.grid {
+			grid-template-columns: repeat(2, 1fr);
+			gap: 12px;
+		}
+	}
 	.empty {
 		text-align: center;
 		color: var(--text-faint);
