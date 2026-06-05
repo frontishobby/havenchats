@@ -16,7 +16,7 @@ const INTRO_MAX = 3000;
 // charx import 한 대형 카드도 편집 가능하도록 넉넉히.
 const DESC_TOKEN_MAX = 8000;
 const TAGS_MAX = 5;
-const GREETING_MAX = 2000;
+const GREETING_MAX = 4000;
 const GREETING_NAME_MAX = 30;
 const GREETINGS_MAX = 5;
 

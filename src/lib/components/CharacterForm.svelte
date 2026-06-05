@@ -57,7 +57,7 @@
 	const DESC_TOKEN_MAX = 8000;
 	const DESC_CHAR_CEIL = 32000; // 입력 폭주 방지용 하드 상한(검증은 토큰 기준).
 	const TAGS_MAX = 5;
-	const GREETING_MAX = 2000;
+	const GREETING_MAX = 4000;
 	const GREETING_NAME_MAX = 30;
 	const GREETINGS_MAX = 5;
 	const IMAGE_MAX_BYTES = 3 * 1024 * 1024;
