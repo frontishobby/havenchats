@@ -38,6 +38,24 @@
 		}
 	}
 
+	// 메타 프레임에서 이번 응답의 AI Gateway 추론 비용(USD)을 뽑는다. providerMetadata.gateway.cost
+	// 는 "0.0270609" 같은 숫자/문자열 → 숫자로. 없거나 파싱 불가면 null.
+	function parseCost(jsonText: string): number | null {
+		try {
+			const raw = JSON.parse(jsonText)?.providerMetadata?.gateway?.cost;
+			if (raw == null) return null;
+			const n = typeof raw === 'number' ? raw : Number(raw);
+			return Number.isFinite(n) ? n : null;
+		} catch {
+			return null;
+		}
+	}
+
+	// 비용(USD)을 소수점 3째 자리에서 반올림해 2자리로 표시. 예: 0.0270609 → "$0.03".
+	function formatCost(cost: number): string {
+		return `$${cost.toFixed(2)}`;
+	}
+
 	let { data }: { data: PageData } = $props();
 	const character = $derived(data.character);
 
@@ -70,9 +88,6 @@
 	let oldestSeq = $state(data.oldestSeq ?? 0); // 현재 로드된 가장 오래된 seq
 	let hasMore = $state(data.hasMore ?? false); // 그 앞에 더 오래된 메시지가 있는지
 	let loadingMore = $state(false);
-	// 직전 턴 input 토큰(추정치)·모델 input 상한 — 응답 헤더에서 회수.
-	let inputTokens = $state<number | null>(null);
-	let inputMax = $state<number | null>(null);
 
 	// ── 대화 요약(설정 모달에서 표시·편집) ──
 	let summary = $state<string | null>(null); // 서버 최신 요약
@@ -474,12 +489,6 @@
 				}
 			}
 
-			// 이번 턴 input 토큰(추정치)·상한 회수 → 하단에 표시
-			const it = Number(res.headers.get('x-haven-input-tokens'));
-			const im = Number(res.headers.get('x-haven-input-max'));
-			inputTokens = Number.isFinite(it) && it > 0 ? it : null;
-			inputMax = Number.isFinite(im) && im > 0 ? im : null;
-
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
 			// 스트림 끝에 붙는 메타 프레임(META_SEP + JSON)은 화면에 렌더하지 않고 콘솔에만 찍는다.
@@ -495,7 +504,10 @@
 			const sep = raw.indexOf(META_SEP);
 			if (sep >= 0) {
 				messages[idx].content = raw.slice(0, sep);
-				logResponseMeta(raw.slice(sep + META_SEP.length));
+				const metaJson = raw.slice(sep + META_SEP.length);
+				logResponseMeta(metaJson);
+				const c = parseCost(metaJson);
+				if (c != null) messages[idx].cost = c;
 			}
 		} catch (e) {
 			messages[idx].content = '⚠️ 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.';
@@ -863,6 +875,9 @@
 				{#if m.content || (streaming && m === lastMessage)}
 					<div class="para {m.role}">
 						{#if !(streaming && m === lastMessage)}
+							{#if m.role === 'assistant' && m.cost != null}
+								<span class="msg-cost" title="이 응답 생성 비용(USD)">{formatCost(m.cost)}</span>
+							{/if}
 							<button
 								class="msg-del"
 								onclick={() => deleteMessage(m)}
@@ -906,16 +921,7 @@
 		{#if sendError}
 			<p class="send-error">{sendError}</p>
 		{/if}
-		<p class="disclaimer">
-			AI가 생성한 이야기이며 실제 인물과 무관합니다.
-			{#if inputTokens !== null}
-				<span class="token-meter"
-					>· 직전 input ~{inputTokens.toLocaleString()}{#if inputMax}<span class="token-max"
-							>/{inputMax.toLocaleString()}</span
-						>{/if} 토큰</span
-				>
-			{/if}
-		</p>
+		<p class="disclaimer">AI가 생성한 이야기이며 실제 인물과 무관합니다.</p>
 	</div>
 </div>
 
@@ -1338,6 +1344,28 @@
 	.msg-del:focus-visible {
 		opacity: 1;
 	}
+	/* 응답 비용(USD) — 삭제 버튼 좌측에 작게. 평소 옅게, 문단 hover 시 또렷하게. */
+	.msg-cost {
+		position: absolute;
+		bottom: -6px;
+		right: 28px;
+		height: 28px;
+		display: grid;
+		place-items: center;
+		padding: 0 2px;
+		font-family: 'Pretendard', system-ui, sans-serif;
+		font-size: 0.72rem;
+		line-height: 1;
+		color: var(--text-dim);
+		opacity: 0.45;
+		transition: opacity 0.12s ease;
+		z-index: 2;
+		user-select: none;
+		pointer-events: none;
+	}
+	.para:hover .msg-cost {
+		opacity: 0.8;
+	}
 	.msg-del:hover {
 		color: var(--danger, #ef4444);
 		border-color: var(--danger, #ef4444);
@@ -1565,11 +1593,5 @@
 	}
 	.local-warn strong {
 		color: var(--text);
-	}
-	.token-meter {
-		color: var(--text-dim);
-	}
-	.token-max {
-		color: var(--text-faint);
 	}
 </style>

@@ -50,7 +50,12 @@ export const load: PageServerLoad = async ({ params, locals, platform, url }) =>
 		if (s && s.characterId === character.id) {
 			sessionId = s.id;
 			const page = await getMessagePage(db, sessionId, PAGE_SIZE);
-			resumed = page.messages.map((m) => ({ id: m.id, role: m.role, content: m.content }));
+			resumed = page.messages.map((m) => ({
+				id: m.id,
+				role: m.role,
+				content: m.content,
+				cost: m.cost
+			}));
 			oldestSeq = page.oldestSeq;
 			hasMore = page.hasMore;
 		}

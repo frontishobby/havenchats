@@ -141,6 +141,8 @@ export interface ChatMessage {
 	id: string;
 	role: Role;
 	content: string;
+	/** assistant 응답 생성에 든 AI Gateway 추론 비용(USD, 실측). 없으면 미표시. */
+	cost?: number;
 }
 
 /** DB 영속 메시지 — ChatMessage + 세션 내 순번(seq). */

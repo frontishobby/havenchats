@@ -191,6 +191,7 @@ interface MessageRow {
 	seq: number;
 	role: Role;
 	content: string;
+	cost: number | null;
 }
 
 /**
@@ -208,13 +209,19 @@ export async function getMessagePage(
 	const beforeSeq = before && before > 0 ? before : Number.MAX_SAFE_INTEGER;
 	const { results } = await db
 		.prepare(
-			`SELECT id, seq, role, content FROM chat_messages
+			`SELECT id, seq, role, content, cost FROM chat_messages
 			 WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`
 		)
 		.bind(sessionId, beforeSeq, limit)
 		.all<MessageRow>();
 	const messages = (results ?? [])
-		.map((r) => ({ id: r.id, seq: r.seq, role: r.role, content: r.content }))
+		.map((r) => ({
+			id: r.id,
+			seq: r.seq,
+			role: r.role,
+			content: r.content,
+			cost: r.cost ?? undefined
+		}))
 		.reverse(); // DESC 로 가져온 뒤 화면 표시용 오름차순으로 뒤집기
 	const oldestSeq = messages.length > 0 ? messages[0].seq : 0;
 	return { messages, oldestSeq, hasMore: oldestSeq > 1 };

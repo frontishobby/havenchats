@@ -29,7 +29,12 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 	);
 
 	return json({
-		messages: page.messages.map((m) => ({ id: m.id, role: m.role, content: m.content })),
+		messages: page.messages.map((m) => ({
+			id: m.id,
+			role: m.role,
+			content: m.content,
+			cost: m.cost
+		})),
 		oldestSeq: page.oldestSeq,
 		hasMore: page.hasMore
 	});
