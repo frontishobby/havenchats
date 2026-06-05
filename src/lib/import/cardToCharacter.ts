@@ -9,6 +9,7 @@
 import type { LoreEntry } from '$lib/types';
 import { resolveCBSStatic } from '$lib/cbs';
 import type { RisuLoreEntry } from './risum';
+import type { ScriptArtifact } from './capabilities';
 
 /** import 단계 상한 — 네이티브 폼(짧은 제약)과 달리 외부 카드라 넉넉하게. */
 export const IMPORT_LIMITS = {
@@ -59,6 +60,8 @@ export interface MappedCard {
 	defaultVariables: Record<string, string>;
 	/** 수동 확인 권장 경고(스크립팅 손실 등). */
 	warnings: string[];
+	/** 재현 안 되는 원본 스크립트(트리거/정규식/코드) — '스크립트 분석'(실험적) 입력. charx 에서 채움. */
+	scripts: ScriptArtifact[];
 }
 
 // ── V3 입력(느슨한 타입) ──
@@ -290,7 +293,8 @@ export function mapCardToCharacter(card: V3Card): MappedCard {
 		images,
 		lorebook,
 		defaultVariables,
-		warnings
+		warnings,
+		scripts: []
 	};
 }
 

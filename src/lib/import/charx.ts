@@ -80,7 +80,9 @@ export async function parseCharx(file: File): Promise<ParsedCharx> {
 		(k) => k === 'module.risum' || k.endsWith('/module.risum')
 	);
 	const moduleMeta = moduleKey ? readModuleMeta(files[moduleKey]) : null;
-	card.warnings.push(...scanUnsupported(cardJson, moduleMeta));
+	const scan = scanUnsupported(cardJson, moduleMeta);
+	card.warnings.push(...scan.warnings);
+	card.scripts = scan.scripts;
 
 	// 로어북: card.json(character_book) + module.risum(loreBook) 을 머지·디둡해 확정.
 	card.lorebook = mergeLorebook(card.lorebook, moduleLorebookToEntries(moduleMeta?.lorebook));

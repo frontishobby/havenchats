@@ -14,7 +14,13 @@
 	let importing = $state(false);
 	let progress = $state<ImportProgress | null>(null);
 
+	// 실험적: 재현 안 되는 스크립트를 LLM 으로 분석.
+	let analyzing = $state(false);
+	let analysis = $state('');
+	let analyzeError = $state('');
+
 	const card = $derived(parsed?.card ?? null);
+	const scripts = $derived(parsed?.card?.scripts ?? []);
 
 	function reset() {
 		if (thumbUrl) URL.revokeObjectURL(thumbUrl);
@@ -22,6 +28,30 @@
 		parsed = null;
 		error = '';
 		progress = null;
+		analysis = '';
+		analyzeError = '';
+		analyzing = false;
+	}
+
+	async function analyzeScripts() {
+		if (!scripts.length || analyzing) return;
+		analyzing = true;
+		analyzeError = '';
+		analysis = '';
+		try {
+			const res = await fetch('/api/import/analyze-script', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ scripts })
+			});
+			const data = (await res.json().catch(() => ({}))) as { analysis?: string; error?: string };
+			if (!res.ok || !data.analysis) throw new Error(data.error || '분석에 실패했어요.');
+			analysis = data.analysis;
+		} catch (err) {
+			analyzeError = err instanceof Error ? err.message : '분석에 실패했어요.';
+		} finally {
+			analyzing = false;
+		}
 	}
 
 	async function onPick(e: Event) {
@@ -126,6 +156,23 @@
 				<ul class="warns">
 					{#each card.warnings as w (w)}<li>⚠️ {w}</li>{/each}
 				</ul>
+			{/if}
+
+			{#if scripts.length}
+				<div class="analyze">
+					<button class="analyze-btn" onclick={analyzeScripts} disabled={analyzing}>
+						{#if analyzing}
+							🔬 분석 중… (LLM)
+						{:else}
+							🔬 이 스크립트가 뭘 하는지 분석 <span class="exp">실험적</span>
+						{/if}
+					</button>
+					<span class="analyze-hint">
+						재현되지 않는 트리거·코드 {scripts.length}개를 AI(Gemini)에게 보내 설명을 받아요.
+					</span>
+					{#if analyzeError}<p class="analyze-err">{analyzeError}</p>{/if}
+					{#if analysis}<div class="analysis">{analysis}</div>{/if}
+				</div>
 			{/if}
 
 			{#if importing && progress}
@@ -250,6 +297,62 @@
 	}
 	.warns li + li {
 		margin-top: 6px;
+	}
+	.analyze {
+		margin-top: 14px;
+	}
+	.analyze-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 14px;
+		border-radius: var(--radius-sm);
+		border: 1px solid var(--border);
+		background: var(--bg-elev);
+		color: var(--text);
+		font-size: 0.84rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.analyze-btn:hover:not(:disabled) {
+		border-color: var(--accent);
+	}
+	.analyze-btn:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+	.analyze-btn .exp {
+		font-size: 0.68rem;
+		font-weight: 700;
+		color: var(--accent);
+		background: rgba(124, 92, 255, 0.14);
+		border-radius: 999px;
+		padding: 1px 7px;
+	}
+	.analyze-hint {
+		display: block;
+		margin-top: 6px;
+		font-size: 0.76rem;
+		color: var(--text-faint);
+	}
+	.analyze-err {
+		margin: 10px 0 0;
+		font-size: 0.82rem;
+		color: #ff8a8a;
+	}
+	.analysis {
+		margin-top: 12px;
+		padding: 14px 16px;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		font-size: 0.84rem;
+		line-height: 1.6;
+		color: var(--text);
+		white-space: pre-wrap;
+		word-break: break-word;
+		max-height: 480px;
+		overflow-y: auto;
 	}
 	.prog {
 		margin-top: 18px;
