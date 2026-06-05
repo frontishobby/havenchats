@@ -4,8 +4,8 @@
 	import { MODELS, DEFAULT_MODEL_ID, getModel } from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
-	import { resolveSceneLine, looksLikeSceneToken } from '$lib/imageCodes';
-	import { localSceneURL } from '$lib/import/localImages';
+	import { resolveSceneLine, looksLikeSceneToken, isLocalSet, isGrid, isNamed } from '$lib/imageCodes';
+	import { localSceneURL, getLocalSceneBlob, localSceneKey } from '$lib/import/localImages';
 	import { personalize as fillPlaceholders } from '$lib/placeholders';
 	import type { ChatMessage } from '$lib/types';
 	import type { PageData } from './$types';
@@ -191,6 +191,28 @@
 
 	const currentModel = $derived(getModel(model) ?? MODELS[0]);
 
+	// charx import 로컬(IndexedDB) 장면 이미지 — 바이트가 이 기기에 없으면(다른 기기에서 import)
+	// 채팅에서 이미지가 조용히 숨겨진다 → 한 장도 없으면 경고 배너를 띄운다.
+	// (한 장이라도 있으면 이 기기에서 import 한 것 → 정상.)
+	let localImagesMissing = $state(false);
+	async function checkLocalImages() {
+		localImagesMissing = false;
+		const set = character.imageSet;
+		if (!isLocalSet(set)) return;
+		const ids = isGrid(set)
+			? set.entries.map((e) => e.id)
+			: isNamed(set)
+				? set.images.map((i) => i.id)
+				: [];
+		if (ids.length === 0) return;
+		const cid = character.id;
+		for (const id of ids) {
+			if (await getLocalSceneBlob(localSceneKey(cid, id))) return; // 하나라도 있으면 정상
+		}
+		// 이 캐릭터로 보고 있는 동안에만 반영(체크 중 다른 캐릭터로 이동했으면 무시).
+		if (character.id === cid) localImagesMissing = true;
+	}
+
 	onMount(() => {
 		const savedModel = localStorage.getItem(MODEL_KEY);
 		if (savedModel && getModel(savedModel)) model = savedModel;
@@ -202,6 +224,7 @@
 		isTouch = window.matchMedia('(pointer: coarse)').matches;
 		// 새로고침/직접 진입(컴포넌트 미재사용) 시에도 최신 메시지로 스크롤.
 		if (messages.length > 0) tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
+		checkLocalImages();
 	});
 	$effect(() => {
 		localStorage.setItem(MODEL_KEY, model);
@@ -245,6 +268,8 @@
 		summaryDraft = '';
 		// 이어가는 세션은 맨 아래(최신 메시지)로 즉시 이동
 		if (messages.length > 0) tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
+		// 다른 캐릭터로 이동했을 수 있으니 로컬 이미지 보유 여부 재확인.
+		checkLocalImages();
 	});
 
 	// 위로 스크롤 시 과거 메시지 한 페이지를 prepend. 스크롤 위치는 유지한다.
@@ -573,6 +598,13 @@
 			</button>
 		</div>
 	</header>
+
+	{#if localImagesMissing}
+		<div class="local-warn" role="status">
+			이 기기에는 이 캐릭터의 장면 이미지가 없어 대화에 이미지가 표시되지 않습니다. 이미지를 가져온 기기에서
+			<strong>기기간 공유</strong>를 누르면 모든 기기에서 볼 수 있어요.
+		</div>
+	{/if}
 
 	{#if showSettings}
 		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -1519,6 +1551,18 @@
 		font-size: 0.78rem;
 		color: var(--danger, #ef4444);
 		margin: 8px 0 0;
+	}
+	.local-warn {
+		flex-shrink: 0;
+		padding: 8px 14px;
+		font-size: 0.8rem;
+		line-height: 1.45;
+		color: var(--text-dim);
+		background: color-mix(in srgb, var(--nsfw, #f59e0b) 14%, var(--bg));
+		border-bottom: 1px solid var(--border);
+	}
+	.local-warn strong {
+		color: var(--text);
 	}
 	.token-meter {
 		color: var(--text-dim);
