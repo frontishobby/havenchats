@@ -51,6 +51,24 @@
 		}
 	}
 
+	// 응답 실패·비정상 종료 시 화면에 보여줄 사유. 서버 에러(streamError)를 우선,
+	// 없으면 finishReason 을 사람이 읽을 수 있게 해석. 정상(stop)이면 null.
+	function parseErrorReason(jsonText: string): string | null {
+		try {
+			const meta = JSON.parse(jsonText);
+			if (meta.streamError) return String(meta.streamError);
+			const fr = meta.finishReason;
+			if (fr && fr !== 'stop') {
+				if (fr === 'length') return '응답이 토큰 상한에 도달해 잘렸습니다.';
+				if (fr === 'content-filter') return '안전 필터에 의해 응답이 차단되었습니다.';
+				return `비정상 종료 (finishReason=${fr}).`;
+			}
+			return null;
+		} catch {
+			return null;
+		}
+	}
+
 	// 비용(USD)을 소수점 2자리로 올림 표시. 예: 0.0270609 → "$0.03", 0.0001 → "$0.01".
 	function formatCost(cost: number): string {
 		return `$${(Math.ceil(cost * 100) / 100).toFixed(2)}`;
@@ -508,9 +526,12 @@
 				logResponseMeta(metaJson);
 				const c = parseCost(metaJson);
 				if (c != null) messages[idx].cost = c;
+				const reason = parseErrorReason(metaJson);
+				if (reason) messages[idx].errorReason = reason;
 			}
 		} catch (e) {
 			messages[idx].content = '⚠️ 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.';
+			messages[idx].errorReason = e instanceof Error ? e.message : String(e);
 			console.error(e);
 		} finally {
 			streaming = false;
@@ -889,6 +910,9 @@
 							</button>
 						{/if}
 						{@render novelBody(m.content, m.role === 'user')}
+						{#if m.errorReason}
+							<p class="msg-error-reason">사유: {m.errorReason}</p>
+						{/if}
 						{#if streaming && m.role === 'assistant' && m === lastMessage}
 							{#if m.content}<span class="cursor"></span>{:else}<span class="typing"
 									><i></i><i></i><i></i></span
@@ -1365,6 +1389,19 @@
 	}
 	.para:hover .msg-cost {
 		opacity: 0.8;
+	}
+	.msg-error-reason {
+		margin: 0.4rem 0 0;
+		padding: 0.4rem 0.6rem;
+		border-left: 2px solid var(--danger, #ef4444);
+		background: color-mix(in srgb, var(--danger, #ef4444) 8%, transparent);
+		border-radius: 4px;
+		font-family: 'Pretendard', system-ui, sans-serif;
+		font-size: 0.78rem;
+		line-height: 1.45;
+		color: var(--text-dim);
+		white-space: pre-wrap;
+		word-break: break-word;
 	}
 	.msg-del:hover {
 		color: var(--danger, #ef4444);

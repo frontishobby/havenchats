@@ -180,6 +180,8 @@ export interface ChatMessage {
 	content: string;
 	/** assistant 응답 생성에 든 AI Gateway 추론 비용(USD, 실측). 없으면 미표시. */
 	cost?: number;
+	/** 응답 실패·비정상 종료 시 사용자에게 보여줄 사유(클라 임시 표시용, 영속 X). */
+	errorReason?: string;
 }
 
 /** DB 영속 메시지 — ChatMessage + 세션 내 순번(seq). */
