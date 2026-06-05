@@ -131,20 +131,23 @@
 								<span class="meta">💬 {c.chats}</span>
 							</span>
 						</button>
-						{#if isLocal(c)}
-							<button
-								class="edit promote"
-								type="button"
-								onclick={() => promote(c)}
-								disabled={!!promoting}
-								title="클라우드에 올려 다른 기기에서도 보기"
-							>
-								{#if promoting === c.id}
-									{promoteProg ? `${promoteProg.uploaded}/${promoteProg.total}` : '올리는 중…'}
-								{:else}
-									⬆ 기기간 공유
-								{/if}
-							</button>
+						{#if c.imported}
+							<!-- 가져온(charx) 캐릭터: 수정 불가. 로컬이면 '기기간 공유'로 클라우드 전환만 가능. -->
+							{#if isLocal(c)}
+								<button
+									class="edit promote"
+									type="button"
+									onclick={() => promote(c)}
+									disabled={!!promoting}
+									title="클라우드에 올려 다른 기기에서도 보기"
+								>
+									{#if promoting === c.id}
+										{promoteProg ? `${promoteProg.uploaded}/${promoteProg.total}` : '올리는 중…'}
+									{:else}
+										⬆ 기기간 공유
+									{/if}
+								</button>
+							{/if}
 						{:else}
 							<button class="edit" type="button" onclick={() => edit(c)}>수정</button>
 						{/if}

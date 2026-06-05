@@ -37,6 +37,13 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 		return json({ error: 'forbidden' }, { status: 403 });
 	}
 
+	// 기존 캐릭터(장면 세트 diff + charx import 여부 확인).
+	const existing = await getCharacterById(db, id);
+	// charx import 캐릭터는 수정 불가(프롬프트 숨김·영구 비공개).
+	if (existing?.imported) {
+		return json({ error: '가져온 캐릭터는 수정할 수 없어요.' }, { status: 403 });
+	}
+
 	const form = await request.formData();
 	const parsed = parseCharacterForm(form);
 	if (!parsed.ok) {
@@ -44,8 +51,6 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 	}
 	const c = parsed.data;
 
-	// 기존 장면 세트(키 diff·정리에 필요).
-	const existing = await getCharacterById(db, id);
 	const oldSet = existing?.imageSet ?? null;
 
 	// 새 이미지가 있으면 교체, 없으면 기존 썸네일 유지.

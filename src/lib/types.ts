@@ -54,6 +54,12 @@ export interface Character {
 	chats: number;
 	/** 장면 이미지 세트(축×조합). 없으면 null. */
 	imageSet: CharacterImageSet | null;
+	/**
+	 * charx(캐릭터 카드 V3) import 로 만들어진 캐릭터 여부.
+	 * true 면 프롬프트(description)는 클라이언트에 빈 문자열로 내려가고(서버 전용),
+	 * 영구 비공개·수정 불가. 장면 이미지는 기기 한정(IndexedDB) → '기기간 공유'로만 R2 전환.
+	 */
+	imported: boolean;
 }
 
 /**

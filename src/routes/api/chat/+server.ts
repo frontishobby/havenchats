@@ -4,6 +4,7 @@ import { streamText, generateText, type ModelMessage } from 'ai';
 import type { ProviderOptions } from '@ai-sdk/provider-utils';
 import { createGateway, type GatewayProvider } from '@ai-sdk/gateway';
 import { findCharacter } from '$lib/server/characters';
+import { getCharacterPrompt } from '$lib/server/db/characters';
 import { MODEL_IDS, DEFAULT_MODEL_ID, getContextLimit, isReasoningModel } from '$lib/data/models';
 import {
 	getSession,
@@ -88,6 +89,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const character = await findCharacter(db, body.characterId);
 	if (!character) {
 		return json({ error: 'character not found' }, { status: 404 });
+	}
+	// imported 캐릭터는 description 이 클라 노출 차단으로 빈 문자열 → 프롬프트 조립용 원본을 서버에서 채운다.
+	if (character.imported) {
+		const raw = await getCharacterPrompt(db, character.id);
+		if (raw != null) character.description = raw;
 	}
 
 	const text = (body.text ?? '').trim();

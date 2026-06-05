@@ -27,6 +27,8 @@ export interface NewCharacter {
 	greetings: Opening[];
 	/** 장면 이미지 세트. 없으면 null. */
 	imageSet: CharacterImageSet | null;
+	/** charx import 캐릭터 여부(프롬프트 숨김·비공개·수정 불가). 기본 false. */
+	imported?: boolean;
 }
 
 interface CharacterRow {
@@ -42,6 +44,7 @@ interface CharacterRow {
 	tags: string;
 	greetings: string;
 	image_set: string | null;
+	imported: number;
 	chats: number;
 	creator_id: string;
 	creator_name: string | null;
@@ -172,13 +175,17 @@ function parseNamedSet(obj: { images?: unknown; storage?: unknown }): CharacterI
 }
 
 function rowToCharacter(row: CharacterRow): Character {
+	const imported = row.imported === 1;
 	return {
 		id: row.id,
 		name: row.name,
 		avatarUrl: row.thumbnail_key ? `/img/${row.thumbnail_key}` : fallbackAvatar(row.id),
 		tagline: row.tagline,
 		intro: row.intro,
-		description: row.description,
+		// charx import 캐릭터의 프롬프트는 클라이언트에 절대 노출하지 않는다(빈 문자열).
+		// 채팅 조립용 원본은 getCharacterPrompt() 로만 서버에서 읽는다.
+		description: imported ? '' : row.description,
+		imported,
 		greetings: parseOpenings(row.greetings),
 		tags: parseStringArray(row.tags),
 		contentRating: row.content_rating === 'nsfw' ? 'nsfw' : 'sfw',
@@ -198,7 +205,7 @@ function rowToCharacter(row: CharacterRow): Character {
 // chats = 이 캐릭터의 모든 세션에 실제로 남아있는 메시지 행 수 합(개별 삭제 반영).
 // characters.chats 컬럼은 더 이상 증가시키지 않으므로 실측 서브쿼리로 대체.
 const SELECT_COLS =
-	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key";
+	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.imported, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key";
 const FROM_JOIN = 'FROM characters c LEFT JOIN users u ON u.id = c.creator_id';
 
 /** 공개(public) 유저 캐릭터 전체 (최신순). 비공개는 제외. */
@@ -246,6 +253,19 @@ export async function getCharacterOwnership(
 				visibility: row.visibility === 'private' ? 'private' : 'public'
 			}
 		: null;
+}
+
+/**
+ * 시스템 프롬프트 조립용 원본 description(서버 전용).
+ * getCharacterById 는 imported 캐릭터의 description 을 빈 문자열로 가리므로, 채팅 조립 시
+ * 이 함수로만 원본을 읽는다. 캐릭터 없으면 null.
+ */
+export async function getCharacterPrompt(db: D1Database, id: string): Promise<string | null> {
+	const row = await db
+		.prepare(`SELECT description FROM characters WHERE id = ?`)
+		.bind(id)
+		.first<{ description: string }>();
+	return row ? row.description : null;
 }
 
 /** 단일 유저 캐릭터 조회. */
@@ -335,8 +355,8 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 	await db
 		.prepare(
 			`INSERT INTO characters
-			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, chats, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, imported, chats, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
 		)
 		.bind(
 			c.id,
@@ -352,6 +372,7 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 			JSON.stringify(c.tags),
 			JSON.stringify(c.greetings),
 			c.imageSet ? JSON.stringify(c.imageSet) : null,
+			c.imported ? 1 : 0,
 			now,
 			now
 		)

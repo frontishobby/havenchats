@@ -11,10 +11,6 @@
 	let thumbUrl = $state<string | null>(null);
 	let error = $state('');
 
-	// import 옵션.
-	let nsfw = $state(true); // 외부 카드는 성인물 가정 — 기본 NSFW(검수 후 변경).
-	let audience = $state<'all' | 'male' | 'female'>('all');
-
 	let importing = $state(false);
 	let progress = $state<ImportProgress | null>(null);
 
@@ -55,7 +51,8 @@
 		importing = true;
 		error = '';
 		try {
-			const res = await runImport(parsed, { contentRating: nsfw ? 'nsfw' : 'sfw', audience }, (p) => {
+			// charx 캐릭터는 성인물 가정 — NSFW + 남성향 고정(선택 없음).
+			const res = await runImport(parsed, { contentRating: 'nsfw', audience: 'male' }, (p) => {
 				progress = p;
 			});
 			// charx 캐릭터는 비공개·기기 한정 → 수정 불가. 내 캐릭터 목록으로 이동(채팅/삭제/기기간 공유).
@@ -130,21 +127,6 @@
 					{#each card.warnings as w (w)}<li>⚠️ {w}</li>{/each}
 				</ul>
 			{/if}
-
-			<div class="opts">
-				<label class="opt">
-					<input type="checkbox" bind:checked={nsfw} disabled={importing} />
-					성인물(NSFW)로 표시
-				</label>
-				<label class="opt">
-					타깃
-					<select bind:value={audience} disabled={importing}>
-						<option value="all">공통</option>
-						<option value="male">남성향</option>
-						<option value="female">여성향</option>
-					</select>
-				</label>
-			</div>
 
 			{#if importing && progress}
 				<div class="prog">
@@ -268,26 +250,6 @@
 	}
 	.warns li + li {
 		margin-top: 6px;
-	}
-	.opts {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 18px;
-		margin: 18px 0 4px;
-	}
-	.opt {
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-		font-size: 0.86rem;
-		color: var(--text);
-	}
-	.opt select {
-		background: var(--bg-elev);
-		color: var(--text);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		padding: 4px 8px;
 	}
 	.prog {
 		margin-top: 18px;
