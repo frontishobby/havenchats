@@ -19,6 +19,28 @@ export interface Opening {
 	content: string;
 }
 
+/**
+ * 로어북 항목 하나. 채팅 중 최근 대화에 keys 의 키워드가 등장하면 content 를 프롬프트에 주입한다.
+ * constant=true 면 키워드와 무관하게 항상 주입. 주입 로직: src/lib/lorebook.ts
+ */
+export interface LoreEntry {
+	/** 안정 식별자(uuid). */
+	id: string;
+	/** 트리거 키워드(소문자 부분일치). constant 항목은 매칭에 쓰이지 않는다. */
+	keys: string[];
+	/** 주입 본문. */
+	content: string;
+	/** true 면 항상 주입(상시 설정). */
+	constant: boolean;
+	/** 우선순위 — 높을수록 먼저 주입(예산 초과 시 낮은 항목부터 누락). 기본 0. */
+	order: number;
+}
+
+/** 캐릭터의 로어북(항목 묶음). 없으면 null. */
+export interface CharacterLorebook {
+	entries: LoreEntry[];
+}
+
 export interface Character {
 	id: string;
 	name: string;
@@ -54,6 +76,12 @@ export interface Character {
 	chats: number;
 	/** 장면 이미지 세트(축×조합). 없으면 null. */
 	imageSet: CharacterImageSet | null;
+	/**
+	 * 로어북(키워드로 켜지는 동적 설정). 없으면 null.
+	 * imported 캐릭터의 로어북은 숨김 프롬프트라 클라이언트엔 null 로 내려가고(서버 전용),
+	 * 채팅 조립 시 getCharacterLorebook() 으로만 서버에서 읽는다.
+	 */
+	lorebook: CharacterLorebook | null;
 	/**
 	 * charx(캐릭터 카드 V3) import 로 만들어진 캐릭터 여부.
 	 * true 면 프롬프트(description)는 클라이언트에 빈 문자열로 내려가고(서버 전용),

@@ -6,7 +6,9 @@
  * 이미지는 named 방식 manifest 로 뽑아낸다(매칭 토큰 = asset 이름에서 트레일링 확장자 제거).
  */
 
+import type { LoreEntry } from '$lib/types';
 import { resolveCBS } from './cbs';
+import type { RisuLoreEntry } from './risum';
 
 /** import 단계 상한 — 네이티브 폼(짧은 제약)과 달리 외부 카드라 넉넉하게. */
 export const IMPORT_LIMITS = {
@@ -51,6 +53,8 @@ export interface MappedCard {
 	iconExt: string | null;
 	/** named 장면 이미지 manifest. */
 	images: ImportImage[];
+	/** card.json character_book 에서 추출한 로어북(키워드 동적 설정). 서버에서 module.risum 과 머지. */
+	lorebook: LoreEntry[];
 	/** 수동 확인 권장 경고(스크립팅 손실 등). */
 	warnings: string[];
 }
@@ -63,9 +67,14 @@ interface V3Asset {
 	ext?: string;
 }
 interface V3BookEntry {
+	keys?: unknown;
+	secondary_keys?: unknown;
 	content?: string;
 	enabled?: boolean;
 	constant?: boolean;
+	insertion_order?: number;
+	name?: string;
+	comment?: string;
 }
 interface V3Data {
 	name?: string;
@@ -90,6 +99,17 @@ export interface V3Card {
 
 function str(v: unknown): string {
 	return typeof v === 'string' ? v : '';
+}
+
+/** unknown(문자열 또는 문자열 배열)을 문자열 배열로. RisuAI 는 콤마 문자열, V3 는 배열을 쓴다. */
+function strArray(v: unknown): string[] {
+	if (Array.isArray(v)) return v.filter((x): x is string => typeof x === 'string');
+	if (typeof v === 'string') return v.split(',').map((s) => s.trim());
+	return [];
+}
+
+function genId(): string {
+	return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Math.random()}`;
 }
 
 function clip(s: string, max: number): string {
@@ -129,7 +149,8 @@ export function mapCardToCharacter(card: V3Card): MappedCard {
 	const name = clip(str(d.name) || str(d.nickname) || 'Unnamed', IMPORT_LIMITS.NAME_MAX).trim();
 
 	// ── description(시스템 프롬프트) = persona + personality + scenario + system_prompt
-	//    + constant 로어북 + post_history(이미지 문법·규칙) + 예시 대화 ──
+	//    + post_history(이미지 문법·규칙) + 예시 대화 ──
+	//    (로어북은 description 에 접지 않고 별도 lorebook 으로 추출 → 채팅 시 키워드 동적 주입)
 	const parts: string[] = [];
 	const push = (header: string, body: string) => {
 		const t = cbs(body).trim();
@@ -140,17 +161,26 @@ export function mapCardToCharacter(card: V3Card): MappedCard {
 	push('상황', str(d.scenario));
 	if (str(d.system_prompt).trim()) push('시스템 지침', str(d.system_prompt));
 
-	// 항상 켜진(constant) 로어북 항목 → 상시 주입.
+	// 로어북: enabled 인 모든 항목을 LoreEntry 로 추출(constant + 키워드형 모두). CBS 해소 적용.
 	const bookEntries = Array.isArray(d.character_book?.entries)
 		? (d.character_book!.entries as V3BookEntry[])
 		: [];
-	const constants = bookEntries.filter((e) => e?.enabled !== false && e?.constant && str(e.content).trim());
-	const droppedBook = bookEntries.length - constants.length;
-	constants.forEach((e, i) => push(`설정 ${i + 1}`, str(e.content)));
-	if (droppedBook > 0) {
-		warnings.push(
-			`로어북 ${droppedBook}개는 키워드 트리거형이라 가져오지 않았어요(상시 항목만 반영).`
-		);
+	const lorebook: LoreEntry[] = [];
+	for (const e of bookEntries) {
+		if (!e || e.enabled === false) continue;
+		const content = cbs(str(e.content)).trim();
+		if (!content) continue;
+		const constant = e.constant === true;
+		const keys = [...strArray(e.keys), ...strArray(e.secondary_keys)].map((k) => cbs(k).trim());
+		const cleanKeys = keys.filter(Boolean);
+		if (!constant && cleanKeys.length === 0) continue; // 영영 안 켜지는 항목은 버림
+		lorebook.push({
+			id: genId(),
+			keys: cleanKeys,
+			content: clip(content, IMPORT_LIMITS.GREETING_MAX),
+			constant,
+			order: typeof e.insertion_order === 'number' ? e.insertion_order : 0
+		});
 	}
 
 	if (str(d.post_history_instructions).trim()) push('이미지·출력 규칙', str(d.post_history_instructions));
@@ -231,6 +261,41 @@ export function mapCardToCharacter(card: V3Card): MappedCard {
 		iconPath,
 		iconExt,
 		images,
+		lorebook,
 		warnings
 	};
+}
+
+/** RisuAI module.risum 의 loreBook 항목들을 LoreEntry[] 로 변환. key 는 콤마 구분, mode/alwaysActive 로 상시 판단. */
+export function moduleLorebookToEntries(entries: RisuLoreEntry[] | undefined): LoreEntry[] {
+	if (!Array.isArray(entries)) return [];
+	const out: LoreEntry[] = [];
+	for (const e of entries) {
+		const content = str(e?.content).trim();
+		if (!content) continue;
+		const constant = e.constant === true || e.alwaysActive === true || e.mode === 'constant';
+		const keys = [...strArray(e.key), ...strArray(e.secondkey)].map((k) => k.trim()).filter(Boolean);
+		if (!constant && keys.length === 0) continue;
+		out.push({
+			id: genId(),
+			keys,
+			content: clip(content, IMPORT_LIMITS.GREETING_MAX),
+			constant,
+			order: typeof e.insertorder === 'number' ? e.insertorder : 0
+		});
+	}
+	return out;
+}
+
+/** 두 로어북을 합치고 content(정규화) 기준 중복 제거. card.json 항목을 우선(앞)에 둔다. */
+export function mergeLorebook(a: LoreEntry[], b: LoreEntry[]): LoreEntry[] {
+	const seen = new Set<string>();
+	const out: LoreEntry[] = [];
+	for (const e of [...a, ...b]) {
+		const k = e.content.replace(/\s+/g, ' ').trim().toLowerCase();
+		if (!k || seen.has(k)) continue;
+		seen.add(k);
+		out.push(e);
+	}
+	return out;
 }

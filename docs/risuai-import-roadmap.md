@@ -41,7 +41,14 @@ description/personality/scenario/system_prompt/post_history/mes_example → `des
 
 ## 1. 기능별 상세 + 구현 방향
 
-### 1-1. 로어북 (World Info) — **1순위, 가성비 최고**
+### 1-1. 로어북 (World Info) — **1순위, 가성비 최고** ✅ **구현됨 (2026-06-06)**
+
+> 구현: `characters.lorebook` JSON 컬럼(migration 0014), `src/lib/lorebook.ts`(정규화·선택·포맷 순수함수),
+> `/api/chat` 에서 최근 window 키워드 스캔→마지막 유저 메시지 끝(directive 앞) 주입(prefix 캐시 보존),
+> `CharacterLorebookModal.svelte`(수동 편집), charx import 추출·머지(card.json `character_book` +
+> `module.risum` lorebook, content 기준 디둡). imported 캐릭터 lorebook 은 서버 전용(getCharacterLorebook).
+> 검증: check 0 errors · 런타임 로직 14/14 · import 추출 10/10 · build·dev 스모크 통과. (아래는 설계 메모)
+
 
 **무엇**: 대화에 특정 키워드가 나오면 관련 설정 텍스트를 그때 프롬프트에 주입. "A를 언급하면 A의 비밀이 공개" 류 조건부 지식.
 

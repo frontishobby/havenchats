@@ -54,10 +54,7 @@ export function scanUnsupported(card: V3Card, module: RisuModuleMeta | null): st
 		warns.push('커스텀 코드(스크립트)가 들어있지만 Haven 에선 실행되지 않아요.');
 	}
 
-	const lore = arr(module?.lorebook).length;
-	if (lore > 0) {
-		warns.push(`모듈 로어북 ${lore}개는 가져오지 않았어요 — 키워드로 켜지는 동적 설정은 아직 미지원이에요.`);
-	}
+	// 로어북(card.json character_book + module.risum lorebook)은 이제 가져와 채팅 시 키워드 주입한다 → 경고 없음.
 
 	if (module?.lowLevelAccess || ext.lowLevelAccess) {
 		warns.push('저수준 시스템 접근을 요구하는 스크립트가 있어요 — 동작하지 않습니다.');

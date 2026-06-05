@@ -26,6 +26,7 @@
 		tags: c.tags,
 		greetings: c.greetings,
 		avatarUrl: c.avatarUrl,
-		imageSet: c.imageSet
+		imageSet: c.imageSet,
+		lorebook: c.lorebook
 	}}
 />

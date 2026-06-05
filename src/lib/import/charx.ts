@@ -7,7 +7,13 @@
  */
 
 import { unzip, strFromU8, type Unzipped } from 'fflate';
-import { mapCardToCharacter, isV3Card, type MappedCard } from './cardToCharacter';
+import {
+	mapCardToCharacter,
+	isV3Card,
+	moduleLorebookToEntries,
+	mergeLorebook,
+	type MappedCard
+} from './cardToCharacter';
 import { readModuleMeta } from './risum';
 import { scanUnsupported } from './capabilities';
 import { putLocalScene, requestPersist } from './localImages';
@@ -53,6 +59,9 @@ export async function parseCharx(file: File): Promise<ParsedCharx> {
 	);
 	const moduleMeta = moduleKey ? readModuleMeta(files[moduleKey]) : null;
 	card.warnings.push(...scanUnsupported(cardJson, moduleMeta));
+
+	// 로어북: card.json(character_book) + module.risum(loreBook) 을 머지·디둡해 확정.
+	card.lorebook = mergeLorebook(card.lorebook, moduleLorebookToEntries(moduleMeta?.lorebook));
 
 	return { card, files };
 }
@@ -121,6 +130,7 @@ export async function runImport(
 			description: card.description,
 			greetings: card.greetings,
 			tags: card.tags,
+			lorebook: card.lorebook,
 			contentRating: opts.contentRating,
 			audience: opts.audience
 		})

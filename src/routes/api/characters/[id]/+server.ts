@@ -83,6 +83,7 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 			tags: c.tags,
 			greetings: c.greetings,
 			imageSet,
+			lorebook: c.lorebook,
 			thumbnailKey: newKey
 		});
 	} catch (e) {

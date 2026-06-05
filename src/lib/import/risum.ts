@@ -37,13 +37,25 @@ function decodeRPack(data: Uint8Array): Uint8Array {
 	return out;
 }
 
+/** RisuAI loreBook 항목(필요 필드만). key 는 콤마 구분 문자열, mode/alwaysActive 로 상시 여부 판단. */
+export interface RisuLoreEntry {
+	key?: string;
+	secondkey?: string;
+	content?: string;
+	constant?: boolean;
+	alwaysActive?: boolean;
+	mode?: string;
+	insertorder?: number;
+	comment?: string;
+}
+
 /** 탐지에 필요한 RisuModule 필드만(느슨한 타입). */
 export interface RisuModuleMeta {
 	name?: string;
 	trigger?: unknown[];
 	regex?: unknown[];
 	cjs?: string;
-	lorebook?: { constant?: boolean; content?: string }[];
+	lorebook?: RisuLoreEntry[];
 	lowLevelAccess?: boolean;
 }
 

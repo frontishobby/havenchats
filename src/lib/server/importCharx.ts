@@ -6,8 +6,9 @@
  * 서버는 메타 검증 + R2 put + D1 쓰기만 담당한다.
  */
 
-import type { Audience, ContentRating, NamedImage, Opening } from '$lib/types';
+import type { Audience, CharacterLorebook, ContentRating, NamedImage, Opening } from '$lib/types';
 import { IMPORT_LIMITS, IMPORT_IMAGE_EXT } from '$lib/import/cardToCharacter';
+import { normalizeLoreEntries } from '$lib/lorebook';
 
 /** import 이미지 한 장 최대 용량(네이티브 3MB 보다 넉넉 — 카드 원본 보존). */
 export const IMPORT_IMAGE_MAX_BYTES = 6 * 1024 * 1024;
@@ -20,6 +21,7 @@ export interface ImportMeta {
 	description: string;
 	greetings: Opening[];
 	tags: string[];
+	lorebook: CharacterLorebook | null;
 	contentRating: ContentRating;
 	audience: Audience;
 }
@@ -71,9 +73,21 @@ export function parseImportMeta(raw: unknown): MetaResult {
 	const audience: Audience =
 		o.audience === 'male' || o.audience === 'female' ? o.audience : 'all';
 
+	const lorebook = normalizeLoreEntries(o.lorebook);
+
 	return {
 		ok: true,
-		data: { name, tagline: tagline.slice(0, IMPORT_LIMITS.TAGLINE_MAX), intro, description, greetings, tags, contentRating, audience }
+		data: {
+			name,
+			tagline: tagline.slice(0, IMPORT_LIMITS.TAGLINE_MAX),
+			intro,
+			description,
+			greetings,
+			tags,
+			lorebook,
+			contentRating,
+			audience
+		}
 	};
 }
 

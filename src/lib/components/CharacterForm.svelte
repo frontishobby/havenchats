@@ -12,9 +12,18 @@
 		type NamedDraft,
 		type NamedApply
 	} from '$lib/components/NamedImagesModal.svelte';
+	import CharacterLorebookModal from '$lib/components/CharacterLorebookModal.svelte';
 	import { isGrid, isNamed, namedUrl } from '$lib/imageCodes';
 	import { estimatePromptTokens } from '$lib/tokens';
-	import type { Audience, CharacterImageSet, ContentRating, Opening, Visibility } from '$lib/types';
+	import type {
+		Audience,
+		CharacterImageSet,
+		CharacterLorebook,
+		ContentRating,
+		LoreEntry,
+		Opening,
+		Visibility
+	} from '$lib/types';
 
 	export interface CharacterFormInitial {
 		name: string;
@@ -30,6 +39,8 @@
 		avatarUrl: string;
 		/** 기존 장면 이미지 세트(수정 시). */
 		imageSet?: CharacterImageSet | null;
+		/** 기존 로어북(수정 시). */
+		lorebook?: CharacterLorebook | null;
 	}
 
 	let {
@@ -125,6 +136,24 @@
 		})) ?? []
 	);
 	const namedCount = $derived(namedImages.length);
+
+	// ── 로어북 (모달에서 편집, 제출 시 JSON 으로 전송) ──
+	let loreEntries = $state<LoreEntry[]>(
+		initial?.lorebook?.entries.map((e) => ({
+			id: e.id,
+			keys: [...e.keys],
+			content: e.content,
+			constant: e.constant,
+			order: e.order
+		})) ?? []
+	);
+	const loreCount = $derived(loreEntries.length);
+	let loreOpen = $state(false);
+
+	function applyLore(entries: LoreEntry[]) {
+		loreEntries = entries;
+		loreOpen = false;
+	}
 
 	// 방식 전환. 떠나는 쪽에 등록된 이미지가 있으면 경고 — 저장 시엔 활성 방식 하나만
 	// 영속화되고 반대쪽 이미지는 R2 에서 정리되기 때문(둘은 공존 불가).
@@ -271,6 +300,9 @@
 				)
 			);
 			if (imageFile) fd.set('image', imageFile);
+
+			// 로어북(키워드 동적 설정) 전달.
+			fd.set('lorebook', JSON.stringify(loreEntries));
 
 			// 장면 이미지 방식(grid|named) 전달.
 			fd.set('imageMode', imageMode);
@@ -437,6 +469,29 @@
 				이미지마다 이름(토큰)을 붙이는 방식이에요. 불규칙·대량 이미지에 적합합니다.
 			</p>
 		{/if}
+	</div>
+
+	<!-- 로어북 -->
+	<div class="field">
+		<div class="label-row">
+			<span class="field-label">로어북 <span class="opt">(선택)</span></span>
+		</div>
+		<button type="button" class="manage-images" onclick={() => (loreOpen = true)}>
+			<span class="mi-icon">📖</span>
+			<span class="mi-text">
+				<strong>로어북 관리</strong>
+				<span
+					>{loreCount > 0
+						? `설정 ${loreCount}개 등록됨`
+						: '키워드가 대화에 나오면 관련 설정을 자동으로 반영해요'}</span
+				>
+			</span>
+			<span class="mi-chev">›</span>
+		</button>
+		<p class="field-hint">
+			키워드별 설정을 등록하면, 그 키워드가 최근 대화에 등장할 때만 해당 설정이 프롬프트에 주입돼요.
+			항상 반영할 항목은 “항상 켜기”로 둘 수 있어요.
+		</p>
 	</div>
 
 	<!-- 제목 -->
@@ -694,6 +749,13 @@
 	initial={namedImages}
 	onclose={() => (namedOpen = false)}
 	onapply={applyNamed}
+/>
+
+<CharacterLorebookModal
+	open={loreOpen}
+	initialEntries={loreEntries}
+	onclose={() => (loreOpen = false)}
+	onapply={applyLore}
 />
 
 <PromptGuideModal open={guideOpen} onclose={() => (guideOpen = false)} />

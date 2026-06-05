@@ -2,7 +2,9 @@ import type {
 	Audience,
 	Character,
 	CharacterImageSet,
+	CharacterLorebook,
 	ContentRating,
+	LoreEntry,
 	Opening,
 	Visibility
 } from '$lib/types';
@@ -27,6 +29,8 @@ export interface NewCharacter {
 	greetings: Opening[];
 	/** 장면 이미지 세트. 없으면 null. */
 	imageSet: CharacterImageSet | null;
+	/** 로어북(키워드 동적 설정). 없으면 null. */
+	lorebook: CharacterLorebook | null;
 	/** charx import 캐릭터 여부(프롬프트 숨김·비공개·수정 불가). 기본 false. */
 	imported?: boolean;
 }
@@ -44,6 +48,7 @@ interface CharacterRow {
 	tags: string;
 	greetings: string;
 	image_set: string | null;
+	lorebook: string | null;
 	imported: number;
 	chats: number;
 	creator_id: string;
@@ -174,6 +179,43 @@ function parseNamedSet(obj: { images?: unknown; storage?: unknown }): CharacterI
 	return { kind: 'named', images, ...(storage ? { storage } : {}) };
 }
 
+/**
+ * DB 의 lorebook JSON 을 CharacterLorebook 로 안전 파싱. 손상/빈 값이면 null.
+ * keys 가 비고 constant 도 아니면(영영 안 켜지는 항목) 버린다(방어적).
+ */
+function parseLorebook(json: string | null): CharacterLorebook | null {
+	if (!json) return null;
+	try {
+		const parsed = JSON.parse(json) as unknown;
+		if (!parsed || typeof parsed !== 'object') return null;
+		const arr = (parsed as { entries?: unknown }).entries;
+		if (!Array.isArray(arr)) return null;
+		const entries = arr
+			.map((e): LoreEntry | null => {
+				const o = (e ?? {}) as {
+					id?: unknown;
+					keys?: unknown;
+					content?: unknown;
+					constant?: unknown;
+					order?: unknown;
+				};
+				const id = typeof o.id === 'string' ? o.id : '';
+				const keys = Array.isArray(o.keys)
+					? o.keys.filter((k): k is string => typeof k === 'string' && k.trim() !== '')
+					: [];
+				const content = typeof o.content === 'string' ? o.content : '';
+				const constant = o.constant === true;
+				const order = typeof o.order === 'number' ? o.order : 0;
+				if (!id || !content.trim() || (!constant && keys.length === 0)) return null;
+				return { id, keys, content, constant, order };
+			})
+			.filter((e): e is LoreEntry => e !== null);
+		return entries.length > 0 ? { entries } : null;
+	} catch {
+		return null;
+	}
+}
+
 function rowToCharacter(row: CharacterRow): Character {
 	const imported = row.imported === 1;
 	return {
@@ -197,7 +239,9 @@ function rowToCharacter(row: CharacterRow): Character {
 			avatarUrl: avatarUrlFromKey(row.creator_avatar_key)
 		},
 		chats: row.chats,
-		imageSet: parseImageSet(row.image_set)
+		imageSet: parseImageSet(row.image_set),
+		// imported 캐릭터의 로어북도 숨김 프롬프트 → 클라엔 null. 채팅 조립은 getCharacterLorebook() 으로.
+		lorebook: imported ? null : parseLorebook(row.lorebook)
 	};
 }
 
@@ -205,7 +249,7 @@ function rowToCharacter(row: CharacterRow): Character {
 // chats = 이 캐릭터의 모든 세션에 실제로 남아있는 메시지 행 수 합(개별 삭제 반영).
 // characters.chats 컬럼은 더 이상 증가시키지 않으므로 실측 서브쿼리로 대체.
 const SELECT_COLS =
-	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.imported, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key";
+	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.lorebook, c.imported, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key";
 const FROM_JOIN = 'FROM characters c LEFT JOIN users u ON u.id = c.creator_id';
 
 /** 공개(public) 유저 캐릭터 전체 (최신순). 비공개는 제외. */
@@ -268,6 +312,22 @@ export async function getCharacterPrompt(db: D1Database, id: string): Promise<st
 	return row ? row.description : null;
 }
 
+/**
+ * 시스템 프롬프트 조립용 원본 로어북(서버 전용).
+ * getCharacterById 는 imported 캐릭터의 lorebook 을 null 로 가리므로, 채팅 조립 시 이 함수로 원본을 읽는다.
+ * 캐릭터 없거나 로어북 없으면 null.
+ */
+export async function getCharacterLorebook(
+	db: D1Database,
+	id: string
+): Promise<CharacterLorebook | null> {
+	const row = await db
+		.prepare(`SELECT lorebook FROM characters WHERE id = ?`)
+		.bind(id)
+		.first<{ lorebook: string | null }>();
+	return row ? parseLorebook(row.lorebook) : null;
+}
+
 /** 단일 유저 캐릭터 조회. */
 export async function getCharacterById(db: D1Database, id: string): Promise<Character | null> {
 	const row = await db
@@ -291,6 +351,8 @@ export interface CharacterUpdate {
 	greetings: Opening[];
 	/** 장면 이미지 세트(현재 상태 전체). 없으면 null. */
 	imageSet: CharacterImageSet | null;
+	/** 로어북(현재 상태 전체). 없으면 null. */
+	lorebook: CharacterLorebook | null;
 	/** 새 이미지 키. undefined 면 썸네일 변경 없음. */
 	thumbnailKey?: string;
 }
@@ -307,7 +369,7 @@ export async function updateCharacter(
 		.prepare(
 			`UPDATE characters SET
 			   name = ?, tagline = ?, intro = ?, description = ?,
-			   audience = ?, content_rating = ?, visibility = ?, tags = ?, greetings = ?, image_set = ?,
+			   audience = ?, content_rating = ?, visibility = ?, tags = ?, greetings = ?, image_set = ?, lorebook = ?,
 			   ${setThumb ? 'thumbnail_key = ?,' : ''}
 			   updated_at = ?
 			 WHERE id = ?`
@@ -324,6 +386,7 @@ export async function updateCharacter(
 				JSON.stringify(c.tags),
 				JSON.stringify(c.greetings),
 				c.imageSet ? JSON.stringify(c.imageSet) : null,
+				c.lorebook ? JSON.stringify(c.lorebook) : null,
 				...(setThumb ? [c.thumbnailKey] : []),
 				now,
 				id
@@ -355,8 +418,8 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 	await db
 		.prepare(
 			`INSERT INTO characters
-			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, imported, chats, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, lorebook, imported, chats, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
 		)
 		.bind(
 			c.id,
@@ -372,6 +435,7 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 			JSON.stringify(c.tags),
 			JSON.stringify(c.greetings),
 			c.imageSet ? JSON.stringify(c.imageSet) : null,
+			c.lorebook ? JSON.stringify(c.lorebook) : null,
 			c.imported ? 1 : 0,
 			now,
 			now

@@ -1,5 +1,13 @@
-import type { Audience, ContentRating, ImageAxis, Opening, Visibility } from '$lib/types';
+import type {
+	Audience,
+	CharacterLorebook,
+	ContentRating,
+	ImageAxis,
+	Opening,
+	Visibility
+} from '$lib/types';
 import { IMAGE_LIMITS, NAMED_LIMITS, comboToCode } from '$lib/imageCodes';
+import { normalizeLoreEntries } from '$lib/lorebook';
 import { estimatePromptTokens } from '$lib/tokens';
 
 /** 허용 이미지 타입 → 확장자. (webp/avif 만) */
@@ -30,6 +38,8 @@ export interface ParsedCharacterForm {
 	visibility: Visibility;
 	tags: string[];
 	greetings: Opening[];
+	/** 로어북(키워드 동적 설정). 없으면 null. */
+	lorebook: CharacterLorebook | null;
 	/** 업로드된 이미지(있으면). 없으면 null. */
 	image: File | null;
 }
@@ -67,6 +77,14 @@ export function parseCharacterForm(form: FormData): ParseResult {
 		if (Array.isArray(parsed)) greetingsRaw = parsed;
 	} catch {
 		// 무시 — 아래 검증에서 걸러짐
+	}
+
+	// 로어북(선택): JSON 배열 → 정규화(키워드·길이·개수 clamp). 손상/빈값이면 null.
+	let lorebook: CharacterLorebook | null = null;
+	try {
+		lorebook = normalizeLoreEntries(JSON.parse(String(form.get('lorebook') ?? '[]')));
+	} catch {
+		// 무시 — null 유지
 	}
 
 	// ── 검증 ──
@@ -121,7 +139,7 @@ export function parseCharacterForm(form: FormData): ParseResult {
 
 	return {
 		ok: true,
-		data: { name, tagline, intro, description, audience, contentRating, visibility, tags: tagsClean, greetings, image }
+		data: { name, tagline, intro, description, audience, contentRating, visibility, tags: tagsClean, greetings, lorebook, image }
 	};
 }
 

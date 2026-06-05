@@ -4,7 +4,8 @@ import { streamText, generateText, type ModelMessage } from 'ai';
 import type { ProviderOptions } from '@ai-sdk/provider-utils';
 import { createGateway, type GatewayProvider } from '@ai-sdk/gateway';
 import { findCharacter } from '$lib/server/characters';
-import { getCharacterPrompt } from '$lib/server/db/characters';
+import { getCharacterPrompt, getCharacterLorebook } from '$lib/server/db/characters';
+import { buildLoreBlock } from '$lib/lorebook';
 import { MODEL_IDS, DEFAULT_MODEL_ID, getContextLimit, isReasoningModel } from '$lib/data/models';
 import {
 	getSession,
@@ -90,10 +91,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!character) {
 		return json({ error: 'character not found' }, { status: 404 });
 	}
-	// imported 캐릭터는 description 이 클라 노출 차단으로 빈 문자열 → 프롬프트 조립용 원본을 서버에서 채운다.
+	// imported 캐릭터는 description·lorebook 이 클라 노출 차단으로 비어 있음 → 조립용 원본을 서버에서 채운다.
 	if (character.imported) {
 		const raw = await getCharacterPrompt(db, character.id);
 		if (raw != null) character.description = raw;
+		character.lorebook = await getCharacterLorebook(db, character.id);
 	}
 
 	const text = (body.text ?? '').trim();
@@ -158,7 +160,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		);
 	}
 
-	const messages = buildMessages(window, maxSentences, userActs, session.memory);
+	// 로어북: 최근 window 메시지의 키워드를 스캔해 매칭(+constant) 항목만 주입할 블록을 만든다.
+	// 마지막 유저 메시지 끝(directive 앞)에 붙으므로 시스템 prefix 캐시는 보존된다.
+	const loreBlock = buildLoreBlock(character.lorebook, window);
+
+	const messages = buildMessages(window, maxSentences, userActs, session.memory, loreBlock);
 	// 이번 턴에 실제로 보낼 input 토큰 추정치(헤더로 즉시 반환 + usage 없을 때 폴백).
 	const inputTokensEst =
 		systemTokens +
@@ -593,7 +599,8 @@ function buildMessages(
 	window: StoredMessage[],
 	maxSentences: number,
 	userActs: number,
-	memory: string | null
+	memory: string | null,
+	loreBlock: string | null
 ): ModelMessage[] {
 	const out: ModelMessage[] = window
 		.filter((m) => m.content.trim() !== '')
@@ -613,7 +620,10 @@ function buildMessages(
 			`- 분량: 약 ${maxSentences}문장 내외로 작성하라.`,
 			userActsLine(userActs)
 		].join('\n');
-		last.content = `${last.content}\n\n${directive}`;
+		// 로어북 블록은 맥락 → directive 는 지침 순서로, 둘 다 마지막 유저 메시지 끝(가변 영역)에 붙인다.
+		last.content = loreBlock
+			? `${last.content}\n\n${loreBlock}\n\n${directive}`
+			: `${last.content}\n\n${directive}`;
 	}
 	return out;
 }
