@@ -152,7 +152,7 @@
 
 	{#if data.isOwner}
 		<a class="create-btn" href="/create">+ 캐릭터 만들기</a>
-		<a class="import-btn" href="/import">↓ charx 가져오기</a>
+		<a class="create-btn" href="/import">+ charx 가져오기</a>
 
 		{#snippet ownerRow(c: Character)}
 			<li class="row">
@@ -342,28 +342,6 @@
 	}
 	.create-btn:hover {
 		background: color-mix(in srgb, var(--accent) 22%, transparent);
-	}
-
-	/* 캐릭터 만들기 버튼 바로 아래 — charx 가져오기(보조 동작) */
-	.import-btn {
-		display: block;
-		width: 100%;
-		margin: -12px 0 22px;
-		padding: 11px;
-		text-align: center;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		background: var(--bg-card);
-		color: var(--text-dim);
-		font-weight: 600;
-		font-size: 0.88rem;
-		transition:
-			border-color 0.15s ease,
-			color 0.15s ease;
-	}
-	.import-btn:hover {
-		border-color: var(--accent);
-		color: var(--text);
 	}
 
 	.empty {
