@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, invalidate } from '$app/navigation';
 	import CharacterCard from '$lib/components/CharacterCard.svelte';
 	import CharacterDetailModal from '$lib/components/CharacterDetailModal.svelte';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
@@ -81,6 +81,9 @@
 					? { ...x, imageSet: { ...x.imageSet, storage: undefined } }
 					: x
 			);
+			// 에셋 페이지 load 는 세션 캐시됨 → 무효화해 새로고침 없이 에셋 미리보기 시
+			// 옛 local 세트(삭제된 IndexedDB)를 안 쓰게 한다.
+			await invalidate(`character:${c.id}`);
 		} catch (e) {
 			alert(e instanceof Error ? e.message : '올리기에 실패했어요.');
 		} finally {
@@ -109,6 +112,8 @@
 			const res = await addAssetsFromZip(c.id, c.imageSet, file, (p) => (assetProg = p));
 			// 갱신된 세트를 로컬 상태에 반영.
 			items = items.map((x) => (x.id === c.id ? { ...x, imageSet: res.newSet } : x));
+			// 캐시된 에셋 페이지 load 무효화(새로고침 없이 추가분이 보이도록).
+			await invalidate(`character:${c.id}`);
 			alert(
 				`'${c.name}'에 이미지 ${res.added}장을 추가했어요.` +
 					(res.skipped > 0 ? ` (${res.skipped}개 건너뜀)` : '')
