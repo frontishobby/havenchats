@@ -24,6 +24,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		return json({ error: '이름을 입력해 주세요.' }, { status: 400 });
 	}
 
+	// 대화용 이름(선택) — 비면 채팅에서 display_name 으로 폴백하므로 NULL 저장.
+	const personaName = String(form.get('persona_name') ?? '').trim().slice(0, 40) || null;
+
 	const prefRaw = String(form.get('preference') ?? '');
 	const preference: Preference | null =
 		prefRaw === 'male' || prefRaw === 'female' ? prefRaw : null;
@@ -52,6 +55,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		if (prevKey && prevKey !== key) await bucket.delete(prevKey).catch(() => {});
 	}
 
-	await updateProfile(db, locals.user.id, locals.user.email, { name, persona, preference });
+	await updateProfile(db, locals.user.id, locals.user.email, {
+		name,
+		personaName,
+		persona,
+		preference
+	});
 	return json({ ok: true });
 };

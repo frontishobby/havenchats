@@ -133,8 +133,10 @@
 	}
 
 	// 제작자가 쓴 플레이스홀더({{char}}/{{나}}/{{user}}) → 캐릭터·사용자 이름으로 치환.
+	// 채팅용 이름은 대화용 이름(personaName) 우선, 없으면 노출용 이름(name)으로 폴백 — 서버(/api/chat)와 동일.
 	function personalize(text: string): string {
-		return fillPlaceholders(text, character.name, data.user?.name);
+		const chatName = data.user?.personaName?.trim() || data.user?.name;
+		return fillPlaceholders(text, character.name, chatName);
 	}
 
 	function greetingMessages(content: string): ChatMessage[] {

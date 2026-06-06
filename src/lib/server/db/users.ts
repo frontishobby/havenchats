@@ -11,7 +11,8 @@ export type Preference = 'male' | 'female';
 export interface UserProfile {
 	id: string;
 	email: string;
-	name: string | null; // display_name (대화용 이름)
+	name: string | null; // display_name (남에게 노출되는 이름)
+	personaName: string | null; // 채팅에서 AI 가 부르는 이름(선택). 비면 채팅은 name 으로 폴백
 	avatarUrl: string | null; // 프로필 사진(servable URL) — 없으면 null
 	persona: string | null;
 	preference: Preference | null;
@@ -75,13 +76,14 @@ export async function findOrCreateOAuthUser(
 export async function getUserProfile(db: D1Database, id: string): Promise<UserProfile | null> {
 	const row = await db
 		.prepare(
-			'SELECT id, email, display_name, avatar_url, persona, preference, blocked_reason FROM users WHERE id = ?'
+			'SELECT id, email, display_name, persona_name, avatar_url, persona, preference, blocked_reason FROM users WHERE id = ?'
 		)
 		.bind(id)
 		.first<{
 			id: string;
 			email: string;
 			display_name: string | null;
+			persona_name: string | null;
 			avatar_url: string | null;
 			persona: string | null;
 			preference: string | null;
@@ -95,6 +97,7 @@ export async function getUserProfile(db: D1Database, id: string): Promise<UserPr
 		id: row.id,
 		email: row.email,
 		name: row.display_name,
+		personaName: row.persona_name,
 		avatarUrl: avatarUrlFromKey(row.avatar_url),
 		persona: row.persona,
 		preference: pref,
@@ -156,19 +159,25 @@ export async function updateProfile(
 	db: D1Database,
 	id: string,
 	email: string,
-	data: { name: string; persona: string | null; preference: Preference | null }
+	data: {
+		name: string;
+		personaName: string | null;
+		persona: string | null;
+		preference: Preference | null;
+	}
 ): Promise<void> {
 	const now = Date.now();
 	await db
 		.prepare(
-			`INSERT INTO users (id, email, display_name, persona, preference, age_verified, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+			`INSERT INTO users (id, email, display_name, persona_name, persona, preference, age_verified, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
 			 ON CONFLICT(id) DO UPDATE SET
 			   display_name = excluded.display_name,
+			   persona_name = excluded.persona_name,
 			   persona = excluded.persona,
 			   preference = excluded.preference,
 			   updated_at = excluded.updated_at`
 		)
-		.bind(id, email, data.name, data.persona, data.preference, now, now)
+		.bind(id, email, data.name, data.personaName, data.persona, data.preference, now, now)
 		.run();
 }

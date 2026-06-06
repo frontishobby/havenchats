@@ -7,7 +7,8 @@ declare global {
 			user: {
 				id: string;
 				email: string;
-				name: string | null; // 대화용 이름(display_name)
+				name: string | null; // 남에게 노출되는 이름(display_name)
+				personaName: string | null; // 채팅에서 AI 가 부르는 이름(선택). 비면 name 으로 폴백
 				avatarUrl: string | null; // 프로필 사진(servable URL) — 없으면 null
 				persona: string | null;
 				preference: 'male' | 'female' | null;

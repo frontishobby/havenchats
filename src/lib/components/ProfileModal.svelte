@@ -10,6 +10,7 @@
 	const AVATAR_MAX_BYTES = 3 * 1024 * 1024;
 
 	let name = $state('');
+	let personaName = $state('');
 	let persona = $state('');
 	let preference = $state<'male' | 'female' | null>(null);
 	let saving = $state(false);
@@ -55,6 +56,7 @@
 	$effect(() => {
 		if (profileModal.open && !initialized) {
 			name = user?.name ?? '';
+			personaName = user?.personaName ?? '';
 			persona = user?.persona ?? '';
 			preference = user?.preference ?? null;
 			error = '';
@@ -82,6 +84,7 @@
 		try {
 			const fd = new FormData();
 			fd.set('name', name.trim());
+			fd.set('persona_name', personaName.trim());
 			fd.set('persona', persona.trim());
 			if (preference) fd.set('preference', preference);
 			if (avatarFile) fd.set('avatar', avatarFile);
@@ -153,9 +156,20 @@
 				<input
 					id="pf-name"
 					type="text"
-					placeholder="대화에서 불릴 이름"
+					placeholder="다른 사람에게 보여질 이름"
 					maxlength="40"
 					bind:value={name}
+				/>
+			</div>
+
+			<div class="field">
+				<label for="pf-persona-name">대화용 이름 <span class="opt">(선택)</span></label>
+				<input
+					id="pf-persona-name"
+					type="text"
+					placeholder="채팅에서 AI 가 부를 이름 (비우면 위 이름 사용)"
+					maxlength="40"
+					bind:value={personaName}
 				/>
 			</div>
 

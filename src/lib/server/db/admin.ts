@@ -210,6 +210,7 @@ export interface AdminUserDetail {
 	id: string;
 	email: string;
 	name: string | null;
+	personaName: string | null;
 	persona: string | null;
 	preference: string | null;
 	ageVerified: boolean;
@@ -221,7 +222,7 @@ export interface AdminUserDetail {
 export async function getUserDetail(db: D1Database, id: string): Promise<AdminUserDetail | null> {
 	const row = await db
 		.prepare(
-			`SELECT id, email, display_name, persona, preference, age_verified, created_at, updated_at, blocked_reason
+			`SELECT id, email, display_name, persona_name, persona, preference, age_verified, created_at, updated_at, blocked_reason
 			 FROM users WHERE id = ?`
 		)
 		.bind(id)
@@ -229,6 +230,7 @@ export async function getUserDetail(db: D1Database, id: string): Promise<AdminUs
 			id: string;
 			email: string;
 			display_name: string | null;
+			persona_name: string | null;
 			persona: string | null;
 			preference: string | null;
 			age_verified: number;
@@ -241,6 +243,7 @@ export async function getUserDetail(db: D1Database, id: string): Promise<AdminUs
 		id: row.id,
 		email: row.email,
 		name: row.display_name,
+		personaName: row.persona_name,
 		persona: row.persona,
 		preference: row.preference,
 		ageVerified: row.age_verified === 1,

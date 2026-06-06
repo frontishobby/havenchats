@@ -126,7 +126,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 
 	const userId = locals.user.id;
-	const userName = locals.user.name;
+	// 채팅에서 AI 가 부르는 이름: 대화용 이름(persona_name) 우선, 없으면 노출용 이름(display_name)으로 폴백.
+	const userName = (locals.user.personaName && locals.user.personaName.trim()) || locals.user.name;
 	const userPersona = locals.user.persona;
 	const modelId = pickModel(body.model);
 	const maxSentences = clampSentences(body.maxSentences);

@@ -60,7 +60,10 @@
 <header class="head">
 	<div class="avatar">{(data.detail.name ?? data.detail.email).charAt(0).toUpperCase()}</div>
 	<div class="who">
-		<h2>{data.detail.name ?? '(이름 미설정)'}</h2>
+		<h2>
+			{data.detail.name ?? '(이름 미설정)'}
+			{#if data.detail.personaName}<span class="persona-name">대화용 “{data.detail.personaName}”</span>{/if}
+		</h2>
 		<p class="email">{data.detail.email}</p>
 		<p class="meta">
 			가입 {dateTime(data.detail.createdAt)} · 취향 {prefLabel(data.detail.preference)} · 성인인증
@@ -189,6 +192,13 @@
 		margin: 0 0 2px;
 		font-size: 1.3rem;
 		font-weight: 800;
+	}
+	.persona-name {
+		margin-left: 8px;
+		font-size: 0.82rem;
+		font-weight: 500;
+		color: var(--text-dim);
+		vertical-align: middle;
 	}
 	.email {
 		margin: 0 0 4px;
