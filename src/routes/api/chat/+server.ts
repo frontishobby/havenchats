@@ -1,7 +1,6 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { streamText, generateText, type ModelMessage } from 'ai';
-import type { ProviderOptions } from '@ai-sdk/provider-utils';
+import { streamText, generateText } from 'ai';
 import { createGateway, type GatewayProvider } from '@ai-sdk/gateway';
 import { findCharacter } from '$lib/server/characters';
 import {
@@ -9,9 +8,8 @@ import {
 	getCharacterLorebook,
 	getCharacterDefaultVars
 } from '$lib/server/db/characters';
-import { buildLoreBlock } from '$lib/lorebook';
-import { evalCBS, makeRng, type CbsContext } from '$lib/cbs';
-import { MODEL_IDS, DEFAULT_MODEL_ID, getContextLimit, isReasoningModel } from '$lib/data/models';
+import { isAdmin } from '$lib/server/auth';
+import { makeRng, type CbsContext } from '$lib/cbs';
 import {
 	getSession,
 	createSession,
@@ -22,44 +20,24 @@ import {
 	estimateTokens
 } from '$lib/server/db/chats';
 import type { Character, ChatSession, StoredMessage } from '$lib/types';
-import { buildImageCatalog, pinSceneCodes } from '$lib/imageCodes';
-import { fillCharName, personalize } from '$lib/placeholders';
+import { pinSceneCodes } from '$lib/imageCodes';
+import { personalize } from '$lib/placeholders';
 import { notifyServerError } from '$lib/server/notify';
+import {
+	assembleTurn,
+	buildSnapshot,
+	buildProviderOptions,
+	clampSentences,
+	clampUserActs,
+	openingContent,
+	pickModel,
+	reasoningHeadroom,
+	WINDOW_TOKEN_BUDGET,
+	KEEP_RECENT,
+	MAX_USER_MSG_TOKENS,
+	type ChatDebugSnapshot
+} from '$lib/server/chatAssembly';
 
-/** live window 토큰 예산 — 이 이상이면 요약 트리거. */
-const WINDOW_TOKEN_BUDGET = 6000;
-/** 항상 원문으로 유지할 최근 메시지 수(요약 대상에서 제외). */
-const KEEP_RECENT = 12;
-/** 모델 컨텍스트 상한에서 빼둘 안전 여유(토크나이저 차이·메타데이터 등). */
-const INPUT_SAFETY_MARGIN = 2000;
-/** 마지막 유저 메시지에 덧붙는 응답 지침의 토큰 어림값(가드 계산용). */
-const DIRECTIVE_EST = 60;
-/**
- * thinking/reasoning 모델용 출력 여유 토큰. 이 모델들은 내부 추론이 output 예산을 잠식해
- * 본문이 잘리므로(finishReason='length'), 본문 예산 위에 이만큼을 더해 보존한다.
- * (Google 계열은 추론 자체를 끄므로 대개 미사용 여유로 남는다 — 안전망)
- */
-const REASONING_HEADROOM = 8000;
-/**
- * Google(Gemini) 계열에 허용할 thinking 예산. 0=완전 차단인데, 약간의 내부 추론은
- * 지시 준수·일관성에 도움이 되므로 소량만 허용한다. 본문 예산(maxOutputTokens)은
- * 이 값 + REASONING_HEADROOM 로 충분히 커서, 이 추론이 본문 길이를 잘라먹지 않는다.
- */
-const GOOGLE_THINKING_BUDGET = 1024;
-/**
- * OpenAI/xAI 추론 모델의 추론 강도. 소설모드 RP/산문엔 깊은 추론이 득보다 비용·지연·
- * 지시이탈을 키우므로 최소로 둔다(완전 차단 X — Google 의 thinkingBudget 와 같은 취지).
- * OpenAI(GPT-5 계열)는 'minimal', xAI(Grok)는 'low' 를 쓴다. (DeepSeek 은 effort 로는
- * 추론이 안 줄어 buildProviderOptions 에서 thinking:disabled 로 따로 끈다.)
- */
-const OPENAI_REASONING_EFFORT = 'minimal';
-const XAI_REASONING_EFFORT = 'low';
-/**
- * 한 번에 보낼 수 있는 유저 메시지의 토큰 상한.
- * trimWindowToBudget 는 최신 메시지를 항상 보존하므로, 거대한 단일 메시지는
- * 누적 가드를 우회한다. 여기서 입력 단계에서 직접 막아 한 턴 비용 폭주를 방지한다.
- */
-const MAX_USER_MSG_TOKENS = 4000;
 /**
  * 응답 메타 프레임 구분자(RS, U+241E). 스트림 맨 끝에 `META_SEP + JSON` 으로 붙여,
  * 클라이언트가 본문과 분리해 console 에 찍는다. 모델 텍스트엔 등장하지 않는 제어문자.
@@ -88,6 +66,8 @@ interface ChatRequestBody {
 	 */
 	userMsgId?: string;
 	assistantMsgId?: string;
+	/** 디버그 모드: 응답 메타 프레임에 조립 내부(system/messages/변수/토큰) 스냅샷을 함께 내려준다. */
+	debug?: boolean;
 }
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
@@ -169,39 +149,50 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		now: Date.now()
 	};
 	const scriptStateBefore = JSON.stringify(session.scriptState ?? {});
+	const varsBefore = { ...(session.scriptState ?? {}) };
 
-	// system 은 한 번만 만들어 토큰 추정과 호출에 함께 쓴다.
-	const systemPrompt = buildSystemPrompt(character, userName, userPersona, session.summary, ctx);
-	const systemTokens = estimateTokens(systemPrompt);
-
-	// ── 모델별 input 상한 하드 가드 ──
-	// 요약(백그라운드)이 못 따라잡았거나 거대한 메시지가 끼어도 모델 컨텍스트를 넘지 않도록,
-	// 요청 시점에 동기적으로 오래된 window 부터 잘라낸다(최신 메시지는 항상 유지).
-	// reasoning 모델은 내부 추론이 output 을 잠식하므로 본문 예산 위에 headroom 을 더한다.
-	const outputReserve = sentencesToTokens(maxSentences) + reasoningHeadroom(modelId);
-	const inputLimit = Math.max(
-		1000,
-		getContextLimit(modelId) - outputReserve - INPUT_SAFETY_MARGIN
-	);
-	const window = trimWindowToBudget(fullWindow, systemTokens, inputLimit);
-	if (window.length < fullWindow.length) {
+	// ── 한 턴 조립(공유 로직) ── system/messages/토큰예산을 한 번에. ctx.vars 는 CBS 로 변이된다.
+	// 입력 하드가드(오래된 window trim)·로어북 주입·응답 지침 부착이 모두 여기서 일어난다.
+	const assembled = assembleTurn({
+		character,
+		fullWindow,
+		summary: session.summary,
+		memory: session.memory,
+		userName,
+		userPersona,
+		modelId,
+		maxSentences,
+		userActs,
+		ctx
+	});
+	const { systemPrompt, window, messages, inputTokensEst, outputReserve, inputLimit } = assembled;
+	if (assembled.windowTrimmed) {
 		console.warn(
 			`[chat] input guard trimmed window ${fullWindow.length}→${window.length} (model=${modelId}, limit=${inputLimit})`
 		);
 	}
 
-	// 로어북: 최근 window 메시지의 키워드를 스캔해 매칭(+constant) 항목만 주입할 블록을 만든다.
-	// content 의 CBS 도 같은 ctx 로 평가(description 이후). 마지막 유저 메시지 끝(directive 앞)에 붙어 prefix 캐시 보존.
-	const loreBlock = buildLoreBlock(character.lorebook, window, ctx);
-
-	const messages = buildMessages(window, maxSentences, userActs, session.memory, loreBlock);
-	// 이번 턴에 실제로 보낼 input 토큰 추정치(헤더로 즉시 반환 + usage 없을 때 폴백).
-	const inputTokensEst =
-		systemTokens +
-		messages.reduce(
-			(s, m) => s + estimateTokens(typeof m.content === 'string' ? m.content : ''),
-			0
-		);
+	// 디버그 모드면 조립 내부 전체를 스냅샷으로 만들어 메타 프레임에 동봉(아래). varsAfter 는 CBS 평가 직후 상태.
+	// 시스템 프롬프트·숨김 카드 내부가 드러나므로 **제작자 본인 또는 관리자**에게만 스냅샷을 내려준다.
+	const canDebug = isAdmin(locals.user.email) || character.creator.id === userId;
+	const debugSnapshot: ChatDebugSnapshot | null = (body.debug && canDebug)
+		? buildSnapshot({
+				source: 'live',
+				model: modelId,
+				assembled,
+				character,
+				session,
+				defaultVars: characterDefaultVars,
+				varsBefore,
+				varsAfter: { ...ctx.vars },
+				userName,
+				userPersona,
+				summary: session.summary,
+				memory: session.memory,
+				maxSentences,
+				userActs
+			})
+		: null;
 
 	const apiKey = env.AI_GATEWAY_API_KEY;
 	const gateway = apiKey ? createGateway({ apiKey }) : null;
@@ -235,7 +226,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			inputTokensEst,
 			assistantMsgId,
 			maxSentences,
-			tokenHeaders
+			tokenHeaders,
+			debugSnapshot
 		);
 	}
 
@@ -331,6 +323,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			// 클라이언트는 이를 떼어 console 에만 찍고 화면엔 렌더하지 않는다.
 			// flash 등에서 출력이 잘리는 경우 finishReason='length'/'content-filter' 로 드러난다.
 			const meta = await collectMeta(result, modelId, streamError);
+			if (debugSnapshot) meta.debug = debugSnapshot;
 			controller.enqueue(encoder.encode(META_SEP + safeJson(meta)));
 			controller.close();
 		}
@@ -396,24 +389,6 @@ function safeJson(value: unknown): string {
 	} catch (e) {
 		return JSON.stringify({ metaError: `serialize failed: ${String(e)}` });
 	}
-}
-
-/**
- * 모델 input 상한에 맞춰 window 앞(오래된 것)부터 잘라낸다. 최신 메시지 1개는 항상 유지.
- * 정상 흐름에선 요약이 window 를 작게 유지하므로 거의 동작하지 않는 안전망이다.
- */
-function trimWindowToBudget<T extends { tokenEst: number }>(
-	window: T[],
-	systemTokens: number,
-	inputLimit: number
-): T[] {
-	let total = systemTokens + DIRECTIVE_EST + window.reduce((s, m) => s + m.tokenEst, 0);
-	let start = 0;
-	while (start < window.length - 1 && total > inputLimit) {
-		total -= window[start].tokenEst;
-		start++;
-	}
-	return start === 0 ? window : window.slice(start);
 }
 
 /**
@@ -501,190 +476,11 @@ const SUMMARY_SYSTEM = [
 	`- 새 요약 본문만 출력(머리말·설명 금지).`
 ].join('\n');
 
-/** 사용자가 설정에서 선택한 모델을 허용목록으로 검증해 반환. 유효하지 않으면 기본 모델. */
-function pickModel(requested?: string): string {
-	return requested && MODEL_IDS.has(requested) ? requested : DEFAULT_MODEL_ID;
-}
-
 /** 클라가 보낸 메시지 id 검증(비어있지 않은 문자열만 채택). 없으면 새 uuid. */
 function pickMsgId(requested?: string): string {
 	return typeof requested === 'string' && requested.trim() !== ''
 		? requested.trim()
 		: crypto.randomUUID();
-}
-
-/** reasoning 모델이면 출력 예산에 더할 여유 토큰, 아니면 0. */
-function reasoningHeadroom(modelId: string): number {
-	return isReasoningModel(modelId) ? REASONING_HEADROOM : 0;
-}
-
-/**
- * 게이트웨이 캐싱 + (Google 계열) thinking 예산 소량 제한.
- * 무제한 추론은 output 예산을 잠식해 본문을 자르고 비용·지연을 키우므로, Gemini 등 Google
- * 모델은 thinkingBudget 을 작게 둔다(완전 차단 X). includeThoughts=false 로 추론 텍스트는
- * 응답 본문에 섞지 않는다.
- */
-function buildProviderOptions(modelId: string): ProviderOptions {
-	const opts: ProviderOptions = { gateway: { caching: 'auto' } };
-	if (modelId.startsWith('google/')) {
-		opts.google = {
-			thinkingConfig: { thinkingBudget: GOOGLE_THINKING_BUDGET, includeThoughts: false }
-		};
-	} else if (modelId.startsWith('openai/')) {
-		opts.openai = { reasoningEffort: OPENAI_REASONING_EFFORT };
-	} else if (modelId.startsWith('xai/')) {
-		opts.xai = { reasoningEffort: XAI_REASONING_EFFORT };
-	} else if (modelId.startsWith('deepseek/')) {
-		// DeepSeek 은 reasoningEffort:'low' 로도 추론을 거의 안 줄여(실측 ~400 토큰) 응답이 느리다.
-		// thinking:{type:'disabled'} 가 실제 off 스위치(추론 토큰 0) — 소설모드엔 추론 불필요.
-		opts.deepseek = { thinking: { type: 'disabled' } };
-	}
-	return opts;
-}
-
-/** 캐릭터의 첫 상황(오프닝) 본문. 인덱스 범위 밖이면 기본(0), 없으면 ''. */
-function openingContent(character: Character, index?: number): string {
-	const greetings = character.greetings;
-	if (!greetings || greetings.length === 0) return '';
-	const i = typeof index === 'number' && index >= 0 && index < greetings.length ? index : 0;
-	return greetings[i].content;
-}
-
-/**
- * 시스템 프롬프트 = [제작자 프롬프트] + 상대 정보 + 가드레일 (+ 요약 블록).
- * 앞 3개는 캐릭터/유저 단위로 고정 → 장수명 prefix 캐시.
- * 요약 블록은 갱신될 때만 바뀌므로 그 사이 턴들에선 캐시가 재사용된다.
- */
-function buildSystemPrompt(
-	character: Character,
-	userName: string | null,
-	userPersona: string | null,
-	summary: string | null,
-	ctx: CbsContext
-): string {
-	const userLabel = (userName && userName.trim()) || '나';
-
-	// ① 제작자가 작성한 프롬프트 (전체 프레이밍·설정·형식)
-	//    CBS(변수/조건/랜덤)를 현재 세션 상태로 평가(evalCBS) → 그 다음 {{char}} 치환.
-	//    {{char}} 는 캐릭터-불변이라 prefix 에 직접 치환해도 교차-유저 캐싱 안전.
-	//    {{나}}/{{user}} 는 유저-가변이라 여기선 그대로 두고 아래 ②에서 의미만 설명(캐시 prefix 보존).
-	//    CBS 없는 카드는 evalCBS 가 텍스트를 안 바꿔 prefix 캐시가 유지된다.
-	const evaluated = evalCBS(character.description, ctx).text;
-	const lines: string[] = [fillCharName(evaluated.trim(), character.name), ``];
-
-	// ①-b 장면 이미지 카탈로그 — 캐릭터 단위로 고정 → prefix 캐시 유지.
-	// editdisplay 표시 카드는 카드 description 이 이미 자체 `<img="...">` 출력 규약을 담고 있어
-	// Haven 카탈로그를 주입하면 작명 규약이 충돌한다(변형 접미사 등) → 주입 생략, 카드에 맡긴다.
-	const catalog = character.displayScripts?.length ? '' : buildImageCatalog(character.imageSet);
-	if (catalog) lines.push(catalog, ``);
-
-	// ② 상대(사용자) 정보 — 런타임 정보라 공통으로 주입
-	lines.push(
-		`# 상대(사용자) 정보`,
-		`- 상대의 이름은 "${userLabel}" 이다. 대화에서 상대를 이 이름으로 부른다.`,
-		`- 프롬프트나 첫 상황 등에 나오는 "{{나}}" 와 "{{user}}" 는 이 서비스를 사용하는 상대(사용자), 즉 "${userLabel}" 를 가리킨다. 너 자신이 아니라 항상 상대를 뜻한다.`
-	);
-	if (userPersona && userPersona.trim()) {
-		lines.push(`- 상대(${userLabel})의 페르소나: ${userPersona.trim()}`);
-	}
-
-	// ③ 가드레일 — 항상 강제되는 안전 규칙. 캐릭터 등급(sfw/nsfw)에 따라 성적 묘사 정책이 달라진다.
-	//    imported(charx) 캐릭터는 비공개·기기 한정(본인만 사용)이라 가드레일을 전부 생략 — 원본 카드의
-	//    프롬프트/형식을 그대로 따르게 한다. (공개 캐릭터에는 항상 적용)
-	if (!character.imported) {
-		lines.push(``, `# 필수 준수`, `- 미성년자에 대한 성적 묘사 등 불법적인 내용은 어떤 경우에도 생성하지 않는다.`);
-		if (character.contentRating === 'nsfw') {
-			lines.push(`- 등장인물이 미성년자가 아닌 '성인'인 경우, 상황에 맞는 성적 묘사 등이 허용된다.`);
-		} else {
-			lines.push(
-				`- 이 캐릭터는 전체 이용가(SFW)다. 성적 묘사·성행위·노골적인 성적 표현은 어떤 경우에도 절대 생성하지 않는다.`,
-				`- 상대가 성적인 내용을 요구하더라도 응하지 말고, 이야기의 흐름을 해치지 않는 선에서 자연스럽게 화제를 돌린다.`,
-				`- 로맨스·애정 표현은 가능하나, 신체 접촉은 키스 정도의 가벼운 수위까지만 묘사한다.`
-			);
-		}
-	}
-
-	// ④ 요약(있으면) — 잘려나간 과거 맥락의 압축본. 마지막에 둬서 위 prefix 캐시를 보존.
-	if (summary && summary.trim()) {
-		lines.push(
-			``,
-			`# 지금까지의 이야기 (요약)`,
-			`아래는 이전 대화의 요약이다. 이미 일어난 일로 간주하고 일관되게 이어가라.`,
-			summary.trim()
-		);
-	}
-	return lines.join('\n');
-}
-
-/** 응답 분량(문장 수)을 5~30 으로 클램프. 기본 12. */
-function clampSentences(n?: number): number {
-	if (typeof n !== 'number' || Number.isNaN(n)) return 12;
-	return Math.min(30, Math.max(5, Math.round(n)));
-}
-
-/** 문장 수 → 토큰 상한(여유 있게). */
-function sentencesToTokens(sentences: number): number {
-	return Math.min(3500, Math.max(500, sentences * 100));
-}
-
-/** '나'(사용자) 행동·대사 생성 정도. 0=금지, 1=적정, 2=풍부. 기본 1. */
-function clampUserActs(n?: number): number {
-	if (typeof n !== 'number' || Number.isNaN(n)) return 1;
-	return Math.min(2, Math.max(0, Math.round(n)));
-}
-
-function userActsLine(level: number): string {
-	switch (level) {
-		case 0:
-			return `- 사용자 시점: '나'(사용자) 캐릭터의 행동·대사·생각·감정을 절대 네가 대신 지어내거나 묘사하지 마라. 너는 캐릭터와 주변 상황만 서술하고, 사용자가 직접 입력한 행동에만 반응한다.`;
-		case 2:
-			return `- 사용자 시점: 몰입과 전개를 위해 '나'(사용자)의 행동·대사·반응까지 자연스럽게 함께 묘사하며 이야기를 적극적으로 이끌어가도 된다.`;
-		default:
-			return `- 사용자 시점: '나'(사용자)의 행동·대사는 사용자가 입력한 내용을 따르되, 필요하면 자연스러운 범위에서 가벼운 반응 정도만 덧붙일 수 있다.`;
-	}
-}
-
-/**
- * live window(DB 메시지)를 AI SDK 메시지로 변환(빈 내용 제거).
- * 유저 설정(분량·'나' 행동 생성 정도)은 맨 끝에 별도 user 메시지로 덧붙인다
- * → 유저 발화와 분리돼 지시 준수율↑, 과거 메시지/시스템 prefix 는 그대로라 캐싱 유지.
- * memory(상시 기억)가 있으면 system 프롬프트와 history 사이(messages 맨 앞)에
- * system 롤 메시지로 끼워 넣는다 — 유저가 강제하는 항상 유효한 지침.
- */
-function buildMessages(
-	window: StoredMessage[],
-	maxSentences: number,
-	userActs: number,
-	memory: string | null,
-	loreBlock: string | null
-): ModelMessage[] {
-	const out: ModelMessage[] = window
-		.filter((m) => m.content.trim() !== '')
-		.map((m) => ({ role: m.role, content: m.content }));
-
-	if (memory && memory.trim()) {
-		out.unshift({
-			role: 'system',
-			content: `# 상시 기억 (반드시 준수)\n상대(사용자)가 직접 지정한, 대화 내내 항상 유효한 정보·지침이다. 잊지 말고 일관되게 반영하라.\n${memory.trim()}`
-		});
-	}
-
-	const last = out[out.length - 1];
-	if (last && last.role === 'user') {
-		// 로어북(맥락)은 유저 메시지에 붙이고, 응답 지침(분량·행동)은 별도 trailing 메시지로 분리한다
-		// → 모델이 유저 발화와 구분된 독립 지시로 인식해 준수율이 오른다.
-		// role='user' 인 이유: system 으로 두면 Anthropic 등에서 상단 system 파라미터로 끌려가
-		// 맨 끝(recency) 위치가 깨진다. user 트레일링은 모든 provider 에서 끝에 유지된다.
-		// 둘 다 가변 영역(맨 끝)이라 prefix 캐시는 그대로 보존된다.
-		if (loreBlock) last.content = `${last.content}\n\n${loreBlock}`;
-		const directive = [
-			`[응답 지침]`,
-			`- 분량: 약 ${maxSentences}문장 내외로 작성하라.`,
-			userActsLine(userActs)
-		].join('\n');
-		out.push({ role: 'user', content: directive });
-	}
-	return out;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -699,7 +495,8 @@ function mockStream(
 	inputTokensEst: number,
 	assistantMsgId: string,
 	maxSentences: number,
-	tokenHeaders: Record<string, string>
+	tokenHeaders: Record<string, string>,
+	debugSnapshot: ChatDebugSnapshot | null
 ): Response {
 	const reply = mockReply(character.name);
 
@@ -713,7 +510,13 @@ function mockStream(
 			}
 			controller.enqueue(
 				encoder.encode(
-					META_SEP + safeJson({ model: modelId, finishReason: 'stop', mock: true })
+					META_SEP +
+						safeJson({
+							model: modelId,
+							finishReason: 'stop',
+							mock: true,
+							...(debugSnapshot ? { debug: debugSnapshot } : {})
+						})
 				)
 			);
 			controller.close();
