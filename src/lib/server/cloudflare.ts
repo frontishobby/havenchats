@@ -165,6 +165,7 @@ query R2Storage($acct: String!, $bucket: String!, $start: Time!) {
         orderBy: [datetime_DESC]
       ) {
         max { objectCount payloadSize metadataSize }
+        dimensions { datetime }
       }
     }
   }
