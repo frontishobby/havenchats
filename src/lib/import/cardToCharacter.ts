@@ -161,7 +161,7 @@ export function isV3Card(card: unknown): card is V3Card {
 }
 
 /** asset 이름 → 매칭 토큰: 트레일링 ".<ext>" 가 있으면 떼어낸다. */
-function matchToken(name: string, ext: string): string {
+export function matchToken(name: string, ext: string): string {
 	const suffix = `.${ext}`.toLowerCase();
 	return name.toLowerCase().endsWith(suffix) ? name.slice(0, name.length - suffix.length) : name;
 }

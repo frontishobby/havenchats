@@ -57,6 +57,26 @@ export interface RisuModuleMeta {
 	cjs?: string;
 	lorebook?: RisuLoreEntry[];
 	lowLevelAccess?: boolean;
+	/** [name, id(export 시 ''), ext] — 바이너리 에셋 루프와 **순서(index)로 매칭**. */
+	assets?: [string, string, string][];
+}
+
+/** 단독 .risum 에서 추출한 에셋 한 개(이미지). bytes 는 RPack 디코드 완료, 바로 저장 가능. */
+export interface RisuModuleAsset {
+	name: string;
+	ext: string; // 실제 바이트에서 스니핑(webp|avif|png|jpg|gif)
+	bytes: Uint8Array;
+}
+
+/** 매직바이트로 이미지 포맷 추정(compressImage 가 ext 메타와 다르게 재인코딩할 수 있어 바이트 기준). */
+function sniffImageExt(b: Uint8Array): string | null {
+	if (b.length >= 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'webp';
+	if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'png';
+	if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpg';
+	if (b.length >= 4 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return 'gif';
+	// AVIF: ....ftyp....avif (ftyp 박스 brand)
+	if (b.length >= 12 && b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70 && b[8] === 0x61 && b[9] === 0x76 && b[10] === 0x69 && b[11] === 0x66) return 'avif';
+	return null;
 }
 
 /** risum 바이너리에서 module 메타(JSON)만 추출. 형식 불일치/손상 시 null. */
@@ -72,6 +92,55 @@ export function readModuleMeta(buf: Uint8Array): RisuModuleMeta | null {
 		const parsed = JSON.parse(json) as { type?: string; module?: RisuModuleMeta };
 		if (parsed?.type !== 'risuModule' || !parsed.module) return null;
 		return parsed.module;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * risum 바이너리에서 module 메타 **+ 에셋(이미지)** 까지 추출. 단독 .risum 첨부용.
+ *
+ * 포맷(원본 modules.ts exportModule/readModule):
+ *   매직(111)·버전(0)·UInt32LE mainLen·RPack(JSON) · [ markByte(1)·UInt32LE len·RPack(이미지) ]* · 0(EOF)
+ * 에셋 메타는 module.assets[i] = [name, '', ext], 바이너리 i 번째 에셋과 순서로 대응.
+ * compressImage 가 webp 등으로 재인코딩할 수 있어 ext 는 바이트 스니핑을 우선한다. 형식 불일치 시 null.
+ */
+export function readModuleFull(
+	buf: Uint8Array
+): { meta: RisuModuleMeta; assets: RisuModuleAsset[] } | null {
+	try {
+		if (buf.length < 6) return null;
+		if (buf[0] !== 111 || buf[1] !== 0) return null;
+		const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+		let pos = 2;
+		const mainLen = view.getUint32(pos, true);
+		pos += 4;
+		if (pos + mainLen > buf.length) return null;
+		const json = new TextDecoder().decode(decodeRPack(buf.subarray(pos, pos + mainLen)));
+		pos += mainLen;
+		const parsed = JSON.parse(json) as { type?: string; module?: RisuModuleMeta };
+		if (parsed?.type !== 'risuModule' || !parsed.module) return null;
+		const meta = parsed.module;
+		const metaAssets = Array.isArray(meta.assets) ? meta.assets : [];
+
+		const assets: RisuModuleAsset[] = [];
+		let i = 0;
+		while (pos < buf.length) {
+			const mark = buf[pos];
+			pos += 1;
+			if (mark !== 1) break; // 0(EOF) 또는 알 수 없는 마크 → 종료.
+			if (pos + 4 > buf.length) break;
+			const len = view.getUint32(pos, true);
+			pos += 4;
+			if (pos + len > buf.length) break;
+			const bytes = decodeRPack(buf.subarray(pos, pos + len)); // 새 Uint8Array(복사본).
+			pos += len;
+			const m = metaAssets[i];
+			const ext = sniffImageExt(bytes) || (m ? String(m[2] ?? '').toLowerCase() : '');
+			if (ext) assets.push({ name: m ? String(m[0] ?? '') : '', ext, bytes });
+			i++;
+		}
+		return { meta, assets };
 	} catch {
 		return null;
 	}

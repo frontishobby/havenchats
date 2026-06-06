@@ -20,9 +20,12 @@
 	// 선택적: 별도 .risum 모듈(로어북·감정 스프라이트)을 캐릭터에 병합.
 	let moduleInput = $state<HTMLInputElement | null>(null);
 	let attachingModule = $state(false);
-	let attachedModule = $state<{ name: string; loreAdded: number; displayAdded: number } | null>(
-		null
-	);
+	let attachedModule = $state<{
+		name: string;
+		loreAdded: number;
+		displayAdded: number;
+		assetsAdded: number;
+	} | null>(null);
 
 	let importing = $state(false);
 	let progress = $state<ImportProgress | null>(null);
@@ -56,8 +59,8 @@
 		attachingModule = true;
 		error = '';
 		try {
-			// parsed.card 는 $state 프록시 → in-place 수정이 반응성으로 전파됨.
-			attachedModule = await applyExternalModule(parsed.card, file);
+			// parsed 는 $state 프록시 → in-place 수정(card·extra)이 반응성으로 전파됨.
+			attachedModule = await applyExternalModule(parsed, file);
 		} catch (err) {
 			error = err instanceof Error ? err.message : '.risum 을 읽지 못했어요.';
 		} finally {
@@ -194,7 +197,7 @@
 				{#if attachedModule}
 					<p class="module-on">
 						✓ 모듈 <b>{attachedModule.name}</b> 병합됨 — 로어북 +{attachedModule.loreAdded}, 표시
-						스크립트 +{attachedModule.displayAdded}
+						스크립트 +{attachedModule.displayAdded}, 이미지 +{attachedModule.assetsAdded}
 					</p>
 					<span class="module-hint">교체하려면 '다른 파일'로 처음부터 다시 선택하세요.</span>
 				{:else}
