@@ -12,7 +12,8 @@
 
 	let { data }: { data: PageData } = $props();
 
-	// 로컬에서 즉시 제거할 수 있도록 복사본 유지(소유자 삭제 시).
+	// 로컬에서 즉시 제거할 수 있도록 복사본 유지(소유자 삭제 시). 유저 전환 시 아래 $effect 가 재설정.
+	// svelte-ignore state_referenced_locally
 	let items = $state<Character[]>(data.characters);
 	let deleting = $state<string | null>(null);
 	let avatarFailed = $state(false);
@@ -58,7 +59,8 @@
 	// 방문자 모드: 상세 모달.
 	let detail = $state<Character | null>(null);
 
-	// 페이지(유저)가 바뀌면 로컬 상태 초기화.
+	// 페이지(유저)가 바뀌면 로컬 상태 초기화. 변경 감지 센티넬이라 초기값만 캡처.
+	// svelte-ignore state_referenced_locally
 	let lastId = $state(data.profile.id);
 	$effect(() => {
 		if (data.profile.id !== lastId) {

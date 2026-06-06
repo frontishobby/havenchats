@@ -3,7 +3,7 @@
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
-	const c = data.character;
+	const c = $derived(data.character);
 </script>
 
 <svelte:head>

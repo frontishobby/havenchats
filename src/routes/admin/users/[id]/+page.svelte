@@ -5,7 +5,8 @@
 
 	let { data }: { data: PageData } = $props();
 
-	// 차단 상태(낙관적 갱신용 로컬 미러).
+	// 차단 상태(낙관적 갱신용 로컬 미러). 초기값만 캡처하고 갱신은 아래 $effect 가 담당.
+	// svelte-ignore state_referenced_locally
 	let blockedReason = $state<string | null>(data.detail.blockedReason);
 	let working = $state(false);
 	$effect(() => {

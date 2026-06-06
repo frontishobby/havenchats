@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { invalidate, replaceState } from '$app/navigation';
 	import { MODELS, DEFAULT_MODEL_ID, getModel } from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
@@ -172,12 +172,14 @@
 		return greetingMessages(openingFor(d.character, d.openingIndex));
 	}
 
-	let messages = $state<ChatMessage[]>(initialMessages(data));
+	// 초기 상태는 마운트 시점의 data 만 캡처(이후 load 변경은 아래 loadKey $effect 가 재적용).
+	const initData = untrack(() => data);
+	let messages = $state<ChatMessage[]>(initialMessages(initData));
 	// 현재 세션 id. null 이면 첫 전송 시 서버가 lazy 생성 → 응답 헤더로 회수.
-	let sessionId = $state<string | null>(data.sessionId);
+	let sessionId = $state<string | null>(initData.sessionId);
 	// ── 과거 메시지 페이징 ── 최초엔 최근 20개만. 위로 올리면 더 불러온다.
-	let oldestSeq = $state(data.oldestSeq ?? 0); // 현재 로드된 가장 오래된 seq
-	let hasMore = $state(data.hasMore ?? false); // 그 앞에 더 오래된 메시지가 있는지
+	let oldestSeq = $state(initData.oldestSeq ?? 0); // 현재 로드된 가장 오래된 seq
+	let hasMore = $state(initData.hasMore ?? false); // 그 앞에 더 오래된 메시지가 있는지
 	let loadingMore = $state(false);
 
 	// ── 대화 요약(설정 모달에서 표시·편집) ──
@@ -358,7 +360,7 @@
 	// 서버 로드가 가리키는 (캐릭터·세션·오프닝) 조합을 키로 비교한다.
 	// 로컬 sessionId(첫 전송 시 lazy 생성으로 갱신)는 키에 넣지 않는다 → 전송 중 메시지가 날아가지 않게.
 	const loadKey = $derived(`${data.character.id}|${data.sessionId ?? ''}|${data.openingIndex}`);
-	let appliedKey = loadKey;
+	let appliedKey = untrack(() => loadKey);
 	$effect(() => {
 		if (loadKey === appliedKey) return;
 		appliedKey = loadKey;

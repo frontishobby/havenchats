@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import PromptGuideModal from '$lib/components/PromptGuideModal.svelte';
@@ -79,24 +80,28 @@
 	const IMAGE_MAX_BYTES = 3 * 1024 * 1024;
 	const ACCEPT = ['image/webp', 'image/avif'];
 
-	let name = $state(initial?.name ?? '');
-	let tagline = $state(initial?.tagline ?? '');
-	let intro = $state(initial?.intro ?? '');
-	let description = $state(initial?.description ?? '');
+	// 폼 필드는 마운트 시 initial 을 한 번만 캡처한다(이후 prop 변경엔 반응 안 함 — 의도).
+	// 매 필드마다 svelte-ignore 를 다는 대신 스냅샷 한 번으로 묶는다.
+	const init = untrack(() => initial);
+
+	let name = $state(init?.name ?? '');
+	let tagline = $state(init?.tagline ?? '');
+	let intro = $state(init?.intro ?? '');
+	let description = $state(init?.description ?? '');
 	const descTokens = $derived(estimatePromptTokens(description));
-	let audience = $state<Audience>(initial?.audience ?? 'all');
-	let nsfw = $state(initial?.contentRating === 'nsfw');
-	let isPrivate = $state(initial?.visibility === 'private');
+	let audience = $state<Audience>(init?.audience ?? 'all');
+	let nsfw = $state(init?.contentRating === 'nsfw');
+	let isPrivate = $state(init?.visibility === 'private');
 
 	// 첫 상황(오프닝) — 첫 항목이 기본(필수). 각 항목은 이름(선택용)과 본문을 가진다.
 	let greetings = $state<Opening[]>(
-		initial?.greetings?.length
-			? initial.greetings.map((g) => ({ name: g.name, content: g.content }))
+		init?.greetings?.length
+			? init.greetings.map((g) => ({ name: g.name, content: g.content }))
 			: [{ name: '', content: '' }]
 	);
 
 	let tagInput = $state('');
-	let tags = $state<string[]>(initial?.tags ? [...initial.tags] : []);
+	let tags = $state<string[]>(init?.tags ? [...init.tags] : []);
 
 	let imageFile = $state<File | null>(null);
 	let imagePreview = $state<string | null>(null);
@@ -110,11 +115,11 @@
 
 	// ── 장면 이미지 세트 (모달에서 편집, 제출 시 함께 전송) ──
 	// 방식: grid(축×조합) 또는 named(이름별 플랫). initial 의 kind 로 시작값 결정.
-	let imageMode = $state<'grid' | 'named'>(isNamed(initial?.imageSet) ? 'named' : 'grid');
+	let imageMode = $state<'grid' | 'named'>(isNamed(init?.imageSet) ? 'named' : 'grid');
 	let imagesOpen = $state(false);
 	let namedOpen = $state(false);
 
-	const initialGrid = isGrid(initial?.imageSet) ? initial.imageSet : null;
+	const initialGrid = isGrid(init?.imageSet) ? init.imageSet : null;
 	let sceneAxes = $state<SceneAxisDraft[]>(
 		initialGrid?.axes.map((a) => ({ label: a.label, values: [...a.values] })) ?? []
 	);
@@ -129,7 +134,7 @@
 	const sceneCount = $derived(sceneEntries.length);
 
 	// 플랫 네임드 드래프트(initial 이 named 면 기존 이미지로 시작).
-	const initialNamed = isNamed(initial?.imageSet) ? initial.imageSet : null;
+	const initialNamed = isNamed(init?.imageSet) ? init.imageSet : null;
 	let namedImages = $state<NamedDraft[]>(
 		initialNamed?.images.map((img) => ({
 			id: img.id,
@@ -144,7 +149,7 @@
 
 	// ── 로어북 (모달에서 편집, 제출 시 JSON 으로 전송) ──
 	let loreEntries = $state<LoreEntry[]>(
-		initial?.lorebook?.entries.map((e) => ({
+		init?.lorebook?.entries.map((e) => ({
 			id: e.id,
 			keys: [...e.keys],
 			content: e.content,
@@ -163,8 +168,8 @@
 	// ── 스크립트 기본 변수 (관리자 import 편집 전용) ──
 	// import 캐릭터의 defaultVariables 를 키=값 행으로 노출/편집. 세션 시작 시 변수 시딩에 쓰인다.
 	let scriptVars = $state<{ key: string; value: string }[]>(
-		initial?.defaultVariables
-			? Object.entries(initial.defaultVariables).map(([key, value]) => ({ key, value }))
+		init?.defaultVariables
+			? Object.entries(init.defaultVariables).map(([key, value]) => ({ key, value }))
 			: []
 	);
 	function addScriptVar() {
@@ -203,7 +208,7 @@
 
 	// 새로 고른 이미지가 있으면 그것, 없으면 기존(수정) 썸네일.
 	const displayImage = $derived(imagePreview ?? initial?.avatarUrl ?? null);
-	const isEdit = mode === 'edit';
+	const isEdit = untrack(() => mode) === 'edit';
 
 	const AUDIENCES: { value: Audience; label: string; hint: string }[] = [
 		{ value: 'all', label: '공통', hint: '모두에게' },
