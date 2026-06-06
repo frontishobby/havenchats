@@ -32,7 +32,7 @@ export const IMAGE_LIMITS = {
 
 /** 플랫 네임드 방식 제약. import(charx) 는 대량 갤러리라 상한이 넉넉하다. */
 export const NAMED_LIMITS = {
-	MAX_IMAGES: 1000,
+	MAX_IMAGES: 6000,
 	NAME_MAX: 80
 } as const;
 
