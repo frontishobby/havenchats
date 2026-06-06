@@ -146,7 +146,23 @@ Location:… ]` → `<div class="cartoon-bg">` 상태창). **Haven 은 소설 �
 
 ---
 
-### 1-4b. HTML 표시 모드 (editdisplay HTML 렌더링) — **별도/후순위, 미결정**
+### 1-4b. HTML 표시 모드 (editdisplay HTML 렌더링) — ✅ **구현됨 (감정 스프라이트 한정, 2026-06-06)**
+
+> 구현(옵션 A): `src/lib/htmlRender.ts`(encodeStyle→DOMPurify[훅: script·on*·javascript:·비유튜브iframe 제거,
+> href http(s)만+target/rel]→decodeStyle[@adobe/css-tools 로 모든 셀렉터에 `.chattext` 스코프 접두, @import 제거]),
+> `src/lib/cbs.ts`(에셋/배열 매크로 추가: raw/img/asset/path/emotion·assetlist·array·filter·#each/slot·settempvar,
+> CbsContext 에 assets/resolveAsset/temp), `src/lib/import/displayScripts.ts`(risum regex 중 editdisplay 추출·정규식
+> 적용·NamedImageSet 에셋 리졸버[ext/대소문자 정규화+편집거리 퍼지]), `characters.display_scripts` 컬럼(migration 0016,
+> 표시 전용이라 클라로 내려감), `/api/chat` 은 display 카드면 buildImageCatalog·pinSceneCodes 스킵(카드 자체 `<img>`
+> 규약에 위임), `chat/[id]/+page.svelte` 는 라인별 정규식 매칭 시 정규식→CBS(순수, SSR/클라 동일)→`<div class="chattext"
+> use:cardHtml>` 에서 DOMPurify 세정 후 innerHTML 주입(액션=클라 전용 → hydration 안전).
+> 범위: **감정 스프라이트(Catrina/Da-yeon/무인도)** 만. Celis 류 인터랙티브 UI(설정 토글·risu-trigger·세션변수 게이팅)는
+> 경량 트리거(§1-3)가 선행돼야 해서 제외. 검증: CBS 6/6 · 실카드 3종 end-to-end 해석 · DOMPurify+스코핑 보안 13/13(jsdom)
+> · check 0 errors · build·dev 스모크. (아래는 원래 설계 메모)
+
+---
+
+#### (원래 메모) HTML 표시 모드 — 별도/후순위, 미결정
 
 editdisplay 정규식 대부분이 생 HTML/CSS(감정스프라이트·상태창·선택UI)를 뿜는다(§1-4). 이걸 실제로
 그리려면 "HTML 렌더링 장치"가 필요. **RisuAI 원본 조사(2026-06-06)로 어떻게 하는지 파악함.**

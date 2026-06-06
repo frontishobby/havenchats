@@ -60,7 +60,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			greetings: c.greetings,
 			imageSet,
 			lorebook: c.lorebook,
-			scriptData: null
+			scriptData: null,
+			displayScripts: null
 		});
 	} catch (e) {
 		// DB 실패 시 업로드한 이미지는 모두 정리 (고아 오브젝트 방지)

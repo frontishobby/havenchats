@@ -11,6 +11,7 @@ import type {
 	CharacterLorebook,
 	CharacterScriptData,
 	ContentRating,
+	DisplayScript,
 	NamedImage,
 	Opening
 } from '$lib/types';
@@ -30,8 +31,25 @@ export interface ImportMeta {
 	tags: string[];
 	lorebook: CharacterLorebook | null;
 	scriptData: CharacterScriptData | null;
+	displayScripts: DisplayScript[] | null;
 	contentRating: ContentRating;
 	audience: Audience;
+}
+
+/** editdisplay 표시 스크립트 검증 — in/out 문자열 + 길이/개수 상한(과대 카드 방어). */
+function parseDisplayScripts(raw: unknown): DisplayScript[] | null {
+	if (!Array.isArray(raw)) return null;
+	const out: DisplayScript[] = [];
+	for (const s of raw) {
+		const x = (s ?? {}) as { in?: unknown; out?: unknown; flags?: unknown };
+		if (typeof x.in !== 'string' || typeof x.out !== 'string') continue;
+		if (!x.in || x.in.length > 2000 || x.out.length > 100_000) continue;
+		const flags =
+			typeof x.flags === 'string' ? x.flags.replace(/[^dgimsuvy]/g, '').slice(0, 8) || 'g' : 'g';
+		out.push({ in: x.in, out: x.out, flags });
+		if (out.length >= 30) break;
+	}
+	return out.length ? out : null;
 }
 
 /** manifest 한 항목(클라가 보낸 이미지 목록 — 아직 id 미할당). */
@@ -108,6 +126,7 @@ export function parseImportMeta(raw: unknown): MetaResult {
 			tags,
 			lorebook,
 			scriptData,
+			displayScripts: parseDisplayScripts(o.displayScripts),
 			contentRating,
 			audience
 		}

@@ -22,6 +22,18 @@ export interface CbsContext {
 	rng: () => number;
 	/** 현재 시각(epoch ms). time/date/unixtime/datetimeformat 에 사용. 결정성 위해 ctx 로 주입. */
 	now: number;
+	/**
+	 * 에셋 이름 목록(`{{assetlist}}`/`{{emotionlist}}` 용, 원본 케이스 보존).
+	 * imported 카드의 editdisplay 표시 스크립트가 `{{#each {{assetlist}}…}}` 로 감정 에셋을 훑는다.
+	 */
+	assets?: string[];
+	/**
+	 * 에셋 매크로 리졸버 — `{{raw|path::name}}`→URL, `{{img|asset|emotion::name}}`→`<img>`.
+	 * imported 카드 표시 렌더 전용(클라). 미정의면 에셋 매크로는 미지원(제거+플래그).
+	 */
+	resolveAsset?: (name: string, type: string) => string;
+	/** `{{settempvar}}`/`{{gettempvar}}` 임시 변수 — 평가 1회 한정(세션 영속 X). */
+	temp?: Record<string, string>;
 }
 
 export interface CbsResult {
@@ -375,6 +387,50 @@ function evalInline(content: string, ctx: CbsContext): string | null {
 			return asArray(parts[1] ?? '').join('::');
 		case 'arraylength':
 			return String(asArray(parts[1] ?? '').length);
+		case 'array':
+		case 'makearray':
+		case 'a':
+			return JSON.stringify(parts.slice(1));
+		case 'filter': {
+			// RisuAI filter: all(빈+중복 제거) / nonempty(빈만 제거) / unique(중복만 제거).
+			const arr = asArray(parts[1] ?? '');
+			const ftype = (parts[2] ?? 'all').toLowerCase();
+			const out = arr.filter((f, i) => {
+				if (ftype === 'nonempty') return f !== '';
+				if (ftype === 'unique') return i === arr.indexOf(f);
+				return f !== '' && i === arr.indexOf(f);
+			});
+			return JSON.stringify(out);
+		}
+
+		// ── 임시 변수(평가 1회 한정) ──
+		case 'settempvar': {
+			if (!ctx.temp) ctx.temp = {};
+			const k = (parts[1] ?? '').toLowerCase();
+			if (k) ctx.temp[k] = parts[2] ?? '';
+			return '';
+		}
+		case 'gettempvar':
+			return ctx.temp?.[(parts[1] ?? '').toLowerCase()] ?? '';
+
+		// ── 에셋(imported 표시 카드 전용) ──
+		case 'assetlist':
+		case 'emotionlist':
+			return JSON.stringify(ctx.assets ?? []);
+		case 'slot':
+			// #each 확장 시 본문에서 텍스트 치환된다. 여기 도달 = each 밖/미해석 → 빈 문자열.
+			return '';
+		case 'raw':
+		case 'path':
+		case 'img':
+		case 'image':
+		case 'asset':
+		case 'bg':
+		case 'bgm':
+		case 'emotion':
+			return ctx.resolveAsset
+				? ctx.resolveAsset(parts.slice(1).join('::').trim(), head)
+				: null;
 
 		// ── 시간/날짜(ctx.now 기준) — RisuAI: 무인자는 비패딩, 인자는 dateTimeFormat ──
 		case 'unixtime':
@@ -430,18 +486,91 @@ function evalInline(content: string, ctx: CbsContext): string | null {
 }
 
 /**
+ * `{{#each ARRAY as VAR}} BODY {{/each}}` 확장. (imported 표시 카드의 감정 에셋 순회용.)
+ *
+ * 우리 인라인 평가기는 가장 안쪽 `{{}}` 부터 풀기 때문에, 확장 전에 `{{slot::VAR}}` 가 먼저
+ * 소거된다. 그래서 #each 만 **인라인 평가 전에** 별도 처리한다:
+ *   - 가장 안쪽 each(본문에 `{{#each` 없음)를 brace 균형으로 잘라낸다(헤더의 `{{assetlist}}` 같은
+ *     중첩 `{{}}` 도 깊이 추적으로 정확히 끝맺음).
+ *   - 헤더는 재귀 evalCBS 로 평가해 ARRAY 를 리터럴(JSON 배열)로 만든다.
+ *   - 원소마다 본문의 `{{slot::VAR}}` 를 치환한 뒤 재귀 evalCBS → 결과를 이어붙여 each 를 대체한다.
+ * 나머지(split/filter/spread/random/raw …)는 호출부의 일반 인라인 루프가 처리한다.
+ */
+function expandEach(text: string, ctx: CbsContext, depth: number): string {
+	if (depth > 12 || text.indexOf('{{#each') < 0) return text;
+	for (let guard = 0; guard < 5000; guard++) {
+		// 가장 안쪽 each = 그 뒤로 다음 토큰이 {{/each}} 인 #each. (본문에 #each 없음)
+		const open = text.lastIndexOf('{{#each');
+		if (open < 0) return text;
+
+		// 헤더 끝(`}}`) 찾기 — `{{`/`}}` 깊이 추적(헤더 내 {{assetlist}} 등 중첩 허용).
+		let i = open + 2; // 첫 '{{' 안쪽
+		let d = 1;
+		while (i < text.length && d > 0) {
+			if (text.startsWith('{{', i)) {
+				d++;
+				i += 2;
+			} else if (text.startsWith('}}', i)) {
+				d--;
+				i += 2;
+			} else i++;
+		}
+		if (d !== 0) return text; // 헤더 안 닫힘 → 포기
+		const headerEnd = i; // '}}' 다음
+		const headerInner = text.slice(open + 2, headerEnd - 2); // '#each …'
+
+		// 본문 끝(`{{/each}}`) 찾기 — lastIndexOf 로 잡은 each 는 본문에 #each 가 없으니 첫 {{/each}}.
+		const close = text.indexOf('{{/each}}', headerEnd);
+		if (close < 0) return text;
+		const body = text.slice(headerEnd, close);
+		const after = close + '{{/each}}'.length;
+
+		// 헤더 평가 → "ARRAY as VAR" 또는 (구식) "ARRAY VAR".
+		const headerExpr = headerInner.replace(/^#each\s*/, '');
+		const headerVal = evalCBS(headerExpr, { ...ctx, vars: ctx.vars }, depth + 1).text.trim();
+		let arrStr = headerVal;
+		let varName = '';
+		const asIdx = headerVal.lastIndexOf(' as ');
+		if (asIdx >= 0) {
+			arrStr = headerVal.slice(0, asIdx).trim();
+			varName = headerVal.slice(asIdx + 4).trim();
+		} else {
+			const sp = headerVal.lastIndexOf(' ');
+			if (sp >= 0) {
+				arrStr = headerVal.slice(0, sp).trim();
+				varName = headerVal.slice(sp + 1).trim();
+			}
+		}
+		const arr = asArray(arrStr);
+		let expanded = '';
+		if (varName) {
+			const slotTok = `{{slot::${varName}}}`;
+			for (const el of arr) {
+				const inst = body.split(slotTok).join(el);
+				expanded += evalCBS(inst, { ...ctx, vars: ctx.vars }, depth + 1).text;
+			}
+		}
+		text = text.slice(0, open) + expanded + text.slice(after);
+	}
+	return text;
+}
+
+/**
  * 본문의 CBS 를 ctx 기준으로 평가/정리. ctx.vars 는 setvar/addvar 로 변이된다.
  * 안→밖 순서로 인라인 매크로를 모두 풀고(블록 조건이 리터럴이 됨), if 블록을 가장 안쪽부터 분기.
  */
-export function evalCBS(input: string, ctx: CbsContext): CbsResult {
+export function evalCBS(input: string, ctx: CbsContext, depth = 0): CbsResult {
 	let usedScripting = false;
 	let text = input
 		.replace(/\{\{\s*char\s*\}\}/gi, MASK.char)
 		.replace(/\{\{\s*user\s*\}\}/gi, MASK.user)
 		.replace(/\{\{\s*나\s*\}\}/g, MASK.na);
 
-	// $슬롯 마커 제거($FirstMessage 등).
+	// $슬롯 마커 제거($FirstMessage 등). (정규식 캡처 $1.. 은 displayScripts 가 이미 치환함)
 	if (/\$[A-Za-z]\w*/.test(text)) text = text.replace(/\$[A-Za-z]\w*/g, '');
+
+	// #each 는 인라인 평가 전에 확장(slot 조기 소거 방지).
+	if (text.indexOf('{{#each') >= 0) text = expandEach(text, ctx, depth);
 
 	for (let round = 0; round < 5000; round++) {
 		let changed = false;

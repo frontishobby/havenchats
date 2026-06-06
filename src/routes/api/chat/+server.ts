@@ -282,7 +282,10 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			);
 
 			// 저장 직전 위치코드 {AAB} → 불변 토큰 {#id} 로 고정(이후 제작자 수정에 안 흔들림).
-			const clean = pinSceneCodes(reply.trim(), character.imageSet);
+			// 단, editdisplay 표시 카드는 렌더 때 정규식이 `<img="...">` 를 직접 변환하므로 핀하지 않고 원형 보존.
+			const clean = character.displayScripts?.length
+				? reply.trim()
+				: pinSceneCodes(reply.trim(), character.imageSet);
 			if (!clean) return; // 에러/빈 응답은 저장하지 않음(유저 메시지는 이미 저장됨)
 			const inputTokens = usage?.inputTokens ?? inputTokensEst;
 			const cost = parseGatewayCost(providerMetadata);
@@ -569,7 +572,9 @@ function buildSystemPrompt(
 	const lines: string[] = [fillCharName(evaluated.trim(), character.name), ``];
 
 	// ①-b 장면 이미지 카탈로그 — 캐릭터 단위로 고정 → prefix 캐시 유지.
-	const catalog = buildImageCatalog(character.imageSet);
+	// editdisplay 표시 카드는 카드 description 이 이미 자체 `<img="...">` 출력 규약을 담고 있어
+	// Haven 카탈로그를 주입하면 작명 규약이 충돌한다(변형 접미사 등) → 주입 생략, 카드에 맡긴다.
+	const catalog = character.displayScripts?.length ? '' : buildImageCatalog(character.imageSet);
 	if (catalog) lines.push(catalog, ``);
 
 	// ② 상대(사용자) 정보 — 런타임 정보라 공통으로 주입

@@ -22,9 +22,11 @@
     "wrangler": "^4.97.0"
   },
   "dependencies": {
+    "@adobe/css-tools": "^4.5.0",
     "@ai-sdk/gateway": "^3.0.123",
     "ai": "^6.0.195",
     "arctic": "^3.7.0",
+    "dompurify": "^3.4.8",
     "fflate": "^0.8.3"
   }
 }

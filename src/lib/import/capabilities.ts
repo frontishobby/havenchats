@@ -155,14 +155,22 @@ export function scanUnsupported(card: V3Card, module: RisuModuleMeta | null): Ca
 	}
 
 	// 정규식 치환(module.regex + extensions.customScripts).
+	//  - editdisplay(감정 스프라이트 HTML)는 이제 렌더에 적용된다 → 경고 제외(displayScripts.ts).
+	//  - disabled(에디터 구분선/라벨, in 비어있음)는 동작 대상이 아님 → 무시.
+	//  - 나머지(editoutput/editinput/editprocess = 출력·입력 가공)만 미지원으로 경고.
 	const regexList = [...arr(module?.regex), ...arr(ext.customScripts)];
-	if (regexList.length > 0) {
+	const regexType = (r: unknown) => str((r as { type?: unknown })?.type);
+	const unsupportedRegex = regexList.filter((r) => {
+		const t = regexType(r);
+		return t !== 'editdisplay' && t !== 'disabled';
+	});
+	if (unsupportedRegex.length > 0) {
 		warnings.push(
-			`정규식 치환 스크립트 ${regexList.length}개는 적용되지 않아요 — 출력 가공·서식 정리·필터가 빠집니다.`
+			`정규식 치환 스크립트 ${unsupportedRegex.length}개는 적용되지 않아요 — 출력 가공·서식 정리·필터가 빠집니다.`
 		);
 		scripts.push({
-			label: `정규식 치환 ${regexList.length}개`,
-			source: JSON.stringify(regexList, null, 2)
+			label: `정규식 치환 ${unsupportedRegex.length}개`,
+			source: JSON.stringify(unsupportedRegex, null, 2)
 		});
 	}
 

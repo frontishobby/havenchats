@@ -15,6 +15,7 @@ import {
 	type MappedCard
 } from './cardToCharacter';
 import { readModuleMeta } from './risum';
+import { extractDisplayScripts } from './displayScripts';
 import { scanUnsupported } from './capabilities';
 import { putLocalScene, requestPersist } from './localImages';
 
@@ -87,6 +88,9 @@ export async function parseCharx(file: File): Promise<ParsedCharx> {
 	// 로어북: card.json(character_book) + module.risum(loreBook) 을 머지·디둡해 확정.
 	card.lorebook = mergeLorebook(card.lorebook, moduleLorebookToEntries(moduleMeta?.lorebook));
 
+	// editdisplay 표시 정규식(감정 스프라이트 HTML) 추출 — 채팅 렌더에서 적용.
+	card.displayScripts = extractDisplayScripts(moduleMeta);
+
 	return { card, files };
 }
 
@@ -156,6 +160,7 @@ export async function runImport(
 			tags: card.tags,
 			lorebook: card.lorebook,
 			defaultVariables: card.defaultVariables,
+			displayScripts: card.displayScripts,
 			contentRating: opts.contentRating,
 			audience: opts.audience
 		})

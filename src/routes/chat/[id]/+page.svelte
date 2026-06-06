@@ -6,6 +6,8 @@
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import { resolveSceneLine, looksLikeSceneToken, isLocalSet, isGrid, isNamed } from '$lib/imageCodes';
 	import { localSceneURL, getLocalSceneBlob, localSceneKey } from '$lib/import/localImages';
+	import { compileScripts, makeAssetResolver, evalDisplayLine } from '$lib/import/displayScripts';
+	import { renderCardHtml } from '$lib/htmlRender';
 	import { personalize as fillPlaceholders } from '$lib/placeholders';
 	import type { ChatMessage } from '$lib/types';
 	import type { PageData } from './$types';
@@ -76,6 +78,30 @@
 
 	let { data }: { data: PageData } = $props();
 	const character = $derived(data.character);
+
+	// imported(charx) 카드의 editdisplay 표시 정규식 — 모델 `<img="감정">` → 감정 스프라이트 HTML.
+	const displayCompiled = $derived(compileScripts(character.displayScripts));
+	const assetResolver = $derived(makeAssetResolver(character.imageSet, character.id));
+
+	/**
+	 * 표시 라인 판별 + 정규식·CBS 평가(세정 전 HTML). 매칭 안 되면 null.
+	 * 순수 함수라 SSR·클라 결과가 동일 → 컨테이너 유무가 일치(hydration 안전). 세정(DOMPurify)은
+	 * cardHtml 액션이 클라에서 수행. seed=캐릭터+라인 → 변형 랜덤이 라인마다 안정적.
+	 */
+	function displayEval(line: string): string | null {
+		if (!displayCompiled.length) return null;
+		return evalDisplayLine(line, displayCompiled, assetResolver, `${character.id}:${line}`, 0);
+	}
+
+	/** 평가된 카드 HTML 을 세정해 컨테이너에 주입(클라 전용 — 액션은 브라우저에서만 실행). */
+	function cardHtml(node: HTMLElement, html: string) {
+		node.innerHTML = renderCardHtml(html);
+		return {
+			update(next: string) {
+				node.innerHTML = renderCardHtml(next);
+			}
+		};
+	}
 
 	// 제작자가 쓴 플레이스홀더({{char}}/{{나}}/{{user}}) → 캐릭터·사용자 이름으로 치환.
 	function personalize(text: string): string {
@@ -856,8 +882,13 @@
 				{/if}
 			{:else}
 				{@const line = item.text}
-				{@const scene = resolveSceneLine(line, character.id, character.imageSet)}
-				{#if scene}
+				{@const cardLine = displayEval(line)}
+				{#if cardLine !== null}
+					<!-- imported 카드 editdisplay: 감정 스프라이트 HTML(세정 후 주입). -->
+					<div class="chattext" use:cardHtml={cardLine}></div>
+				{:else}
+					{@const scene = resolveSceneLine(line, character.id, character.imageSet)}
+					{#if scene}
 					<!-- 장면 이미지 토큰({AAB}/{#id}) → 이미지 블록 -->
 					{#if scene.localKey}
 						{@const lk = scene.localKey}
@@ -881,7 +912,8 @@
 						{#each sp || isUser ? parseInline(sp ? sp.rest : line) : parseNarration(line) as seg, j (j)}
 							{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
 						{/each}
-					</span>
+						</span>
+					{/if}
 				{/if}
 			{/if}
 		{/each}
@@ -1426,6 +1458,17 @@
 		border-radius: var(--radius);
 		border: 1px solid var(--border);
 		background: var(--bg-elev);
+	}
+	/* imported 카드 editdisplay HTML 컨테이너 — 카드 자체 CSS 가 .chattext 하위로 스코프돼 주입된다.
+	   내부 요소는 innerHTML 주입이라 Svelte 스코프가 안 닿음(카드 <style> 가 직접 그림). */
+	.chattext {
+		margin: 0.8em 0;
+		max-width: 100%;
+		overflow-wrap: anywhere;
+	}
+	.chattext :global(img) {
+		max-width: 100%;
+		height: auto;
 	}
 	/* 펜스 블록(```{제목} … ```) — 상태창/정보 카드 */
 	.block {

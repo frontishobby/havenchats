@@ -5,6 +5,7 @@ import type {
 	CharacterLorebook,
 	CharacterScriptData,
 	ContentRating,
+	DisplayScript,
 	LoreEntry,
 	Opening,
 	Visibility
@@ -34,6 +35,8 @@ export interface NewCharacter {
 	lorebook: CharacterLorebook | null;
 	/** 스크립트 설정(기본 변수 등, 서버 전용). 없으면 null. */
 	scriptData: CharacterScriptData | null;
+	/** 표시용 정규식(editdisplay) — imported 카드 감정 스프라이트 HTML. 없으면 null. */
+	displayScripts: DisplayScript[] | null;
 	/** charx import 캐릭터 여부(프롬프트 숨김·비공개·수정 불가). 기본 false. */
 	imported?: boolean;
 }
@@ -52,6 +55,7 @@ interface CharacterRow {
 	greetings: string;
 	image_set: string | null;
 	lorebook: string | null;
+	display_scripts: string | null;
 	imported: number;
 	chats: number;
 	creator_id: string;
@@ -219,6 +223,24 @@ function parseLorebook(json: string | null): CharacterLorebook | null {
 	}
 }
 
+/** DB 의 display_scripts JSON → DisplayScript[]. 손상/빈 값이면 null. */
+function parseDisplayScripts(json: string | null): DisplayScript[] | null {
+	if (!json) return null;
+	try {
+		const parsed = JSON.parse(json);
+		if (!Array.isArray(parsed)) return null;
+		const out: DisplayScript[] = [];
+		for (const s of parsed) {
+			if (s && typeof s.in === 'string' && typeof s.out === 'string') {
+				out.push({ in: s.in, out: s.out, flags: typeof s.flags === 'string' ? s.flags : 'g' });
+			}
+		}
+		return out.length ? out : null;
+	} catch {
+		return null;
+	}
+}
+
 function rowToCharacter(row: CharacterRow): Character {
 	const imported = row.imported === 1;
 	return {
@@ -244,7 +266,9 @@ function rowToCharacter(row: CharacterRow): Character {
 		chats: row.chats,
 		imageSet: parseImageSet(row.image_set),
 		// imported 캐릭터의 로어북도 숨김 프롬프트 → 클라엔 null. 채팅 조립은 getCharacterLorebook() 으로.
-		lorebook: imported ? null : parseLorebook(row.lorebook)
+		lorebook: imported ? null : parseLorebook(row.lorebook),
+		// 표시용 정규식은 숨김 프롬프트가 아니라 렌더용 → imported 여도 클라로 내려간다.
+		displayScripts: parseDisplayScripts(row.display_scripts)
 	};
 }
 
@@ -252,7 +276,7 @@ function rowToCharacter(row: CharacterRow): Character {
 // chats = 이 캐릭터의 모든 세션에 실제로 남아있는 메시지 행 수 합(개별 삭제 반영).
 // characters.chats 컬럼은 더 이상 증가시키지 않으므로 실측 서브쿼리로 대체.
 const SELECT_COLS =
-	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.lorebook, c.imported, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key";
+	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.lorebook, c.display_scripts, c.imported, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key";
 const FROM_JOIN = 'FROM characters c LEFT JOIN users u ON u.id = c.creator_id';
 
 /** 공개(public) 유저 캐릭터 전체 (최신순). 비공개는 제외. */
@@ -458,8 +482,8 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 	await db
 		.prepare(
 			`INSERT INTO characters
-			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, lorebook, script_data, imported, chats, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, lorebook, script_data, display_scripts, imported, chats, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
 		)
 		.bind(
 			c.id,
@@ -477,6 +501,7 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 			c.imageSet ? JSON.stringify(c.imageSet) : null,
 			c.lorebook ? JSON.stringify(c.lorebook) : null,
 			c.scriptData ? JSON.stringify(c.scriptData) : null,
+			c.displayScripts && c.displayScripts.length ? JSON.stringify(c.displayScripts) : null,
 			c.imported ? 1 : 0,
 			now,
 			now

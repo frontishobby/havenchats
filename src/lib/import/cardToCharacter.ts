@@ -6,7 +6,7 @@
  * 이미지는 named 방식 manifest 로 뽑아낸다(매칭 토큰 = asset 이름에서 트레일링 확장자 제거).
  */
 
-import type { LoreEntry } from '$lib/types';
+import type { DisplayScript, LoreEntry } from '$lib/types';
 import { resolveCBSStatic } from '$lib/cbs';
 import type { RisuLoreEntry } from './risum';
 import type { ScriptArtifact } from './capabilities';
@@ -62,6 +62,8 @@ export interface MappedCard {
 	warnings: string[];
 	/** 재현 안 되는 원본 스크립트(트리거/정규식/코드) — '스크립트 분석'(실험적) 입력. charx 에서 채움. */
 	scripts: ScriptArtifact[];
+	/** editdisplay 표시 정규식(감정 스프라이트 HTML). charx 에서 module.risum 으로부터 채움. */
+	displayScripts: DisplayScript[];
 }
 
 // ── V3 입력(느슨한 타입) ──
@@ -294,7 +296,8 @@ export function mapCardToCharacter(card: V3Card): MappedCard {
 		lorebook,
 		defaultVariables,
 		warnings,
-		scripts: []
+		scripts: [],
+		displayScripts: []
 	};
 }
 

@@ -50,6 +50,20 @@ export interface CharacterScriptData {
 	defaultVariables?: Record<string, string>;
 }
 
+/**
+ * imported(charx) 카드의 editdisplay 정규식 — 모델 출력의 `<img="감정">` 마커를 감정 스프라이트
+ * HTML 로 바꾸는 표시용 치환. 채팅 렌더 시(클라) 적용: 정규식 in→out($캡처) → CBS 평가 → DOMPurify 세정.
+ * 표시 전용이라 클라이언트로 내려간다. (src/lib/import/displayScripts.ts, htmlRender.ts)
+ */
+export interface DisplayScript {
+	/** 정규식 패턴(RisuAI customscript.in). */
+	in: string;
+	/** 치환 템플릿(생 HTML + CBS 매크로, `$1`/`$&` 캡처 포함 가능). */
+	out: string;
+	/** 정규화된 정규식 flag(`g`/`i`/… 기본 `u`). */
+	flags: string;
+}
+
 export interface Character {
 	id: string;
 	name: string;
@@ -91,6 +105,11 @@ export interface Character {
 	 * 채팅 조립 시 getCharacterLorebook() 으로만 서버에서 읽는다.
 	 */
 	lorebook: CharacterLorebook | null;
+	/**
+	 * 표시용 정규식(editdisplay) — imported 카드의 감정 스프라이트 HTML 렌더. 없으면 null.
+	 * 표시 전용(숨김 프롬프트 아님)이라 클라이언트로 내려간다. 채팅 렌더에서 적용.
+	 */
+	displayScripts: DisplayScript[] | null;
 	/**
 	 * charx(캐릭터 카드 V3) import 로 만들어진 캐릭터 여부.
 	 * true 면 프롬프트(description)는 클라이언트에 빈 문자열로 내려가고(서버 전용),
