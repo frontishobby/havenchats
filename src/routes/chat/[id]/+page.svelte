@@ -71,6 +71,35 @@
 		}
 	}
 
+	// 메타의 warnings(AI SDK 경고 배열)를 사람이 읽을 한 줄로. 비었으면 null.
+	function formatWarnings(warnings: unknown): string | null {
+		if (!Array.isArray(warnings) || warnings.length === 0) return null;
+		const parts = warnings
+			.map((w) => {
+				if (w == null) return '';
+				if (typeof w === 'string') return w;
+				const o = w as Record<string, unknown>;
+				return String(o.message ?? o.details ?? o.setting ?? o.type ?? '');
+			})
+			.filter(Boolean);
+		return parts.length ? parts.join('; ') : null;
+	}
+
+	// 하드 에러는 아니지만 응답이 비어 있는 경우(모델이 아무것도 못 냄 — 원래는 조용히
+	// 응답이 안 오던 케이스)에 메타에서 사유를 끌어내 같은 경고 포맷으로 노출한다.
+	function emptyResponseReason(jsonText: string): string {
+		try {
+			const meta = JSON.parse(jsonText);
+			const w = formatWarnings(meta.warnings);
+			if (w) return `응답이 비어 있습니다. (${w})`;
+			if (meta.metaError) return `응답이 비어 있습니다. (${String(meta.metaError)})`;
+			const fr = meta.finishReason;
+			return `응답이 비어 있습니다.${fr ? ` (finishReason=${fr})` : ''}`;
+		} catch {
+			return '응답이 비어 있습니다.';
+		}
+	}
+
 	// 비용(USD)을 소수점 2자리로 올림 표시. 예: 0.0270609 → "$0.03", 0.0001 → "$0.01".
 	function formatCost(cost: number): string {
 		return `$${(Math.ceil(cost * 100) / 100).toFixed(2)}`;
@@ -546,15 +575,19 @@
 			}
 			raw += decoder.decode(); // 멀티바이트 잔여 flush
 			const sep = raw.indexOf(META_SEP);
+			const metaJson = sep >= 0 ? raw.slice(sep + META_SEP.length) : '';
 			if (sep >= 0) {
 				messages[idx].content = raw.slice(0, sep);
-				const metaJson = raw.slice(sep + META_SEP.length);
 				logResponseMeta(metaJson);
 				const c = parseCost(metaJson);
 				if (c != null) messages[idx].cost = c;
-				const reason = parseErrorReason(metaJson);
-				if (reason) messages[idx].errorReason = reason;
 			}
+			// 하드 에러(streamError·비정상 finishReason)는 그대로 노출하고, 그게 아니어도
+			// 응답이 비어 있으면 메타에서 사유를 끌어내 같은 경고 포맷으로 노출(조용한 무응답 방지).
+			const reason =
+				parseErrorReason(metaJson) ??
+				(messages[idx].content.trim() ? null : emptyResponseReason(metaJson));
+			if (reason) messages[idx].errorReason = reason;
 		} catch (e) {
 			messages[idx].content = '⚠️ 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.';
 			messages[idx].errorReason = e instanceof Error ? e.message : String(e);
@@ -925,7 +958,7 @@
 		{/if}
 		<article class="novel">
 			{#each messages as m (m.id)}
-				{#if m.content || (streaming && m === lastMessage)}
+				{#if m.content || m.errorReason || (streaming && m === lastMessage)}
 					<div class="para {m.role}">
 						{#if !(streaming && m === lastMessage)}
 							{#if m.role === 'assistant' && m.cost != null}
