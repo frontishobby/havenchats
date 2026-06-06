@@ -3,6 +3,7 @@
 	import { invalidate } from '$app/navigation';
 	import LoginModal from '$lib/components/LoginModal.svelte';
 	import ProfileModal from '$lib/components/ProfileModal.svelte';
+	import BlockedModal from '$lib/components/BlockedModal.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { loginModal } from '$lib/state/loginModal.svelte';
 	import { profileModal } from '$lib/state/profileModal.svelte';
@@ -21,7 +22,8 @@
 
 	// 최초 로그인(프로필 미완성) 시 프로필 설정 모달 자동 노출
 	$effect(() => {
-		if (data.user && !data.user.profileComplete) profileModal.open = true;
+		if (data.user && !data.user.profileComplete && !data.user.blockedReason)
+			profileModal.open = true;
 	});
 
 	// 좌측 사이드바(최근 채팅)
@@ -143,6 +145,11 @@
 />
 <LoginModal />
 <ProfileModal user={data.user} />
+
+<!-- 차단된 유저: 종료 불가 모달로 모든 동작 차단. 다른 모든 모달/UI 위에 렌더. -->
+{#if data.user?.blockedReason}
+	<BlockedModal reason={data.user.blockedReason} />
+{/if}
 
 <style>
 	.app {

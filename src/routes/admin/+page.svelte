@@ -91,7 +91,10 @@
 			<tbody>
 				{#each data.users as u (u.id)}
 					<tr onclick={() => openUser(u.id)}>
-						<td class="l name">{u.name ?? '(미설정)'}</td>
+						<td class="l name">
+						{u.name ?? '(미설정)'}
+						{#if u.blocked}<span class="blocked-tag">차단</span>{/if}
+					</td>
 						<td class="l email">{u.email}</td>
 						<td>{date(u.createdAt)}</td>
 						<td>{num(u.sessions)}</td>
@@ -232,6 +235,17 @@
 	}
 	.name {
 		font-weight: 600;
+	}
+	.blocked-tag {
+		display: inline-block;
+		margin-left: 6px;
+		padding: 1px 6px;
+		border-radius: 999px;
+		font-size: 0.66rem;
+		font-weight: 700;
+		background: rgba(255, 92, 138, 0.16);
+		color: var(--nsfw);
+		vertical-align: middle;
 	}
 	.email {
 		color: var(--text-dim);

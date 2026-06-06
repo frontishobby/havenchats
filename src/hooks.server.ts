@@ -34,8 +34,23 @@ export const handle: Handle = async ({ event, resolve }) => {
 		avatarUrl: null,
 		persona: null,
 		preference: null,
-		profileComplete: false
+		profileComplete: false,
+		blockedReason: null
 	};
+
+	// 차단된 유저는 변이성 API(POST/PUT/PATCH/DELETE) 호출을 서버에서 막는다.
+	// (UI 는 차단 모달로 가리지만, 직접 요청까지 차단해 어떤 동작도 못하게.)
+	// 차단 해제(관리자 /api/admin) 자체는 관리자 게이트가 따로 막으므로 무관.
+	if (
+		event.locals.user.blockedReason &&
+		event.request.method !== 'GET' &&
+		event.request.method !== 'HEAD'
+	) {
+		return new Response(JSON.stringify({ error: '차단된 계정입니다.' }), {
+			status: 403,
+			headers: { 'content-type': 'application/json' }
+		});
+	}
 
 	return resolve(event);
 };

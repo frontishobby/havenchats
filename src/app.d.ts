@@ -12,6 +12,7 @@ declare global {
 				persona: string | null;
 				preference: 'male' | 'female' | null;
 				profileComplete: boolean;
+				blockedReason: string | null; // null 이 아니면 차단된 유저
 			} | null;
 		}
 		// interface PageData {}

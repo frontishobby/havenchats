@@ -1,8 +1,45 @@
 <script lang="ts">
+	import { invalidateAll } from '$app/navigation';
 	import { usd, num, dateTime, ago } from '$lib/adminFormat';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	// 차단 상태(낙관적 갱신용 로컬 미러).
+	let blockedReason = $state<string | null>(data.detail.blockedReason);
+	let working = $state(false);
+	$effect(() => {
+		blockedReason = data.detail.blockedReason;
+	});
+
+	async function block() {
+		const reason = prompt('차단 사유를 입력하세요. (차단된 유저에게 표시됩니다)');
+		if (reason == null || reason.trim() === '') return;
+		await send(reason.trim());
+	}
+	async function unblock() {
+		if (!confirm('이 유저의 차단을 해제할까요?')) return;
+		await send(null);
+	}
+	async function send(reason: string | null) {
+		if (working) return;
+		working = true;
+		try {
+			const res = await fetch(`/api/admin/users/${data.detail.id}/block`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ reason })
+			});
+			if (!res.ok) throw new Error();
+			const out = (await res.json()) as { blockedReason: string | null };
+			blockedReason = out.blockedReason;
+			await invalidateAll();
+		} catch {
+			alert('처리에 실패했어요. 잠시 후 다시 시도해 주세요.');
+		} finally {
+			working = false;
+		}
+	}
 
 	// 펼친 프롬프트 캐릭터 id 집합.
 	let openIds = $state<Set<string>>(new Set());
@@ -32,6 +69,22 @@
 	</div>
 	<a class="pub-link" href={`/user/${data.detail.id}`}>공개 프로필 ↗</a>
 </header>
+
+<!-- 차단 컨트롤 -->
+<div class="block-bar" class:blocked={!!blockedReason}>
+	{#if blockedReason}
+		<div class="block-info">
+			<span class="block-tag">🚫 차단됨</span>
+			<span class="block-reason">{blockedReason}</span>
+		</div>
+		<button class="block-btn unblock" type="button" onclick={unblock} disabled={working}>
+			차단 해제
+		</button>
+	{:else}
+		<span class="block-ok">정상 계정</span>
+		<button class="block-btn" type="button" onclick={block} disabled={working}>유저 차단</button>
+	{/if}
+</div>
 
 {#if data.detail.persona}
 	<div class="persona">
@@ -150,6 +203,71 @@
 	}
 	.pub-link:hover {
 		color: var(--accent-hover);
+	}
+
+	.block-bar {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin-bottom: 18px;
+		padding: 10px 14px;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+	}
+	.block-bar.blocked {
+		border-color: var(--nsfw);
+		background: rgba(255, 92, 138, 0.1);
+	}
+	.block-info {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.block-tag {
+		flex-shrink: 0;
+		font-size: 0.8rem;
+		font-weight: 800;
+		color: var(--nsfw);
+	}
+	.block-reason {
+		font-size: 0.84rem;
+		color: var(--text);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.block-ok {
+		flex: 1;
+		font-size: 0.84rem;
+		color: var(--text-dim);
+	}
+	.block-btn {
+		flex-shrink: 0;
+		padding: 7px 16px;
+		border: 1px solid var(--nsfw);
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--nsfw);
+		font-size: 0.84rem;
+		font-weight: 700;
+		transition: background 0.15s ease;
+	}
+	.block-btn:hover:not(:disabled) {
+		background: rgba(255, 92, 138, 0.15);
+	}
+	.block-btn.unblock {
+		border-color: var(--border);
+		color: var(--text-dim);
+	}
+	.block-btn.unblock:hover:not(:disabled) {
+		background: var(--bg-elev);
+		color: var(--text);
+	}
+	.block-btn:disabled {
+		opacity: 0.5;
 	}
 
 	.persona {

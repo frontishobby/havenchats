@@ -16,6 +16,7 @@ export interface UserProfile {
 	persona: string | null;
 	preference: Preference | null;
 	profileComplete: boolean; // display_name 설정 여부
+	blockedReason: string | null; // null 이 아니면 차단된 유저
 }
 
 /** 다른 유저에게 공개되는 최소 프로필(유저 페이지 헤더용). */
@@ -73,7 +74,9 @@ export async function findOrCreateOAuthUser(
 /** 세션 신원으로 전체 프로필 로드. (hooks 에서 매 요청 사용) */
 export async function getUserProfile(db: D1Database, id: string): Promise<UserProfile | null> {
 	const row = await db
-		.prepare('SELECT id, email, display_name, avatar_url, persona, preference FROM users WHERE id = ?')
+		.prepare(
+			'SELECT id, email, display_name, avatar_url, persona, preference, blocked_reason FROM users WHERE id = ?'
+		)
 		.bind(id)
 		.first<{
 			id: string;
@@ -82,6 +85,7 @@ export async function getUserProfile(db: D1Database, id: string): Promise<UserPr
 			avatar_url: string | null;
 			persona: string | null;
 			preference: string | null;
+			blocked_reason: string | null;
 		}>();
 
 	if (!row) return null;
@@ -94,8 +98,26 @@ export async function getUserProfile(db: D1Database, id: string): Promise<UserPr
 		avatarUrl: avatarUrlFromKey(row.avatar_url),
 		persona: row.persona,
 		preference: pref,
-		profileComplete: !!row.display_name && row.display_name.trim() !== ''
+		profileComplete: !!row.display_name && row.display_name.trim() !== '',
+		blockedReason: row.blocked_reason
 	};
+}
+
+/**
+ * 유저 차단/해제(관리자 전용). reason 이 비면 차단 해제(NULL), 아니면 그 사유로 차단.
+ * 반환: 저장된 사유(해제면 null).
+ */
+export async function setBlockedReason(
+	db: D1Database,
+	id: string,
+	reason: string | null
+): Promise<string | null> {
+	const text = reason?.trim() ? reason.trim().slice(0, 500) : null;
+	await db
+		.prepare('UPDATE users SET blocked_reason = ?, updated_at = ? WHERE id = ?')
+		.bind(text, Date.now(), id)
+		.run();
+	return text;
 }
 
 /** 유저 페이지 헤더용 공개 프로필. 없으면 null. */

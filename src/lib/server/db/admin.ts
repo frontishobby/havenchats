@@ -17,6 +17,7 @@ export interface AdminUserRow {
 	costTotal: number;
 	cost7d: number;
 	lastActive: number | null;
+	blocked: boolean;
 }
 
 /**
@@ -29,7 +30,7 @@ export async function listUsersWithStats(
 ): Promise<AdminUserRow[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT u.id, u.email, u.display_name, u.created_at,
+			`SELECT u.id, u.email, u.display_name, u.created_at, u.blocked_reason,
 			        COUNT(DISTINCT s.id) AS sessions,
 			        COUNT(m.id) AS messages,
 			        COALESCE(SUM(m.cost), 0) AS cost_total,
@@ -47,6 +48,7 @@ export async function listUsersWithStats(
 			email: string;
 			display_name: string | null;
 			created_at: number;
+			blocked_reason: string | null;
 			sessions: number;
 			messages: number;
 			cost_total: number;
@@ -62,7 +64,8 @@ export async function listUsersWithStats(
 		messages: r.messages,
 		costTotal: r.cost_total,
 		cost7d: r.cost_7d,
-		lastActive: r.last_active
+		lastActive: r.last_active,
+		blocked: r.blocked_reason != null
 	}));
 }
 
@@ -210,12 +213,13 @@ export interface AdminUserDetail {
 	ageVerified: boolean;
 	createdAt: number;
 	updatedAt: number;
+	blockedReason: string | null;
 }
 
 export async function getUserDetail(db: D1Database, id: string): Promise<AdminUserDetail | null> {
 	const row = await db
 		.prepare(
-			`SELECT id, email, display_name, persona, preference, age_verified, created_at, updated_at
+			`SELECT id, email, display_name, persona, preference, age_verified, created_at, updated_at, blocked_reason
 			 FROM users WHERE id = ?`
 		)
 		.bind(id)
@@ -228,6 +232,7 @@ export async function getUserDetail(db: D1Database, id: string): Promise<AdminUs
 			age_verified: number;
 			created_at: number;
 			updated_at: number;
+			blocked_reason: string | null;
 		}>();
 	if (!row) return null;
 	return {
@@ -238,7 +243,8 @@ export async function getUserDetail(db: D1Database, id: string): Promise<AdminUs
 		preference: row.preference,
 		ageVerified: row.age_verified === 1,
 		createdAt: row.created_at,
-		updatedAt: row.updated_at
+		updatedAt: row.updated_at,
+		blockedReason: row.blocked_reason
 	};
 }
 
