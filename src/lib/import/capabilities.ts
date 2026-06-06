@@ -124,11 +124,12 @@ function effectCategory(type: string): string | null {
 	}
 }
 
-/** 카드 + (있으면) risum module 을 스캔해 미지원 동적 기능 경고 + 원본 스크립트를 모은다. */
-export function scanUnsupported(card: V3Card, module: RisuModuleMeta | null): CapabilityScan {
+/** 카드 + (있으면) risum module 을 스캔해 미지원 동적 기능 경고 + 원본 스크립트를 모은다.
+ *  card 가 null 이면(단독 .risum 모듈) module 만 스캔한다. */
+export function scanUnsupported(card: V3Card | null, module: RisuModuleMeta | null): CapabilityScan {
 	const warnings: string[] = [];
 	const scripts: ScriptArtifact[] = [];
-	const ext = ((card.data as { extensions?: { risuai?: RisuExt } } | undefined)?.extensions
+	const ext = ((card?.data as { extensions?: { risuai?: RisuExt } } | undefined)?.extensions
 		?.risuai ?? {}) as RisuExt;
 
 	// 트리거: 의미 있는 효과 카테고리 수집 + 원본 보존(빈 슬롯은 건너뜀).

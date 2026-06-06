@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { parseCharx, runImport, type ParsedCharx, type ImportProgress } from '$lib/import/charx';
+	import {
+		parseCharx,
+		runImport,
+		applyExternalModule,
+		type ParsedCharx,
+		type ImportProgress
+	} from '$lib/import/charx';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -10,6 +16,13 @@
 	let parsed = $state<ParsedCharx | null>(null);
 	let thumbUrl = $state<string | null>(null);
 	let error = $state('');
+
+	// 선택적: 별도 .risum 모듈(로어북·감정 스프라이트)을 캐릭터에 병합.
+	let moduleInput = $state<HTMLInputElement | null>(null);
+	let attachingModule = $state(false);
+	let attachedModule = $state<{ name: string; loreAdded: number; displayAdded: number } | null>(
+		null
+	);
 
 	let importing = $state(false);
 	let progress = $state<ImportProgress | null>(null);
@@ -31,6 +44,25 @@
 		analysis = '';
 		analyzeError = '';
 		analyzing = false;
+		attachedModule = null;
+		attachingModule = false;
+	}
+
+	async function onPickModule(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = ''; // 같은 파일 재선택 허용
+		if (!file || !parsed) return;
+		attachingModule = true;
+		error = '';
+		try {
+			// parsed.card 는 $state 프록시 → in-place 수정이 반응성으로 전파됨.
+			attachedModule = await applyExternalModule(parsed.card, file);
+		} catch (err) {
+			error = err instanceof Error ? err.message : '.risum 을 읽지 못했어요.';
+		} finally {
+			attachingModule = false;
+		}
 	}
 
 	async function analyzeScripts() {
@@ -157,6 +189,35 @@
 					{#each card.warnings as w (w)}<li>⚠️ {w}</li>{/each}
 				</ul>
 			{/if}
+
+			<div class="module">
+				{#if attachedModule}
+					<p class="module-on">
+						✓ 모듈 <b>{attachedModule.name}</b> 병합됨 — 로어북 +{attachedModule.loreAdded}, 표시
+						스크립트 +{attachedModule.displayAdded}
+					</p>
+					<span class="module-hint">교체하려면 '다른 파일'로 처음부터 다시 선택하세요.</span>
+				{:else}
+					<button
+						class="module-btn"
+						onclick={() => moduleInput?.click()}
+						disabled={attachingModule || importing}
+					>
+						{attachingModule ? '모듈 읽는 중…' : '＋ .risum 모듈 추가 (선택)'}
+					</button>
+					<span class="module-hint">
+						별도 .risum(로어북·감정 스프라이트)을 이 캐릭터에 합쳐요. 트리거·코드는 charx 와 같이
+						경고로만 표시돼요.
+					</span>
+				{/if}
+				<input
+					bind:this={moduleInput}
+					type="file"
+					accept=".risum,application/octet-stream"
+					onchange={onPickModule}
+					hidden
+				/>
+			</div>
 
 			{#if scripts.length}
 				<div class="analyze">
@@ -297,6 +358,43 @@
 	}
 	.warns li + li {
 		margin-top: 6px;
+	}
+	.module {
+		margin-top: 14px;
+		padding-top: 14px;
+		border-top: 1px solid var(--border);
+	}
+	.module-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 14px;
+		border-radius: var(--radius-sm);
+		border: 1px dashed var(--border);
+		background: var(--bg-elev);
+		color: var(--text);
+		font-size: 0.84rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.module-btn:hover:not(:disabled) {
+		border-color: var(--accent);
+	}
+	.module-btn:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+	.module-on {
+		margin: 0;
+		font-size: 0.84rem;
+		font-weight: 700;
+		color: var(--accent);
+	}
+	.module-hint {
+		display: block;
+		margin-top: 6px;
+		font-size: 0.76rem;
+		color: var(--text-faint);
 	}
 	.analyze {
 		margin-top: 14px;
