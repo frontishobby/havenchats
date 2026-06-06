@@ -922,7 +922,7 @@
 					<!-- imported 카드 editdisplay: 감정 스프라이트 HTML(세정 후 주입). -->
 					<div class="chattext" use:cardHtml={cardLine}></div>
 				{:else}
-					{@const scene = resolveSceneLine(line, character.id, character.imageSet)}
+					{@const scene = resolveSceneLine(line, character.id, character.imageSet, character.updatedAt)}
 					{#if scene}
 					<!-- 장면 이미지 토큰({AAB}/{#id}) → 이미지 블록 -->
 					{#if scene.localKey}

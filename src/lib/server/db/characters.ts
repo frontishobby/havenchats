@@ -10,6 +10,7 @@ import type {
 	Opening,
 	Visibility
 } from '$lib/types';
+import { withVersion } from '$lib/imageCodes';
 
 /** /create 에서 등록되는 새 캐릭터 입력. */
 export interface NewCharacter {
@@ -58,14 +59,16 @@ interface CharacterRow {
 	display_scripts: string | null;
 	imported: number;
 	chats: number;
+	updated_at: number;
 	creator_id: string;
 	creator_name: string | null;
 	creator_avatar_key: string | null;
+	creator_updated_at: number | null;
 }
 
-/** avatar_url 컬럼(R2 키)을 servable URL 로 변환. 없으면 null. */
-function avatarUrlFromKey(key: string | null): string | null {
-	return key ? `/img/${key}` : null;
+/** avatar_url 컬럼(R2 키)을 servable URL 로 변환. 없으면 null. version 은 캐시 버스팅. */
+function avatarUrlFromKey(key: string | null, version?: number | null): string | null {
+	return key ? withVersion(`/img/${key}`, version) : null;
 }
 
 /** dicebear 폴백 아바타 (이미지 미등록 시). */
@@ -246,7 +249,9 @@ function rowToCharacter(row: CharacterRow): Character {
 	return {
 		id: row.id,
 		name: row.name,
-		avatarUrl: row.thumbnail_key ? `/img/${row.thumbnail_key}` : fallbackAvatar(row.id),
+		avatarUrl: row.thumbnail_key
+			? withVersion(`/img/${row.thumbnail_key}`, row.updated_at)
+			: fallbackAvatar(row.id),
 		tagline: row.tagline,
 		intro: row.intro,
 		// charx import 캐릭터의 프롬프트는 클라이언트에 절대 노출하지 않는다(빈 문자열).
@@ -261,9 +266,10 @@ function rowToCharacter(row: CharacterRow): Character {
 		creator: {
 			id: row.creator_id,
 			name: row.creator_name,
-			avatarUrl: avatarUrlFromKey(row.creator_avatar_key)
+			avatarUrl: avatarUrlFromKey(row.creator_avatar_key, row.creator_updated_at)
 		},
 		chats: row.chats,
+		updatedAt: row.updated_at,
 		imageSet: parseImageSet(row.image_set),
 		// imported 캐릭터의 로어북도 숨김 프롬프트 → 클라엔 null. 채팅 조립은 getCharacterLorebook() 으로.
 		lorebook: imported ? null : parseLorebook(row.lorebook),
@@ -276,7 +282,7 @@ function rowToCharacter(row: CharacterRow): Character {
 // chats = 이 캐릭터의 모든 세션에 실제로 남아있는 메시지 행 수 합(개별 삭제 반영).
 // characters.chats 컬럼은 더 이상 증가시키지 않으므로 실측 서브쿼리로 대체.
 const SELECT_COLS =
-	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.lorebook, c.display_scripts, c.imported, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key";
+	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.lorebook, c.display_scripts, c.imported, c.updated_at, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key, u.updated_at AS creator_updated_at";
 const FROM_JOIN = 'FROM characters c LEFT JOIN users u ON u.id = c.creator_id';
 
 /** 공개(public) 유저 캐릭터 전체 (최신순). 비공개는 제외. */

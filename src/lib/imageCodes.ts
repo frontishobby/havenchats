@@ -112,9 +112,18 @@ export function entryKey(characterId: string, entry: ImageEntry): string {
 	return `charimg/${characterId}/${entry.id}.${entry.ext}`;
 }
 
+/**
+ * 캐시 버스팅용 버전 쿼리(`?v=`) 부착. version 이 있을 때만 붙인다.
+ * 같은 키(엔티티 id 고정)라도 재업로드 시 updatedAt 이 바뀌면 URL 이 달라져
+ * → /img 라우트가 immutable 캐시를 안전하게 걸 수 있다. (url 은 쿼리 없는 /img/ 경로 가정)
+ */
+export function withVersion(url: string, version?: number | string | null): string {
+	return version != null && version !== '' ? `${url}?v=${version}` : url;
+}
+
 /** 조합 이미지 URL (기존 /img/[...key] 라우트로 서빙). */
-export function entryUrl(characterId: string, entry: ImageEntry): string {
-	return `/img/${entryKey(characterId, entry)}`;
+export function entryUrl(characterId: string, entry: ImageEntry, version?: number | string | null): string {
+	return withVersion(`/img/${entryKey(characterId, entry)}`, version);
 }
 
 /** 조합의 사람이 읽는 설명("홍길동 · 한복 · 화남"). alt/툴팁용. 범위 밖이면 '?'. */
@@ -151,8 +160,8 @@ export function namedKey(characterId: string, img: NamedImage): string {
 }
 
 /** 네임드 이미지 URL. */
-export function namedUrl(characterId: string, img: NamedImage): string {
-	return `/img/${namedKey(characterId, img)}`;
+export function namedUrl(characterId: string, img: NamedImage, version?: number | string | null): string {
+	return withVersion(`/img/${namedKey(characterId, img)}`, version);
 }
 
 /** id 로 네임드 이미지 조회. */
@@ -251,17 +260,18 @@ function decorateScene(
 function resolvePinned(
 	id: string,
 	characterId: string,
-	set: CharacterImageSet
+	set: CharacterImageSet,
+	version?: number | string | null
 ): ResolvedScene | null {
 	if (isGrid(set)) {
 		const entry = findEntryById(set, id);
 		if (!entry) return null;
-		return decorateScene({ url: entryUrl(characterId, entry), alt: entryAlt(set, entry) }, id, characterId, set);
+		return decorateScene({ url: entryUrl(characterId, entry, version), alt: entryAlt(set, entry) }, id, characterId, set);
 	}
 	if (isNamed(set)) {
 		const img = findNamedById(set, id);
 		if (!img) return null;
-		return decorateScene({ url: namedUrl(characterId, img), alt: img.name }, id, characterId, set);
+		return decorateScene({ url: namedUrl(characterId, img, version), alt: img.name }, id, characterId, set);
 	}
 	return null;
 }
@@ -274,19 +284,20 @@ function resolvePinned(
 export function resolveSceneLine(
 	line: string,
 	characterId: string,
-	set: CharacterImageSet | null | undefined
+	set: CharacterImageSet | null | undefined,
+	version?: number | string | null
 ): ResolvedScene | null {
 	if (!hasScenes(set)) return null;
 
 	const pinned = PINNED_LINE.exec(line);
-	if (pinned) return resolvePinned(pinned[1], characterId, set);
+	if (pinned) return resolvePinned(pinned[1], characterId, set, version);
 
 	if (isGrid(set)) {
 		const pos = POSITIONAL_LINE.exec(line);
 		if (pos) {
 			const entry = findEntryByCode(set, pos[1]);
 			if (!entry) return null;
-			return decorateScene({ url: entryUrl(characterId, entry), alt: entryAlt(set, entry) }, entry.id, characterId, set);
+			return decorateScene({ url: entryUrl(characterId, entry, version), alt: entryAlt(set, entry) }, entry.id, characterId, set);
 		}
 	}
 
@@ -295,7 +306,7 @@ export function resolveSceneLine(
 		if (img) {
 			const found = findNamedByName(set, img[1].trim());
 			if (!found) return null;
-			return decorateScene({ url: namedUrl(characterId, found), alt: found.name }, found.id, characterId, set);
+			return decorateScene({ url: namedUrl(characterId, found, version), alt: found.name }, found.id, characterId, set);
 		}
 	}
 

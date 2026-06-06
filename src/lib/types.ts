@@ -116,6 +116,11 @@ export interface Character {
 	 * 영구 비공개·수정 불가. 장면 이미지는 기기 한정(IndexedDB) → '기기간 공유'로만 R2 전환.
 	 */
 	imported: boolean;
+	/**
+	 * 마지막 수정 시각(epoch ms). 이미지 캐시 버스팅 버전(`?v=`)으로 쓴다 — 썸네일·장면
+	 * 이미지 키는 엔티티 id 로 고정이라, 재업로드 시 이 값이 바뀌어야 immutable 캐시가 안전.
+	 */
+	updatedAt: number;
 }
 
 /**

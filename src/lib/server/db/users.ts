@@ -1,4 +1,5 @@
 import type { SessionIdentity } from '$lib/server/auth';
+import { withVersion } from '$lib/imageCodes';
 
 export interface OAuthProfile {
 	provider: string; // 'google'
@@ -27,9 +28,9 @@ export interface PublicProfile {
 	avatarUrl: string | null;
 }
 
-/** avatar_url 컬럼에는 R2 오브젝트 키를 저장한다. servable URL 로 변환. */
-function avatarUrlFromKey(key: string | null): string | null {
-	return key ? `/img/${key}` : null;
+/** avatar_url 컬럼에는 R2 오브젝트 키를 저장한다. servable URL 로 변환. version 은 캐시 버스팅. */
+function avatarUrlFromKey(key: string | null, version?: number | null): string | null {
+	return key ? withVersion(`/img/${key}`, version) : null;
 }
 
 /**
@@ -76,7 +77,7 @@ export async function findOrCreateOAuthUser(
 export async function getUserProfile(db: D1Database, id: string): Promise<UserProfile | null> {
 	const row = await db
 		.prepare(
-			'SELECT id, email, display_name, persona_name, avatar_url, persona, preference, blocked_reason FROM users WHERE id = ?'
+			'SELECT id, email, display_name, persona_name, avatar_url, persona, preference, blocked_reason, updated_at FROM users WHERE id = ?'
 		)
 		.bind(id)
 		.first<{
@@ -88,6 +89,7 @@ export async function getUserProfile(db: D1Database, id: string): Promise<UserPr
 			persona: string | null;
 			preference: string | null;
 			blocked_reason: string | null;
+			updated_at: number;
 		}>();
 
 	if (!row) return null;
@@ -98,7 +100,7 @@ export async function getUserProfile(db: D1Database, id: string): Promise<UserPr
 		email: row.email,
 		name: row.display_name,
 		personaName: row.persona_name,
-		avatarUrl: avatarUrlFromKey(row.avatar_url),
+		avatarUrl: avatarUrlFromKey(row.avatar_url, row.updated_at),
 		persona: row.persona,
 		preference: pref,
 		profileComplete: !!row.display_name && row.display_name.trim() !== '',
@@ -126,11 +128,11 @@ export async function setBlockedReason(
 /** 유저 페이지 헤더용 공개 프로필. 없으면 null. */
 export async function getPublicProfile(db: D1Database, id: string): Promise<PublicProfile | null> {
 	const row = await db
-		.prepare('SELECT id, display_name, avatar_url FROM users WHERE id = ?')
+		.prepare('SELECT id, display_name, avatar_url, updated_at FROM users WHERE id = ?')
 		.bind(id)
-		.first<{ id: string; display_name: string | null; avatar_url: string | null }>();
+		.first<{ id: string; display_name: string | null; avatar_url: string | null; updated_at: number }>();
 	if (!row) return null;
-	return { id: row.id, name: row.display_name, avatarUrl: avatarUrlFromKey(row.avatar_url) };
+	return { id: row.id, name: row.display_name, avatarUrl: avatarUrlFromKey(row.avatar_url, row.updated_at) };
 }
 
 /** 프로필 사진 R2 키 갱신. 기존 키(있으면) 반환 → 호출부가 옛 오브젝트 정리. */

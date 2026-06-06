@@ -89,10 +89,10 @@
 					<button
 						class="img"
 						type="button"
-						onclick={() => openZoom(entryUrl(character.id, entry), entryAlt(set, entry))}
+						onclick={() => openZoom(entryUrl(character.id, entry, character.updatedAt), entryAlt(set, entry))}
 						aria-label={`${entryAlt(set, entry)} 확대 보기`}
 					>
-						<img src={entryUrl(character.id, entry)} alt={entryAlt(set, entry)} loading="lazy" />
+						<img src={entryUrl(character.id, entry, character.updatedAt)} alt={entryAlt(set, entry)} loading="lazy" />
 						<span class="code">{comboToCode(entry.combo)}</span>
 					</button>
 					<figcaption>{entryAlt(set, entry)}</figcaption>
@@ -121,10 +121,10 @@
 						<button
 							class="img"
 							type="button"
-							onclick={() => openZoom(namedUrl(character.id, img), img.name)}
+							onclick={() => openZoom(namedUrl(character.id, img, character.updatedAt), img.name)}
 							aria-label={`${img.name} 확대 보기`}
 						>
-							<img src={namedUrl(character.id, img)} alt={img.name} loading="lazy" />
+							<img src={namedUrl(character.id, img, character.updatedAt)} alt={img.name} loading="lazy" />
 						</button>
 					{/if}
 					<figcaption>{img.name}</figcaption>
