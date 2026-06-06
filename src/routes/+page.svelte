@@ -40,9 +40,6 @@
 {/if}
 
 <section class="hero">
-	<h1>마음이 머무는 곳, <span class="accent">Haven</span></h1>
-	<p>좋아하는 캐릭터를 골라 지금 바로 대화를 시작하세요.</p>
-
 	<div class="search">
 		<span class="search-icon">🔍</span>
 		<input type="text" placeholder="캐릭터 이름, 설명으로 검색…" bind:value={query} />
@@ -86,22 +83,8 @@
 	.hero {
 		max-width: var(--maxw);
 		margin: 0 auto;
-		padding: 48px 20px 24px;
+		padding: 32px 20px 24px;
 		text-align: center;
-	}
-	.hero h1 {
-		font-size: clamp(1.8rem, 4vw, 2.8rem);
-		font-weight: 800;
-		margin: 0 0 10px;
-		letter-spacing: -0.02em;
-	}
-	.accent {
-		color: var(--accent);
-	}
-	.hero p {
-		color: var(--text-dim);
-		margin: 0 0 28px;
-		font-size: 1.05rem;
 	}
 	.search {
 		position: relative;

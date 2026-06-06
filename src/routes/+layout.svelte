@@ -89,6 +89,14 @@
 				<span class="wordmark">Haven<span class="dim">chats</span></span>
 			</a>
 		</div>
+		{#if data.credits}
+			<span class="credits-badge" title={`총 사용 $${data.credits.totalUsed.toFixed(2)}`}>
+				<span class="credits-k">Vercel 크레딧</span>
+				<span class="credits-v" class:low={data.credits.balance < 5}>
+					${data.credits.balance.toFixed(2)}
+				</span>
+			</span>
+		{/if}
 		<nav>
 			<a class="hub-link" href="/styles">그림체 Hub</a>
 			{#if data.user}
@@ -244,6 +252,42 @@
 		display: flex;
 		align-items: center;
 		gap: 16px;
+	}
+	/* Vercel 크레딧 뱃지 — 네비바 정중앙(좌/우 영역과 독립되게 절대 배치). */
+	.credits-badge {
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 5px 12px;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		font-size: 0.84rem;
+		white-space: nowrap;
+		z-index: 1;
+	}
+	.credits-k {
+		color: var(--text-dim);
+		font-weight: 600;
+		font-size: 0.76rem;
+	}
+	.credits-v {
+		font-weight: 800;
+		color: var(--text);
+		font-variant-numeric: tabular-nums;
+	}
+	.credits-v.low {
+		color: var(--nsfw);
+	}
+	/* 좁은 화면에선 브랜드·유저메뉴와 겹치므로 숨김. */
+	@media (max-width: 640px) {
+		.credits-badge {
+			display: none;
+		}
 	}
 	.login-btn {
 		display: inline-block;

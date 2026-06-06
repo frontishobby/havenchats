@@ -1,5 +1,6 @@
 import { listRecentSessions } from '$lib/server/db/chats';
 import { findCharacter } from '$lib/server/characters';
+import { fetchGatewayCredits } from '$lib/server/credits';
 import type { Character, RecentChat } from '$lib/types';
 import type { LayoutServerLoad } from './$types';
 
@@ -43,5 +44,6 @@ export const load: LayoutServerLoad = async ({ locals, platform, depends }) => {
 		}
 	}
 
-	return { user: locals.user, recentChats };
+	// Vercel 크레딧 잔량은 전체 공개(네비 중앙 뱃지).
+	return { user: locals.user, recentChats, credits: await fetchGatewayCredits() };
 };
