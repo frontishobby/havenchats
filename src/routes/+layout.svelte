@@ -27,6 +27,11 @@
 	// 좌측 사이드바(최근 채팅)
 	let sidebarOpen = $state(false);
 
+	// 관리자 여부(메뉴에 /admin 노출용). 서버 auth 모듈을 클라에 import하지 않고 이메일만 비교.
+	const isAdminUser = $derived(
+		data.user?.email?.trim().toLowerCase() === 'owner@example.com'
+	);
+
 	// 우상단 유저 메뉴(드롭다운)
 	let menuOpen = $state(false);
 	let menuRef = $state<HTMLDivElement | null>(null);
@@ -97,6 +102,16 @@
 							<button class="menu-item" role="menuitem" onclick={openProfileSettings}>
 								프로필 설정
 							</button>
+							{#if isAdminUser}
+								<a
+									class="menu-item"
+									role="menuitem"
+									href="/admin"
+									onclick={() => (menuOpen = false)}
+								>
+									관리자
+								</a>
+							{/if}
 							<div class="menu-sep"></div>
 							<a
 								class="menu-item danger"
