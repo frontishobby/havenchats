@@ -54,16 +54,19 @@ function pickPromptModel(requested?: string): string {
 
 const SITUATION_SYSTEM = [
 	`You convert the latest moment of a Korean roleplay scene into an image-generation prompt for NovelAI Diffusion V4.5 (anime illustration).`,
-	`You are given a [Character] reference sheet and the [Latest scene]. ALWAYS reflect the character's fixed physical appearance from the reference (hair color/length/style, eye color, body type, skin, distinctive features) so the character looks consistent across images. But depict ONLY the [Latest scene]'s current moment — pose, expression, action, current clothing or state of undress, and setting. Ignore the reference's non-visual text (personality, backstory, rules, command/keyword lists).`,
-	`Describe ONLY what is visually depictable in a single still image of the most recent moment: the character(s) present, appearance (hair, eyes, body), clothing or state of undress, facial expression, pose, action, camera angle/framing, composition, setting/background, lighting and mood.`,
-	`Output format: a single comma-separated prompt. Prefer Danbooru-style tags (e.g. "1girl, long hair, blush, sitting, indoors, night"); use short natural-language phrases only when a situation is hard to express as tags.`,
+	`You are given a [Character] reference sheet and the [Latest scene]. ALWAYS reflect the character's fixed physical appearance from the reference (hair color/length/style, eye color, body type, skin, distinctive features) so the character looks consistent across images. But depict ONLY the [Latest scene]'s current moment. Ignore the reference's non-visual text (personality, backstory, rules, command/keyword lists).`,
+	`Output format: two parts in this exact order, joined together by a comma.`,
+	`  PART 1 — Danbooru-style tags describing the character's appearance and current clothing state: count tag (e.g. 1girl), hair color/length/style, eye color, body type and notable physical features (from the reference), plus the current clothing or state of undress as shown in the [Latest scene] (e.g. "school uniform, unbuttoned shirt, no bra", "naked, towel"). Lowercase, comma-separated.`,
+	`  PART 2 — a short natural-language sentence (or two) describing the CURRENT SITUATION of the [Latest scene]: the pose, action, facial expression, what is happening, the setting/background, camera framing, lighting and mood. Plain English prose, not tags.`,
+	`Example: "1girl, long black hair, red eyes, slim, large breasts, white blouse, unbuttoned, no bra, She is sitting on the edge of the bed leaning forward with a flushed, breathless expression, reaching toward the viewer in a dim bedroom lit by warm lamplight."`,
 	`Rules:`,
-	`- English only. Lowercase tags.`,
+	`- English only.`,
 	`- Focus on the single most recent visual beat, not the whole history.`,
+	`- The appearance tags (hair, eyes, body) must stay consistent with the reference; only the clothing/undress state follows the latest scene.`,
 	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, or negative terms — those are added separately.`,
-	`- No preamble, no explanation, no quotes, no line breaks. Output the prompt only.`,
+	`- No preamble, no explanation, no quotes, no line breaks, no labels like "PART 1". Output the prompt only.`,
 	`- NSFW content is allowed and should be described plainly when present.`,
-	`- Keep it under ~60 tags.`
+	`- Keep the tag part under ~40 tags and the prose part to 1-2 sentences.`
 ].join('\n');
 
 interface ImageRequestBody {
