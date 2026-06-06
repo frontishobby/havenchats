@@ -109,21 +109,21 @@
 							onerror={() => (imgFailed = true)}
 						/>
 					{/if}
+					<div class="hero-overlay">
+						<div class="name-row">
+							<h2>{character.name}</h2>
+							{#if character.contentRating === 'nsfw'}
+								<NsfwBadge size={18} />
+							{/if}
+						</div>
+						<p class="tagline">{character.tagline}</p>
+					</div>
 				</div>
-				<div class="hero-info">
-					<div class="name-row">
-						<h2>{character.name}</h2>
-						{#if character.contentRating === 'nsfw'}
-							<NsfwBadge size={18} />
-						{/if}
-					</div>
-					<p class="tagline">{character.tagline}</p>
-					<div class="meta">
-						<span class="meta-chip">{AUDIENCE_LABEL[character.audience]}</span>
-						{#each character.tags.slice(0, 4) as tag (tag)}
-							<span class="meta-chip tag">#{tag}</span>
-						{/each}
-					</div>
+				<div class="meta">
+					<span class="meta-chip">{AUDIENCE_LABEL[character.audience]}</span>
+					{#each character.tags.slice(0, 4) as tag (tag)}
+						<span class="meta-chip tag">#{tag}</span>
+					{/each}
 				</div>
 			</div>
 
@@ -242,37 +242,42 @@
 		position: absolute;
 		top: 12px;
 		right: 12px;
-		width: 30px;
-		height: 30px;
+		width: 32px;
+		height: 32px;
 		border: none;
-		border-radius: 8px;
-		background: transparent;
-		color: var(--text-dim);
+		border-radius: 50%;
+		background: rgba(0, 0, 0, 0.45);
+		color: #fff;
 		font-size: 0.95rem;
-		z-index: 1;
+		z-index: 2;
+		backdrop-filter: blur(2px);
 	}
 	.close:hover {
-		background: var(--bg-elev);
-		color: var(--text);
+		background: rgba(0, 0, 0, 0.7);
 	}
 
 	.hero {
 		display: flex;
-		gap: 16px;
+		flex-direction: column;
+		gap: 14px;
 		margin-bottom: 20px;
 	}
+	/* 세로 포트레이트 히어로 — 모달 좌우 패딩까지 채우고 하단에 이름/태그라인 오버레이 */
 	.thumb {
-		width: 96px;
-		height: 96px;
-		flex-shrink: 0;
-		border-radius: var(--radius-sm);
+		position: relative;
+		width: calc(100% + 48px);
+		margin: -24px -24px 0;
+		aspect-ratio: 3 / 4;
+		max-height: 56vh;
 		overflow: hidden;
 		background: linear-gradient(135deg, var(--accent), var(--nsfw));
+		border-radius: var(--radius) var(--radius) 0 0;
 	}
 	.thumb img {
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
+		object-position: center top;
 		display: block;
 	}
 	.thumb-fallback {
@@ -280,15 +285,19 @@
 		height: 100%;
 		display: grid;
 		place-items: center;
-		font-size: 2.4rem;
+		font-size: 5rem;
 		font-weight: 700;
 		color: #fff;
 	}
-	.hero-info {
-		min-width: 0;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
+	/* 이미지 하단 그라데이션 위 텍스트 */
+	.hero-overlay {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		padding: 36px 24px 16px;
+		background: linear-gradient(to top, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0.4) 55%, transparent 100%);
+		pointer-events: none;
 	}
 	.name-row {
 		display: flex;
@@ -297,20 +306,22 @@
 	}
 	.name-row h2 {
 		margin: 0;
-		font-size: 1.3rem;
+		font-size: 1.45rem;
 		font-weight: 800;
+		color: #fff;
+		text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 	}
 	.tagline {
 		margin: 6px 0 0;
 		font-size: 0.9rem;
-		color: var(--text-dim);
+		color: rgba(255, 255, 255, 0.88);
 		line-height: 1.5;
+		text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 	}
 	.meta {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 6px;
-		margin-top: 10px;
 	}
 	.meta-chip {
 		font-size: 0.72rem;
