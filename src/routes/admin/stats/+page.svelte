@@ -6,6 +6,23 @@
 
 	let { data }: { data: PageData } = $props();
 
+	const PERIODS: { key: string; label: string }[] = [
+		{ key: '1d', label: '1일' },
+		{ key: '7d', label: '7일' },
+		{ key: '30d', label: '30일' },
+		{ key: 'all', label: '전체' }
+	];
+	const periodLabel = $derived(PERIODS.find((p) => p.key === data.period)?.label ?? '1일');
+
+	function selectPeriod(key: string) {
+		if (key === data.period) return;
+		// keepFocus/noScroll 로 탭 전환처럼 자연스럽게. ?period= 만 갱신 → 서버 load 재실행.
+		goto(key === '1d' ? '/admin/stats' : `/admin/stats?period=${key}`, {
+			keepFocus: true,
+			noScroll: true
+		});
+	}
+
 	function modelLabel(id: string | null): string {
 		if (!id) return '(미기록)';
 		return getModel(id)?.label ?? id;
@@ -16,9 +33,29 @@
 	}
 </script>
 
+<!-- 기간 선택 + 총 사용액 -->
+<section class="period-bar">
+	<div class="seg">
+		{#each PERIODS as p (p.key)}
+			<button
+				class="seg-btn"
+				class:active={data.period === p.key}
+				type="button"
+				onclick={() => selectPeriod(p.key)}
+			>
+				{p.label}
+			</button>
+		{/each}
+	</div>
+	<div class="total">
+		<span class="total-k">총 사용액 · {periodLabel}</span>
+		<span class="total-v">{usd(data.totalSpend, 2)}</span>
+	</div>
+</section>
+
 <!-- 모델별 통계 -->
 <section>
-	<h2 class="section-label">모델별 비용 (cost 기록된 응답 기준)</h2>
+	<h2 class="section-label">모델별 비용 · {periodLabel} (cost 기록된 응답 기준)</h2>
 	<div class="table-wrap">
 		<table>
 			<thead>
@@ -60,7 +97,7 @@
 
 <!-- 캐릭터별 통계 -->
 <section>
-	<h2 class="section-label">캐릭터별 사용량 Top 20 (비용순)</h2>
+	<h2 class="section-label">캐릭터별 사용량 · {periodLabel} Top 20 (비용순)</h2>
 	<div class="table-wrap">
 		<table>
 			<thead>
@@ -103,6 +140,60 @@
 	}
 	section {
 		margin-bottom: 32px;
+	}
+
+	.period-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 16px;
+		margin-bottom: 28px;
+	}
+	.seg {
+		display: inline-flex;
+		padding: 3px;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+	}
+	.seg-btn {
+		padding: 7px 16px;
+		border: none;
+		border-radius: 7px;
+		background: transparent;
+		color: var(--text-dim);
+		font-size: 0.86rem;
+		font-weight: 600;
+		transition:
+			background 0.15s ease,
+			color 0.15s ease;
+	}
+	.seg-btn:hover {
+		color: var(--text);
+	}
+	.seg-btn.active {
+		background: var(--accent);
+		color: #fff;
+	}
+	.total {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 2px;
+	}
+	.total-k {
+		font-size: 0.76rem;
+		font-weight: 600;
+		color: var(--text-dim);
+	}
+	.total-v {
+		font-size: 2.2rem;
+		font-weight: 800;
+		letter-spacing: -0.02em;
+		color: var(--accent-hover);
+		font-variant-numeric: tabular-nums;
+		line-height: 1;
 	}
 	.table-wrap {
 		overflow-x: auto;

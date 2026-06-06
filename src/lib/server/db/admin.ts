@@ -164,8 +164,9 @@ export interface ModelStat {
 /**
  * 모델별 통계. cost 가 기록된 assistant 메시지만 대상(NULL 제외).
  * model 이 NULL 인 구버전 행은 별도 그룹(model=null)으로 묶인다.
+ * since = 집계 시작 epoch ms(이 시각 이후 메시지만). 전체 기간이면 0.
  */
-export async function getModelStats(db: D1Database): Promise<ModelStat[]> {
+export async function getModelStats(db: D1Database, since = 0): Promise<ModelStat[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT model,
@@ -177,10 +178,11 @@ export async function getModelStats(db: D1Database): Promise<ModelStat[]> {
 			        COALESCE(SUM(input_tokens), 0) AS in_tok_sum,
 			        AVG(input_tokens) AS in_tok_avg
 			 FROM chat_messages
-			 WHERE role = 'assistant' AND cost IS NOT NULL
+			 WHERE role = 'assistant' AND cost IS NOT NULL AND created_at >= ?
 			 GROUP BY model
 			 ORDER BY cost_sum DESC`
 		)
+		.bind(since)
 		.all<{
 			model: string | null;
 			messages: number;
@@ -379,8 +381,15 @@ export interface CharacterStat {
 	cost: number;
 }
 
-/** 캐릭터별 사용량 top N(cost 높은 순). 삭제된 캐릭터는 name=null. */
-export async function getCharacterStats(db: D1Database, limit = 20): Promise<CharacterStat[]> {
+/**
+ * 캐릭터별 사용량 top N(기간 내 cost 높은 순). 삭제된 캐릭터는 name=null.
+ * since = 집계 시작 epoch ms(메시지 기준). 전체 기간이면 0. 메시지 없는 캐릭터는 제외.
+ */
+export async function getCharacterStats(
+	db: D1Database,
+	limit = 20,
+	since = 0
+): Promise<CharacterStat[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT s.character_id,
@@ -390,13 +399,13 @@ export async function getCharacterStats(db: D1Database, limit = 20): Promise<Cha
 			        COUNT(m.id) AS messages,
 			        COALESCE(SUM(m.cost), 0) AS cost
 			 FROM chat_sessions s
-			 LEFT JOIN chat_messages m ON m.session_id = s.id
+			 JOIN chat_messages m ON m.session_id = s.id AND m.created_at >= ?
 			 LEFT JOIN characters c ON c.id = s.character_id
 			 GROUP BY s.character_id
 			 ORDER BY cost DESC, messages DESC
 			 LIMIT ?`
 		)
-		.bind(limit)
+		.bind(since, limit)
 		.all<{
 			character_id: string;
 			name: string | null;
