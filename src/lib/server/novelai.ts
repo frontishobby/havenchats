@@ -109,7 +109,7 @@ export function buildPositivePrompt(
 	const sit = situation.trim().replace(/,\s*$/, '').trim();
 	const head = [style, sit].filter(Boolean).join(', ');
 	const body = head + QUALITY_TAIL;
-	return nsfw ? `rating:nsfw, ${body}` : body;
+	return nsfw ? `rating:nsfw, uncensored, ${body}` : body;
 }
 
 export interface GeneratedImage {
