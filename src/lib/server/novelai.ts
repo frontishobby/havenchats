@@ -57,10 +57,6 @@ export async function verifySubscription(token: string): Promise<VerifyResult> {
 // 고정 프롬프트/파라미터 (docs/realtime-image.md)
 // ─────────────────────────────────────────────────────────────
 
-/** 그림체 프롬프트 미지정 시 기본값. */
-export const DEFAULT_STYLE_PROMPT =
-	'1.4::artist:sasamori tomoe:: 1.2::artist:ahemaru::, 0.7::artist:hero_neisan, artist:takano suzu::, 0.4::artist:kidmo::, 1.3::seoyong, artist:sohn woohyoung::, 1.2::healthyman ::, freng, 1.2::artist:sos adult::, 1.2::hiramedousa ::, 1.5::artist:shinjiro, artist:umezawa_itte::,';
-
 /** 상황 프롬프트 뒤에 항상 붙는 퀄리티 꼬리(앞 콤마 포함). */
 export const QUALITY_TAIL =
 	', -4::artist collaboration, year 2025, year 2024, -3::spoken bubble, text, cross-section::, rating:explicit, {{{-3::censored, photo inset, stomach deformation}}}, {{{-3::small lines::}}}, 1.5::balanced contrast::, -2::simple illustration::, -1::censored::, best quality, amazing quality, very aesthetic, intricate detail, highres, incredibly absurdres';
@@ -102,14 +98,14 @@ export function isResolutionKey(v: unknown): v is ResolutionKey {
 /**
  * 최종 positive 프롬프트 조립: (NSFW면) rating:nsfw + 그림체 + 상황 + 퀄리티 꼬리.
  * 그림체/상황의 끝 콤마를 정리한 뒤 ', ' 로 잇고, 퀄리티 꼬리(앞 콤마 포함)를 붙인다.
- * nsfw=true 면 맨 앞에 `rating:nsfw` 를 추가한다(NSFW 캐릭터).
+ * 그림체가 비면 화풍 태그 없이 상황+퀄리티만(하드코딩 기본값 없음). nsfw=true 면 맨 앞에 rating:nsfw.
  */
 export function buildPositivePrompt(
 	stylePrompt: string,
 	situation: string,
 	nsfw = false
 ): string {
-	const style = (stylePrompt.trim() || DEFAULT_STYLE_PROMPT).replace(/,\s*$/, '').trim();
+	const style = stylePrompt.trim().replace(/,\s*$/, '').trim();
 	const sit = situation.trim().replace(/,\s*$/, '').trim();
 	const head = [style, sit].filter(Boolean).join(', ');
 	const body = head + QUALITY_TAIL;

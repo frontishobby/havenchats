@@ -328,10 +328,6 @@
 	let favStylesLoaded = $state(false);
 	let styleOpen = $state(false); // 그림체 드롭다운 열림
 	const recommendedStyle = $derived(data.recommendedStyle ?? null);
-	// 추천·즐겨찾기·저장이 하나도 없는지 → 그러면 '기본'이 fallback 그림체를 가리킨다.
-	const noOwnStyles = $derived(
-		!recommendedStyle && favStyles.length === 0 && savedStyles.length === 0
-	);
 	// 현재 선택된 그림체 객체(드롭다운 트리거 표시용). 기본 선택('')이면 null.
 	const selectedStyle = $derived.by(() => {
 		if (!imageStyleId) return null;
@@ -342,13 +338,13 @@
 			null
 		);
 	});
-	// 선택된 그림체의 화풍 프롬프트. 기본('')일 때: 내 그림체가 하나도 없으면 fallback, 있으면 서버 기본.
+	// 선택된 그림체의 화풍 프롬프트. 기본('')일 때: Hub 최초 공유 그림체(fallback), 그것도 없으면 빈 문자열.
 	const selectedStylePrompt = $derived.by(() => {
 		if (imageStyleId) return selectedStyle?.prompt ?? '';
-		return noOwnStyles && fallbackStyle ? fallbackStyle.prompt : '';
+		return fallbackStyle?.prompt ?? '';
 	});
-	// 드롭다운 트리거 썸네일: 선택된 그림체, 없으면(기본) noOwnStyles 시 fallback 썸네일.
-	const trigStyle = $derived(selectedStyle ?? (noOwnStyles ? fallbackStyle : null));
+	// 드롭다운 트리거 썸네일: 선택된 그림체, 없으면(기본) fallback 썸네일.
+	const trigStyle = $derived(selectedStyle ?? fallbackStyle);
 	let imagePromptModel = $state(DEFAULT_IMG_PROMPT_MODEL); // 상황 프롬프트 생성 모델
 	let imgModelOpen = $state(false); // 이미지 프롬프트 모델 드롭다운 열림
 	let imageEarly = $state(false); // 빠른 생성 우선(스트리밍 중 미리 발사)
@@ -1452,7 +1448,7 @@
 											aria-selected={imageStyleId === ''}
 											onclick={() => selectStyle('')}
 										>
-											{#if noOwnStyles && fallbackStyle?.thumbnailUrl}
+											{#if fallbackStyle?.thumbnailUrl}
 												<img class="style-swatch" src={fallbackStyle.thumbnailUrl} alt="" />
 											{:else}
 												<span class="style-swatch default">✦</span>
