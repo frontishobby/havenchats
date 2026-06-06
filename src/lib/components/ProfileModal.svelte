@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { profileModal } from '$lib/state/profileModal.svelte';
+	import { privacyMode, setHideHistory } from '$lib/state/privacyMode.svelte';
 
 	let { user }: { user: App.Locals['user'] } = $props();
 
@@ -208,6 +209,23 @@
 				</div>
 			</div>
 
+			<div class="field">
+				<label class="toggle-row" for="pf-hide-history">
+					<span class="toggle-text">
+						<span class="field-label">브라우저 기록 숨김</span>
+						<span class="toggle-desc">브라우저 탭 제목을 항상 "Haven" 으로만 표시해요.</span>
+					</span>
+					<input
+						id="pf-hide-history"
+						type="checkbox"
+						class="toggle-input"
+						checked={privacyMode.hideHistory}
+						onchange={(e) => setHideHistory(e.currentTarget.checked)}
+					/>
+					<span class="toggle-switch" aria-hidden="true"></span>
+				</label>
+			</div>
+
 			{#if error}<p class="error">{error}</p>{/if}
 
 			<button class="save" onclick={save} disabled={!canSave || saving}>
@@ -382,6 +400,66 @@
 	}
 	.pref-btn.active span {
 		color: var(--text-dim);
+	}
+	.toggle-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		cursor: pointer;
+		margin-bottom: 0;
+	}
+	.toggle-text {
+		flex: 1;
+		min-width: 0;
+	}
+	.toggle-desc {
+		display: block;
+		font-size: 0.74rem;
+		color: var(--text-faint);
+		font-weight: 400;
+		margin-top: 2px;
+		line-height: 1.4;
+	}
+	.toggle-input {
+		position: absolute;
+		opacity: 0;
+		width: 0;
+		height: 0;
+	}
+	.toggle-switch {
+		position: relative;
+		flex-shrink: 0;
+		width: 42px;
+		height: 24px;
+		border-radius: 999px;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		transition: background 0.15s ease;
+	}
+	.toggle-switch::after {
+		content: '';
+		position: absolute;
+		top: 2px;
+		left: 2px;
+		width: 18px;
+		height: 18px;
+		border-radius: 50%;
+		background: var(--text-faint);
+		transition:
+			transform 0.15s ease,
+			background 0.15s ease;
+	}
+	.toggle-input:checked + .toggle-switch {
+		background: var(--accent);
+		border-color: var(--accent);
+	}
+	.toggle-input:checked + .toggle-switch::after {
+		transform: translateX(18px);
+		background: #fff;
+	}
+	.toggle-input:focus-visible + .toggle-switch {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
 	}
 	.error {
 		margin: 0 0 12px;

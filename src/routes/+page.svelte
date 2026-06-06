@@ -29,7 +29,7 @@
 </script>
 
 <svelte:head>
-	<title>Haven — AI 캐릭터와 대화하세요</title>
+	<title>Haven</title>
 	<meta name="description" content="나만의 AI 캐릭터와 끝없는 이야기를 나눠보세요." />
 </svelte:head>
 

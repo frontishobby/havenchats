@@ -7,6 +7,7 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { loginModal } from '$lib/state/loginModal.svelte';
 	import { profileModal } from '$lib/state/profileModal.svelte';
+	import { privacyMode } from '$lib/state/privacyMode.svelte';
 	import { isAdmin } from '$lib/admin';
 	import type { LayoutData } from './$types';
 	let { children, data }: { children: import('svelte').Snippet; data: LayoutData } = $props();
@@ -25,6 +26,19 @@
 	$effect(() => {
 		if (data.user && !data.user.profileComplete && !data.user.blockedReason)
 			profileModal.open = true;
+	});
+
+	// 브라우저 기록 숨김(로컬 옵션): 켜져 있으면 어떤 페이지든 탭 제목을 "Haven" 으로 강제.
+	// 각 페이지가 <svelte:head><title>...</title> 로 제목을 바꾸므로, <head> 변화를 감시해 즉시 되돌린다.
+	$effect(() => {
+		if (!privacyMode.hideHistory) return;
+		document.title = 'Haven';
+		const enforce = () => {
+			if (document.title !== 'Haven') document.title = 'Haven';
+		};
+		const obs = new MutationObserver(enforce);
+		obs.observe(document.head, { childList: true, subtree: true, characterData: true });
+		return () => obs.disconnect();
 	});
 
 	// 좌측 사이드바(최근 채팅)
