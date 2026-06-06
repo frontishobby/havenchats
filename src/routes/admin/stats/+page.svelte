@@ -31,6 +31,28 @@
 	function intOrDash(n: number | null): string {
 		return n == null ? '—' : num(Math.round(n));
 	}
+
+	// 일별 cost: 빈 날짜를 0 으로 채워 최근 N일을 연속 막대로. (KST 기준 날짜 문자열)
+	const dayKey = (ms: number) =>
+		new Intl.DateTimeFormat('en-CA', {
+			timeZone: 'Asia/Seoul',
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit'
+		}).format(new Date(ms));
+
+	const trend = $derived.by(() => {
+		const byDay = new Map(data.daily.map((d) => [d.day, d]));
+		const out: { day: string; cost: number; messages: number }[] = [];
+		const now = Date.now();
+		for (let i = data.trendDays - 1; i >= 0; i--) {
+			const key = dayKey(now - i * 86_400_000);
+			const hit = byDay.get(key);
+			out.push({ day: key, cost: hit?.cost ?? 0, messages: hit?.messages ?? 0 });
+		}
+		return out;
+	});
+	const trendMax = $derived(Math.max(...trend.map((d) => d.cost), 1e-9));
 </script>
 
 <!-- 기간 선택 + 총 사용액 -->
@@ -50,6 +72,21 @@
 	<div class="total">
 		<span class="total-k">총 사용액 · {periodLabel}</span>
 		<span class="total-v">{usd(data.totalSpend, 2)}</span>
+	</div>
+</section>
+
+<!-- 일별 비용 추이 (기간 선택과 무관, 최근 14일 고정) -->
+<section class="trend">
+	<h2 class="section-label">일별 비용 (최근 {data.trendDays}일, KST)</h2>
+	<div class="bars">
+		{#each trend as d (d.day)}
+			<div class="bar-col" title={`${d.day} · ${usd(d.cost, 4)} · ${num(d.messages)}msg`}>
+				<div class="bar-track">
+					<div class="bar-fill" style:height={`${(d.cost / trendMax) * 100}%`}></div>
+				</div>
+				<span class="bar-label">{d.day.slice(5)}</span>
+			</div>
+		{/each}
 	</div>
 </section>
 
@@ -149,6 +186,44 @@
 		flex-wrap: wrap;
 		gap: 16px;
 		margin-bottom: 28px;
+	}
+
+	.bars {
+		display: flex;
+		align-items: flex-end;
+		gap: 6px;
+		height: 120px;
+		padding: 8px 12px;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+	}
+	.bar-col {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 6px;
+		height: 100%;
+	}
+	.bar-track {
+		flex: 1;
+		width: 100%;
+		display: flex;
+		align-items: flex-end;
+		justify-content: center;
+	}
+	.bar-fill {
+		width: 70%;
+		min-height: 2px;
+		background: linear-gradient(180deg, var(--accent-hover), var(--accent));
+		border-radius: 3px 3px 0 0;
+		transition: height 0.2s ease;
+	}
+	.bar-label {
+		font-size: 0.62rem;
+		color: var(--text-faint);
+		white-space: nowrap;
 	}
 	.seg {
 		display: inline-flex;

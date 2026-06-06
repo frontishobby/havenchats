@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { fetchInfraMetrics } from '$lib/server/cloudflare';
+import { estimateBilling } from '$lib/server/cfPricing';
 import type { PageServerLoad } from './$types';
 
 /** D1 binding 으로 직접 센 테이블별 행 수(Analytics 권한과 무관하게 항상 동작). */
@@ -23,5 +24,6 @@ export const load: PageServerLoad = async ({ platform }) => {
 	if (!db) error(500, '저장소를 사용할 수 없어요.');
 
 	const [infra, rows] = await Promise.all([fetchInfraMetrics(), tableRows(db)]);
-	return { infra, rows };
+	const billing = estimateBilling(infra);
+	return { infra, rows, billing };
 };

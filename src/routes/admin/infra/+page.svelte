@@ -1,11 +1,32 @@
 <script lang="ts">
-	import { num, bytes, dateTime, ago } from '$lib/adminFormat';
+	import { num, bytes, dateTime, ago, usd } from '$lib/adminFormat';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	const infra = $derived(data.infra);
 	const rows = $derived(data.rows);
+	const billing = $derived(data.billing);
+
+	/** 큰 수 압축 표기(1.2K / 3.4M / 25B). */
+	function compact(n: number): string {
+		if (n >= 1e9) return `${(n / 1e9).toFixed(n >= 1e10 ? 0 : 1)}B`;
+		if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
+		if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
+		return num(Math.round(n));
+	}
+
+	/** 청구 항목 사용량 표기: 'gb' 는 GB, 'count' 는 압축 수. */
+	function usageText(item: { monthly: number | null; unit: 'gb' | 'count' }): string {
+		if (item.monthly == null) return '—';
+		if (item.unit === 'gb') return `${item.monthly.toFixed(item.monthly >= 10 ? 1 : 3)} GB`;
+		return compact(item.monthly);
+	}
+
+	function freeText(item: { unit: 'gb' | 'count'; free: number }): string {
+		if (item.free <= 0) return '—';
+		return item.unit === 'gb' ? `${item.free} GB` : compact(item.free);
+	}
 
 	// 테이블 라벨(스키마 대응).
 	const TABLE_LABELS: Record<string, string> = {
@@ -36,6 +57,68 @@
 		Cloudflare 지표를 보려면 <code>CLOUDFLARE_API_TOKEN</code> ·
 		<code>CLOUDFLARE_ACCOUNT_ID</code> 가 설정돼야 해요. (prod 는 Pages secret)
 	</div>
+{/if}
+
+<!-- 청구 예상 (사용량 기반) -->
+{#if billing.available}
+	<section>
+		<h2 class="section-label">월 청구 예상 (사용량 기반)</h2>
+		<div class="bill-top">
+			<div class="bill-total">
+				<span class="bt-k">총 예상액 · 월</span>
+				<span class="bt-v">{usd(billing.monthlyTotal, 2)}</span>
+			</div>
+			<div class="bill-by-svc">
+				{#each billing.services as s (s.key)}
+					<div class="svc-chip">
+						<span class="sc-k">{s.label}</span>
+						<span class="sc-v">{usd(s.subtotal, 2)}</span>
+					</div>
+				{/each}
+			</div>
+		</div>
+
+		<div class="table-wrap">
+			<table>
+				<thead>
+					<tr>
+						<th class="l">서비스</th>
+						<th class="l">항목</th>
+						<th>추정 사용량</th>
+						<th>무료 허용</th>
+						<th>예상액</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each billing.services as s (s.key)}
+						{#each s.items as item, i (s.key + item.name)}
+							<tr class:svc-start={i === 0}>
+								<td class="l name">{i === 0 ? s.label : ''}</td>
+								<td class="l">
+									{item.name}
+									{#if item.projected}<span class="raw"> · 7일 환산</span>{/if}
+								</td>
+								<td class:dim={!item.available}>
+									{item.available ? usageText(item) : '지표 없음'}
+								</td>
+								<td class="dim">{freeText(item)}</td>
+								<td class="cost" class:zero={item.cost === 0}>{usd(item.cost, 2)}</td>
+							</tr>
+						{/each}
+						<tr class="svc-subtotal">
+							<td class="l"></td>
+							<td class="l" colspan="3">{s.label} 소계</td>
+							<td class="cost">{usd(s.subtotal, 2)}</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+		<p class="dim-note">
+			공개 Workers 유료 플랜 가격표 기준 <strong>추정치</strong>예요. 저장량은 현재 스냅샷, 쿼리·작업은
+			최근 7일을 월(×30/7)로 환산했어요. 정확한 청구는 Cloudflare 대시보드 기준.
+		</p>
+	</section>
 {/if}
 
 <!-- D1 -->
@@ -233,6 +316,81 @@
 		background: var(--bg-elev);
 		border-radius: 4px;
 		color: var(--text);
+	}
+
+	.bill-top {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 16px;
+		margin-bottom: 16px;
+		padding: 16px 18px;
+		background: var(--bg-card);
+		border: 1px solid var(--accent);
+		border-radius: var(--radius-sm);
+	}
+	.bill-total {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.bt-k {
+		font-size: 0.76rem;
+		font-weight: 600;
+		color: var(--text-dim);
+	}
+	.bt-v {
+		font-size: 2.2rem;
+		font-weight: 800;
+		letter-spacing: -0.02em;
+		color: var(--accent-hover);
+		font-variant-numeric: tabular-nums;
+		line-height: 1;
+	}
+	.bill-by-svc {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+	}
+	.svc-chip {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 2px;
+		padding: 8px 14px;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+	}
+	.sc-k {
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--text-dim);
+	}
+	.sc-v {
+		font-size: 1.1rem;
+		font-weight: 800;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.svc-start td {
+		border-top-width: 2px;
+	}
+	.svc-subtotal td {
+		border-top: 1px dashed var(--border);
+		color: var(--text-dim);
+		font-weight: 600;
+		font-size: 0.82rem;
+	}
+	.cost {
+		color: var(--accent-hover);
+		font-weight: 700;
+		font-variant-numeric: tabular-nums;
+	}
+	.cost.zero {
+		color: var(--text-faint);
+		font-weight: 400;
 	}
 
 	.cards {

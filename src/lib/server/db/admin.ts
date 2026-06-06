@@ -20,7 +20,7 @@ function parseImageSet(json: string | null): CharacterImageSet | null {
 	}
 }
 
-/** 유저 1행 + 사용량 집계. */
+/** 유저 1행 + 사용량 집계. (비용은 사용 통계 탭에서 — 여기선 세션/메시지/활동만) */
 export interface AdminUserRow {
 	id: string;
 	email: string;
@@ -28,35 +28,27 @@ export interface AdminUserRow {
 	createdAt: number;
 	sessions: number;
 	messages: number;
-	costTotal: number;
-	cost7d: number;
 	lastActive: number | null;
 	blocked: boolean;
 }
 
 /**
- * 전체 유저 + 사용량(세션/메시지 수, 누적 cost, 최근 7일 cost, 마지막 활동). 7일 cost 높은 순.
- * since7d = (now - 7일) epoch ms.
+ * 전체 유저 + 사용량(세션/메시지 수, 마지막 활동). 최근 활동순(없으면 가입일순).
+ * 이름/이메일 검색은 클라에서 필터 — 전체를 한 번에 로드한다.
  */
-export async function listUsersWithStats(
-	db: D1Database,
-	since7d: number
-): Promise<AdminUserRow[]> {
+export async function listUsersWithStats(db: D1Database): Promise<AdminUserRow[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT u.id, u.email, u.display_name, u.created_at, u.blocked_reason,
 			        COUNT(DISTINCT s.id) AS sessions,
 			        COUNT(m.id) AS messages,
-			        COALESCE(SUM(m.cost), 0) AS cost_total,
-			        COALESCE(SUM(CASE WHEN m.created_at >= ? THEN m.cost ELSE 0 END), 0) AS cost_7d,
 			        MAX(s.last_message_at) AS last_active
 			 FROM users u
 			 LEFT JOIN chat_sessions s ON s.user_id = u.id
 			 LEFT JOIN chat_messages m ON m.session_id = s.id
 			 GROUP BY u.id
-			 ORDER BY cost_7d DESC, u.created_at DESC`
+			 ORDER BY last_active DESC, u.created_at DESC`
 		)
-		.bind(since7d)
 		.all<{
 			id: string;
 			email: string;
@@ -65,8 +57,6 @@ export async function listUsersWithStats(
 			blocked_reason: string | null;
 			sessions: number;
 			messages: number;
-			cost_total: number;
-			cost_7d: number;
 			last_active: number | null;
 		}>();
 	return (results ?? []).map((r) => ({
@@ -76,8 +66,6 @@ export async function listUsersWithStats(
 		createdAt: r.created_at,
 		sessions: r.sessions,
 		messages: r.messages,
-		costTotal: r.cost_total,
-		cost7d: r.cost_7d,
 		lastActive: r.last_active,
 		blocked: r.blocked_reason != null
 	}));
