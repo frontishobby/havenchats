@@ -31,15 +31,13 @@
 	</div>
 
 	<div class="body">
-		<div class="name-row">
-			<h3 class="name">
-				<span class="name-text">{character.name}</span>
-				{#if character.contentRating === 'nsfw'}
-					<NsfwBadge size={17} />
-				{/if}
-			</h3>
-			<span class="chats">💬 {formatChats(character.chats)}</span>
-		</div>
+		<h3 class="name">
+			<span class="name-text">{character.name}</span>
+			{#if character.contentRating === 'nsfw'}
+				<NsfwBadge size={17} />
+			{/if}
+		</h3>
+		<span class="chats">💬 {formatChats(character.chats)}</span>
 		<p class="tagline">{character.tagline}</p>
 		<div class="tags">
 			{#each character.tags.slice(0, 3) as tag (tag)}
@@ -101,12 +99,6 @@
 		flex-direction: column;
 		gap: 6px;
 	}
-	.name-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 8px;
-	}
 	h3.name {
 		margin: 0;
 		font-size: 1rem;
@@ -118,9 +110,8 @@
 	}
 	.name-text {
 		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		overflow-wrap: anywhere;
+		word-break: break-word;
 	}
 	.chats {
 		font-size: 0.75rem;

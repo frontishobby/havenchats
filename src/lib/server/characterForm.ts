@@ -18,7 +18,7 @@ export const ALLOWED_IMAGE: Record<string, string> = {
 };
 export const MAX_IMAGE_BYTES = 3 * 1024 * 1024; // 3MB
 
-const NAME_MAX = 15;
+const NAME_MAX = 30;
 const TAGLINE_MAX = 100;
 const INTRO_MAX = 3000;
 // 프롬프트 제한은 글자가 아니라 추정 토큰 기준(영어가 글자 수로 불이익 안 받게). $lib/tokens 참고.

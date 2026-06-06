@@ -68,7 +68,7 @@
 		allowScriptVars?: boolean;
 	} = $props();
 
-	const NAME_MAX = 15;
+	const NAME_MAX = 30;
 	const TAGLINE_MAX = 100;
 	const INTRO_MAX = 3000;
 	// 프롬프트 제한은 글자가 아니라 **추정 토큰** 기준 — 영어처럼 토큰 효율이 높은 언어가
