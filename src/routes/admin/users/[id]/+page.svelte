@@ -115,13 +115,15 @@
 			{#each data.characters as c (c.id)}
 				<li class="char">
 					<div class="char-head">
-						<span class="char-name">{c.name}</span>
-						<span class="badge" class:priv={c.visibility === 'private'}>
-							{c.visibility === 'private' ? '비공개' : '공개'}
-						</span>
-						{#if c.contentRating === 'nsfw'}<span class="badge nsfw">NSFW</span>{/if}
-						{#if c.imported}<span class="badge imp">charx</span>{/if}
-						<span class="char-meta">💬 {num(c.chats)} · {dateTime(c.createdAt)}</span>
+						<div class="char-title">
+							<span class="char-name">{c.name}</span>
+							<span class="badge" class:priv={c.visibility === 'private'}>
+								{c.visibility === 'private' ? '비공개' : '공개'}
+							</span>
+							{#if c.contentRating === 'nsfw'}<span class="badge nsfw">NSFW</span>{/if}
+							{#if c.imported}<span class="badge imp">charx</span>{/if}
+							<span class="char-meta">💬 {num(c.chats)} · {dateTime(c.createdAt)}</span>
+						</div>
 						<div class="char-actions">
 							<button class="read-btn" type="button" onclick={() => toggle(c.id)}>
 								{openIds.has(c.id) ? '프롬프트 접기' : '프롬프트 보기'}
@@ -369,6 +371,13 @@
 	}
 	.char-head {
 		display: flex;
+		align-items: flex-start;
+		gap: 8px;
+	}
+	.char-title {
+		flex: 1;
+		min-width: 0;
+		display: flex;
 		align-items: center;
 		gap: 8px;
 		flex-wrap: wrap;
@@ -403,7 +412,6 @@
 		margin-left: 2px;
 	}
 	.char-actions {
-		margin-left: auto;
 		display: flex;
 		flex-direction: column;
 		gap: 5px;
