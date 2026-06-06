@@ -6,6 +6,7 @@
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { base64ToBlob } from '$lib/imagePreview';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
+	import CharacterDetailModal from '$lib/components/CharacterDetailModal.svelte';
 	import {
 		resolveSceneLine,
 		looksLikeSceneToken,
@@ -310,6 +311,8 @@
 	// 서버 MAX_USER_MSG_TOKENS(4000) × estimateTokens 비율(len/2) = 8000자.
 	const MAX_USER_MSG_CHARS = 8000;
 	let imgFailed = $state(false);
+	// 헤더의 캐릭터 정보(썸네일·이름·설명) 클릭 시 상세 모달 표시.
+	let showCharModal = $state(false);
 	let scroller = $state<HTMLDivElement | null>(null);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
 	// 터치(모바일) 기기 여부 — 이 경우 Enter 는 전송하지 않고 개행(기본 동작) 시킨다.
@@ -1069,22 +1072,28 @@
 <div class="chat">
 	<header class="chat-header">
 		<a class="back" href="/" aria-label="뒤로">←</a>
-		<div class="avatar-sm">
-			{#if imgFailed}
-				<span>{character.name.charAt(0)}</span>
-			{:else}
-				<img src={character.avatarUrl} alt={character.name} onerror={() => (imgFailed = true)} />
-			{/if}
-		</div>
-		<div class="who">
-			<div class="name-row">
-				<strong>{character.name}</strong>
-				{#if character.contentRating === 'nsfw'}
-					<NsfwBadge size={17} />
+		<button
+			class="char-info"
+			onclick={() => (showCharModal = true)}
+			aria-label="{character.name} 정보 보기"
+		>
+			<div class="avatar-sm">
+				{#if imgFailed}
+					<span>{character.name.charAt(0)}</span>
+				{:else}
+					<img src={character.avatarUrl} alt={character.name} onerror={() => (imgFailed = true)} />
 				{/if}
 			</div>
-			<span class="tagline">{character.tagline}</span>
-		</div>
+			<div class="who">
+				<div class="name-row">
+					<strong>{character.name}</strong>
+					{#if character.contentRating === 'nsfw'}
+						<NsfwBadge size={17} />
+					{/if}
+				</div>
+				<span class="tagline">{character.tagline}</span>
+			</div>
+		</button>
 		<div class="header-right">
 			<button
 				class="settings-btn"
@@ -1136,6 +1145,11 @@
 			</button>
 		</div>
 	</header>
+
+	<CharacterDetailModal
+		character={showCharModal ? character : null}
+		onclose={() => (showCharModal = false)}
+	/>
 
 	{#if localImagesMissing}
 		<div class="local-warn" role="status">
@@ -1837,6 +1851,26 @@
 	.back:hover {
 		background: var(--bg-card);
 		color: var(--text);
+	}
+	/* 헤더 캐릭터 정보(썸네일+이름+설명) — 클릭 시 상세 모달. 버튼 기본 스타일 리셋. */
+	.char-info {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		min-width: 0;
+		padding: 4px 8px 4px 4px;
+		margin: -4px 0;
+		border: none;
+		background: transparent;
+		border-radius: 10px;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+		transition: background 0.15s ease;
+	}
+	.char-info:hover {
+		background: var(--bg-card);
 	}
 	.avatar-sm {
 		width: 38px;
