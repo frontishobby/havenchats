@@ -71,6 +71,23 @@ const SITUATION_SYSTEM = [
 	`- Keep it concise: appearance/clothing tags under ~40 tags, situation phrases kept to the few clear beats only (no full sentences, no padding).`
 ].join('\n');
 
+/**
+ * 상황 프롬프트 후처리. NovelAI 는 영어/danbooru 태그만 해석하므로, 모델이 (지시에도 불구하고)
+ * 캐릭터 프롬프트의 '상태창'을 통짜로 베껴 넣는 걸 출력단에서 막는다.
+ * — 줄·콤마 단위 세그먼트로 쪼개 한글이 들어간 조각은 통째로 제거(잔여 숫자/기호 junk 포함) →
+ *   순수 영어 태그/구문만 ', ' 로 재조립. 입력(assistantText)은 그대로라 모델은 상태를 참고는 한다.
+ */
+const HANGUL_RE = /[가-힣ᄀ-ᇿ㄰-㆏ꥠ-꥿ힰ-퟿]/;
+function sanitizeSituation(raw: string): string {
+	return raw
+		.split(/[\r\n,]+/)
+		.map((s) => s.trim())
+		.filter((s) => s && !HANGUL_RE.test(s))
+		.join(', ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
 interface ImageRequestBody {
 	sessionId?: string;
 	/** 방금 완료된 assistant 응답 본문(상황 프롬프트 입력). */
@@ -257,7 +274,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			providerOptions: buildProviderOptions(promptModel, { noThinking: true })
 		});
 		rawSituation = result.text ?? '';
-		situation = rawSituation.trim().replace(/\s+/g, ' ');
+		situation = sanitizeSituation(rawSituation);
 		finishReason = (result.finishReason as string | undefined) ?? null;
 		warnings = result.warnings ?? [];
 		cost = parseGatewayCost(result.providerMetadata);
