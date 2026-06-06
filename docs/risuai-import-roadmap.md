@@ -1,8 +1,24 @@
 # RisuAI 카드(charx/risum) import 고도화 로드맵
 
-> 작성: 2026-06-05 · 상태: **계획(미착수)**
+> 작성: 2026-06-05 · 최종 갱신: 2026-06-06 · 상태: **진행 중** (로어북·변수엔진·HTML표시·탐지경고 완료)
 > 목적: charx import 시 "조용히 누락"되는 RisuAI 기능들을 단계적으로 흡수.
-> 관련 코드: `src/lib/import/charx.ts`, `cardToCharacter.ts`, `cbs.ts`, `src/routes/api/import/charx/`
+> 관련 코드: `src/lib/import/charx.ts`, `cardToCharacter.ts`, `cbs.ts`, `htmlRender.ts`, `displayScripts.ts`, `lorebook.ts`, `src/routes/api/import/charx/`
+
+---
+
+## 구현 현황 (요약)
+
+| # | 기능 | 상태 | 핵심 위치 |
+|---|---|---|---|
+| 1-1 | 로어북(키워드 동적 설정) | ✅ 완료 | `lorebook.ts`, migration 0014 |
+| 1-2 | 변수 엔진 + 동적 CBS | ✅ 완료 (+Tier1) | `cbs.ts`, migration 0015 |
+| 1-3 | 경량 트리거 | ⬜ 미착수 | (변수엔진 위에 올림) |
+| 1-4 | 정규식 치환 | 🟡 표시형 완료 / 텍스트형 보류 | §1-4b |
+| 1-4b | HTML 표시 모드(감정 스프라이트) | ✅ 완료 | `htmlRender.ts`, `displayScripts.ts`, migration 0016 |
+| 1-5 | 미지원 요소 탐지 + 경고 | ✅ 완료 | `risum.ts`, `capabilities.ts` |
+| 1-6 | CJS 커스텀 코드(클라 샌드박스) | ⬜ 최후순위 | — |
+
+**남은 핵심 작업**: 경량 트리거(§1-3) → 그 위에 Celis 류 인터랙티브 UI(상태창·설정 토글)와 텍스트형 정규식.
 
 ---
 
@@ -41,60 +57,28 @@ description/personality/scenario/system_prompt/post_history/mes_example → `des
 
 ## 1. 기능별 상세 + 구현 방향
 
-### 1-1. 로어북 (World Info) — **1순위, 가성비 최고** ✅ **구현됨 (2026-06-06)**
+### 1-1. 로어북 (World Info) — ✅ 완료 (2026-06-06)
 
-> 구현: `characters.lorebook` JSON 컬럼(migration 0014), `src/lib/lorebook.ts`(정규화·선택·포맷 순수함수),
-> `/api/chat` 에서 최근 window 키워드 스캔→마지막 유저 메시지 끝(directive 앞) 주입(prefix 캐시 보존),
-> `CharacterLorebookModal.svelte`(수동 편집), charx import 추출·머지(card.json `character_book` +
-> `module.risum` lorebook, content 기준 디둡). imported 캐릭터 lorebook 은 서버 전용(getCharacterLorebook).
-> 검증: check 0 errors · 런타임 로직 14/14 · import 추출 10/10 · build·dev 스모크 통과. (아래는 설계 메모)
+키워드로 켜지는 동적 설정("A 언급 시 A의 비밀 공개" 류). `characters.lorebook` JSON 컬럼(migration 0014) +
+`src/lib/lorebook.ts`(정규화·선택·포맷 순수함수). import 가 card.json `character_book` + module.risum `lorebook`
+를 머지·디둡(content 기준). `/api/chat` 가 최근 window 키워드 스캔 → 마지막 유저 메시지 끝(가변영역, prefix 캐시
+보존)에 주입, constant 는 항상 주입. imported 는 서버 전용(getCharacterLorebook). 수동 편집 `CharacterLorebookModal.svelte`.
+검증: 런타임 14/14 · 추출 10/10.
 
-
-**무엇**: 대화에 특정 키워드가 나오면 관련 설정 텍스트를 그때 프롬프트에 주입. "A를 언급하면 A의 비밀이 공개" 류 조건부 지식.
-
-**왜 쉬움**: `card.json`에 있음 → RPack 불필요. 이미 `cardToCharacter.ts:144`에서 읽고 있고 *버리기만* 한다.
-
-**런타임**: 우리 `/api/chat`은 이미 sliding window + rolling summary로 동적 컨텍스트를 조립 중 → **로어북 스캔 단계 1개 추가**가 자연스러움.
-- 최근 메시지 N개를 스캔 → 키워드 매칭된 항목만 system 프롬프트에 주입
-- constant 항목은 항상 주입
-
-**핵심 80% / 나중에**: 핵심(키워드 매칭→주입)은 쉬움. RisuAI 풀 재현(정규식 키, recursion, scan depth, 토큰 예산, `@@`데코레이터)은 후순위.
-
-**⚠️ 로어북이 두 군데에 분산** (실제 charx 3종 스캔으로 확인, 2026-06-05):
-- `card.json` `character_book.entries` — 지금 cardToCharacter 가 *상시(constant)만* 흡수
-- `module.risum` `lorebook[]` — charx export 가 `char.globalLore` 를 여기로 넣음. 현재 완전 미흡수
-- **둘이 중복/분산될 수 있음** (예: Celis.charx = character_book 8개 **＋** module.risum lorebook 8개). 정식 구현 시 **두 출처를 머지 + 디둡(content/comment 기준)** 필요. 안 그러면 같은 설정이 두 번 주입됨.
-- 참고: `extensions.risuai.triggerscript/customScripts` 는 charx 에선 **항상 비어 있음**(risum 으로 이동) → 트리거/정규식 탐지는 risum 디코드가 필수임을 실증.
-
-**캐싱 주의**: 로어북은 가변 주입이라 system **고정 prefix**를 깨면 프롬프트 캐시가 날아간다. 로어북 블록은 가변 영역(마지막 유저 메시지 끝 또는 rolling summary처럼 prefix 뒤쪽)에 배치할 것. (CLAUDE.md 프롬프트 캐싱 규칙 참고)
+> 후순위(미구현): RisuAI 풀 재현(정규식 키·recursion·scan depth·토큰 예산·`@@` 데코레이터).
 
 ---
 
-### 1-2. 변수 엔진 + 동적 CBS — **2순위, 토대** ✅ **구현됨 (2026-06-06)**
+### 1-2. 변수 엔진 + 동적 CBS — ✅ 완료 (2026-06-06)
 
-> 구현: `src/lib/cbs.ts`(런타임 CBS 엔진 — evalCBS(text,ctx): getvar/setvar/addvar/calc/random/roll/#if,
-> 시드 RNG, resolveCBSStatic), `chat_sessions.script_state`·`characters.script_data` JSON 컬럼(migration 0015),
-> import 가 description·로어북의 CBS 를 **원시 보존**(평탄화 제거, greeting·notes 만 정적 평탄화) +
-> `extensions.risuai.defaultVariables` 추출, `/api/chat` 가 매 턴 ctx(세션변수∪기본변수+index+rng)로
-> description·로어북 evalCBS → setvar 변이를 턴 종료 후 `updateScriptState` 영속. CBS 없는 카드는 noop →
-> prefix 캐시 보존. 검증: check 0 · evalCBS 19/19 · import 변수체인 7/7 · build·dev 스모크. (아래는 설계 메모)
->
-> **+ Tier 1 CBS 보강 (2026-06-06):** evalCBS 에 비교(greater/less/ge/le)·수학(round/floor/ceil/abs/
-> min/max/sum/average/pow/remaind/randint)·문자열(replace/trim/length/lower/upper/capitalize/starts·
-> endswith/contains/reverse/tonumber/split/join/spread/arraylength)·시간(time/date/unixtime/isotime/
-> isodate/datetimeformat, `ctx.now` 주입)·블록 `#when`(+`:else`)·이스케이프(decbo/decbc/bo/bc, 마스크
-> 복원)·주석(`//`,comment) 추가. RisuAI 176개 중 자료구조(배열/딕셔너리/`#each`/`#func`)·메시지참조·
-> char필드주입은 Tier 2(트리거와 함께), 에셋/감정/암호화/환경 매크로(~50개)는 우리 아키텍처에 무의미 →
-> 영구 스킵. 검증: Tier1 종합 테스트 통과.
+세션별 상태 변수(`$호감도`, `$기분`...)를 import 박제 → 런타임 평가로. `src/lib/cbs.ts`(evalCBS: getvar/setvar/
+addvar/calc/random/roll/#if/#when, 비교·수학·문자열·시간 매크로, 시드 RNG), `chat_sessions.script_state`·
+`characters.script_data` JSON 컬럼(migration 0015). import 가 description·로어북 CBS 를 원시 보존(greeting·notes
+만 정적 평탄화) + defaultVariables 추출. `/api/chat` 가 매 턴 ctx(세션변수∪기본변수+index+rng)로 평가 → setvar
+변이 영속(updateScriptState). CBS 없으면 noop(prefix 캐시 유지). 검증: evalCBS 19/19 · 변수체인 7/7.
 
-
-**무엇**: 세션별 상태 변수(`$호감도`, `$기분`...). 지금은 import 때 박제 → 런타임에 살아 움직이게.
-
-**저장**: `chat_sessions`에 JSON 컬럼 `script_state` 추가. `{ "$호감도": "50" }` 형태.
-
-**런타임**: CBS 평가를 import-time → **chat-time(`/api/chat`)로 이동**. 매 턴 `script_state` 읽어서 `{{getvar}}`/`{{#if}}` 평가. 이게 트리거의 전제.
-
-**파급**: 이거 하면 호감도/진행도 같은 **상태머신형 캐릭터가 박제 → 동적**으로 살아남.
+> Tier 2 일부는 §1-4b 에서 추가(assetlist/array/filter/`#each`/slot/settempvar). 메시지참조·char필드주입은 트리거(§1-3)
+> 와 함께, 에셋/감정/암호화/환경 매크로(~50개)는 우리 아키텍처에 무의미 → 영구 스킵.
 
 ---
 
@@ -122,119 +106,54 @@ description/personality/scenario/system_prompt/post_history/mes_example → `des
 
 ---
 
-### 1-4. 정규식 치환 스크립트 — **4순위 (재평가: 대부분 포팅 비대상)**
+### 1-4. 정규식 치환 스크립트 — 🟡 표시형 완료 / 텍스트형 보류
 
-**무엇**: `module.risum` `regex[]`(customscript). `{in: 정규식, out: 치환, type, flag}`. AI 텍스트를 파이프라인
-단계별로 find-replace. `out` 에 `$1` 그룹·CBS 매크로 포함 가능(정규식+CBS 결합). 단계(type):
-- `editdisplay`: **화면 표시 텍스트만**(모델 못 봄) · `editoutput`: AI 출력 원본 · `editinput`: 유저 입력 ·
-  `editprocess`: 모델에 보낼 프롬프트(보통 숨김 마커 제거) · `disabled`: 꺼짐(에디터 구분선/라벨)
+`module.risum` `regex[]`(customscript). `{in, out, type, flag}`. `out` 에 `$1` 그룹·CBS 매크로 결합 가능. type 별 처리:
+- **`editdisplay` (HTML 출력 = 대부분)** → ✅ **완료** — 감정 스프라이트 HTML 렌더(§1-4b).
+- **`editoutput`/`editinput`/`editprocess` (텍스트 가공)** → 보류. 단독 효용 낮고 CBS 조건과 얽혀 복잡 → 안전 정규식 한정 후순위.
+- **`disabled` (에디터 구분선/라벨, in 비어있음)** → 무시.
 
-**⚠️ 실제 카드 분석(2026-06-06, Catrina/무인도/Celis) 결과 — 전제가 틀렸음:**
-대부분의 정규식은 **RisuAI의 HTML 렌더링 장치**다. `editdisplay` 들이 `<style>`/`<div>`/`<input>` **생 HTML/CSS
-를 뿜어** 감정이미지·상태창·첫메시지 선택 UI 를 그린다(예: `<img="char_emotion">` → CSS+HTML, `[ Date:…|
-Location:… ]` → `<div class="cartoon-bg">` 상태창). **Haven 은 소설 모드(산문/마크다운)라 생 HTML 을 안
-그리고, 장면 이미지는 자체 시스템(위치코드/named)으로 이미 처리** → **display 정규식은 우리 렌더러와 근본 충돌**
-(그대로 가져오면 HTML 태그가 텍스트로 노출되거나 XSS 위험).
+> 초기 판단(2026-06-06)은 "editdisplay = HTML 뿜어 산문 모드와 충돌 → 포팅 안 함"이었으나, §1-4b 에서 DOMPurify+CSS
+> 스코핑으로 안전하게 렌더 가능해져 **표시형은 완료로 전환**. capabilities 경고도 editdisplay·disabled 는 제외(나머지만 ⚠️).
 
-**수정된 방향:**
-- **표시형(editdisplay, HTML 출력)** → **포팅 안 함**. 우리 장면이미지/산문 렌더링으로 대체. 감지 경고만 유지.
-- **텍스트 정리형(editprocess/editoutput, HTML 없는 순수 치환 — 숨김 마커 제거 등)** → 선택적·소수만. 단독 효용
-  낮고 CBS 조건과 얽히면 복잡. 안전한 정규식 한정.
-- "editdisplay 먼저(쉽고 안전)"는 **오판이었음** — display 가 오히려 HTML 뿜어 부적합/위험.
-
-**보안**: 제작자 임의 정규식 → **ReDoS 위험**. 입력 길이 제한 + 패턴 검증(또는 안전 정규식 엔진). Workers엔 동기 정규식 타임아웃이 없으니 입력 크기로 방어.
+**보안**: 제작자 임의 정규식 = ReDoS 위험 → 입력 길이 제한(`displayScripts.ts` MAX_DISPLAY_INPUT)으로 방어(Workers/브라우저 동기 타임아웃 부재 대비).
 
 ---
 
-### 1-4b. HTML 표시 모드 (editdisplay HTML 렌더링) — ✅ **구현됨 (감정 스프라이트 한정, 2026-06-06)**
+### 1-4b. HTML 표시 모드 (editdisplay HTML 렌더링) — ✅ 완료 (감정 스프라이트 한정, 2026-06-06)
 
-> 구현(옵션 A): `src/lib/htmlRender.ts`(encodeStyle→DOMPurify[훅: script·on*·javascript:·비유튜브iframe 제거,
-> href http(s)만+target/rel]→decodeStyle[@adobe/css-tools 로 모든 셀렉터에 `.chattext` 스코프 접두, @import 제거]),
-> `src/lib/cbs.ts`(에셋/배열 매크로 추가: raw/img/asset/path/emotion·assetlist·array·filter·#each/slot·settempvar,
-> CbsContext 에 assets/resolveAsset/temp), `src/lib/import/displayScripts.ts`(risum regex 중 editdisplay 추출·정규식
-> 적용·NamedImageSet 에셋 리졸버[ext/대소문자 정규화+편집거리 퍼지]), `characters.display_scripts` 컬럼(migration 0016,
-> 표시 전용이라 클라로 내려감), `/api/chat` 은 display 카드면 buildImageCatalog·pinSceneCodes 스킵(카드 자체 `<img>`
-> 규약에 위임), `chat/[id]/+page.svelte` 는 라인별 정규식 매칭 시 정규식→CBS(순수, SSR/클라 동일)→`<div class="chattext"
-> use:cardHtml>` 에서 DOMPurify 세정 후 innerHTML 주입(액션=클라 전용 → hydration 안전).
-> 범위: **감정 스프라이트(Catrina/Da-yeon/무인도)** 만. Celis 류 인터랙티브 UI(설정 토글·risu-trigger·세션변수 게이팅)는
-> 경량 트리거(§1-3)가 선행돼야 해서 제외. 검증: CBS 6/6 · 실카드 3종 end-to-end 해석 · DOMPurify+스코핑 보안 13/13(jsdom)
-> · check 0 errors · build·dev 스모크. (아래는 원래 설계 메모)
+수입 카드의 editdisplay 정규식이 모델 `<img="감정">` 마커를 격리·세정된 감정 스프라이트 HTML 로 렌더(옵션 A 채택).
+**파이프라인(클라)**: 정규식 in→out($캡처) → CBS 평가(에셋 리졸브) → DOMPurify 세정 + CSS `.chattext` 스코핑 → innerHTML.
 
----
+- `src/lib/htmlRender.ts`: encodeStyle(`<style>`→hex) → DOMPurify(훅: script·on*·`javascript:`·비유튜브 iframe 제거,
+  href http(s)만+target/rel) → decodeStyle(@adobe/css-tools 로 셀렉터에 `.chattext` 접두, `@import` 제거).
+- `src/lib/cbs.ts`: 에셋/배열 매크로 추가(raw/img/asset/path/emotion·assetlist·array·filter·`#each`/slot·settempvar),
+  CbsContext 에 assets/resolveAsset/temp.
+- `src/lib/import/displayScripts.ts`: risum editdisplay 추출·정규식 적용·NamedImageSet 에셋 리졸버(ext/대소문자
+  정규화 + 편집거리 퍼지).
+- `characters.display_scripts` 컬럼(migration 0016, 표시 전용 → 클라 전달).
+- `/api/chat`: display 카드면 buildImageCatalog·pinSceneCodes 스킵(카드 자체 `<img>` 출력 규약에 위임 — 카탈로그 주입 시 변형 접미사 충돌).
+- `chat/[id]/+page.svelte`: 라인별 매칭 시 정규식→CBS(순수, SSR/클라 동일)→`<div class="chattext" use:cardHtml>` 로
+  세정 후 innerHTML 주입(액션=클라 전용 → hydration 안전).
 
-#### (원래 메모) HTML 표시 모드 — 별도/후순위, 미결정
+**범위**: 감정 스프라이트(Catrina/Da-yeon/무인도)만. Celis 류 인터랙티브 UI(설정 토글·risu-trigger·세션변수 게이팅)와
+양피지 상태창 등 풀 UI 는 트리거(§1-3)/첫메시지 HTML 영역이라 제외. 검증: CBS 6/6 · 실카드 3종 e2e · 보안 13/13(jsdom).
 
-editdisplay 정규식 대부분이 생 HTML/CSS(감정스프라이트·상태창·선택UI)를 뿜는다(§1-4). 이걸 실제로
-그리려면 "HTML 렌더링 장치"가 필요. **RisuAI 원본 조사(2026-06-06)로 어떻게 하는지 파악함.**
-
-**RisuAI 방식 — `{@html}` + DOMPurify + CSS AST 스코핑 (Shadow DOM/iframe 아님):**
-파이프라인(`parser/parser.svelte.ts:736~`, `ChatBody.svelte`):
-`CBS → 에셋매크로({{emotion}}→<img>) → editdisplay 정규식 → <style> hex인코딩 → markdown-it → DOMPurify → <style> 디코딩+스코핑 → {@html}`
-
-보안 3기둥(전부 copyable):
-1. **DOMPurify + 훅**(`:46-119,780`): `<script>`·`on*` 제거, `href` http(s)만(→`javascript:` 차단),
-   `<iframe>`은 YouTube embed만, `<style>`·`<img>`·`blob:` 허용.
-2. **CSS 격리 = AST 재작성**(`:893-953`, 핵심): `<style>`를 hex로 숨겨 DOMPurify 통과 → `css.parse` →
-   **모든 셀렉터에 `.chattext ` 접두 + 모든 클래스에 `x-risu-` 접두**. 카드 CSS가 앱 전역으로 못 샘.
-   (Shadow DOM 대신 셀렉터 재작성으로 스코핑 — 우리가 걱정한 격리는 이걸로 해결)
-3. **에셋 리졸버**(`:482-629`): `<img="name">`/`{{emotion::name}}` → 이름 소문자화 → 캐시 조회
-   (Levenshtein 퍼지매칭) → `getFileSrc` → `blob:`/`data:` URL → `<img src>`.
-
-**우리가 이식할 부품:** DOMPurify+훅(라이브러리 추가, config 복사) · `<style>` 인코딩/디코딩 + CSS AST
-스코핑(`.chattext`→우리 메시지 컨테이너 클래스) · 에셋 `<img="name">`→우리 장면이미지(IndexedDB/R2) URL
-리졸버. **markdown-it 은 우리 산문 렌더러와 이질적** → imported 카드용 **2번째 렌더 경로**가 됨.
-
-**핵심 판단:**
-- **보안은 해결된 문제**(RisuAI 레시피 그대로면 잔여 위험 낮음, Shadow DOM 불필요).
-- 진짜 비용은 **CSS AST 스코핑 + 에셋 리졸버** 두 덩어리 + **산문 모드와 2-렌더러 공존 통합**.
-- 감정 스프라이트는 우리 장면이미지(위치코드)로 이미 가능 → HTML 에셋 리졸버는 일부 중복.
-
-**옵션:**
-- **(A) imported 카드용 RisuAI 호환 HTML 표시 모드**(별도 렌더 경로) — DOMPurify + CSS AST 스코핑 +
-  에셋 리졸버 이식. 보안 레시피 검증돼 의외로 할 만함. 중간~큰 공사. imported 캐릭터 한정 적용.
-- **(B) 안 함 + 네이티브 대체** — 감정/상태창을 장면이미지 + 마크다운 상태블록으로. 카드 HTML 은 경고만.
-
-**권장 순서:** 경량 트리거(3순위) + 텍스트형 정규식 먼저 → HTML 표시 모드(A/B)는 그 다음 독립 작업으로 결정.
-"수입 카드를 제대로 보이게"가 핵심 목표면 (A) 가 현실적(보안 copyable). 아니면 (B).
+> 설계 근거(RisuAI 원본): `{@html}` + DOMPurify + CSS AST 스코핑(Shadow DOM 아님). 파이프라인 `parser/parser.svelte.ts:736~`,
+> DOMPurify 훅 `:46-119`, CSS 스코핑 `:893-953`, 에셋 리졸버 `:482-629`. 우리는 markdown-it 생략(감정 마커는 순수 HTML),
+> class 접두(`x-risu-`) 생략(`.chattext` 스코핑만으로 격리 충분).
 
 ---
 
-### 1-5. 미지원 요소 탐지 + 경고 — **4.5순위 (가성비 ★)** ✅ **구현됨 (2026-06-05)**
+### 1-5. 미지원 요소 탐지 + 경고 — ✅ 완료 (2026-06-05)
 
-> 구현: `src/lib/import/risum.ts`(RPack 디코더 + readModuleMeta), `src/lib/import/capabilities.ts`(scanUnsupported),
-> `charx.ts parseCharx` 에서 호출 → `card.warnings` 병합 → import 미리보기 UI 에 노출.
-> 실제 charx 3종(Catrina/Celis/무인도)으로 검증 — 트리거·정규식·모듈로어북 탐지 정상. (아래 본문은 설계 메모)
->
-> **+ V1/V2/CJS 분리 (2026-06-06):** 트리거를 effect.type 의 `v2` 접두사로 분류 — V1(조건→효과, "지원 예정")
-> vs V2(블록 프로그래밍, "미지원"). CJS 는 JavaScript 로 명시. CBS 변수/로어북은 이제 동작하므로 경고에서 제외.
-> → 사용자가 "어떤 부분이 살고 죽는지" 정확히 알게 됨.
+import 시 카드의 미지원 요소를 구조 스캔해 미리보기 UI 에 명시("조용히 누락" → 명시 고지). `src/lib/import/risum.ts`
+(RPack 디코더 + readModuleMeta), `capabilities.ts`(scanUnsupported) → `card.warnings`. 트리거를 V1(조건→효과)/
+V2(블록 프로그래밍)/CJS(JavaScript)로 분리 표기. **지원되는 것(로어북·CBS 변수·editdisplay·disabled)은 경고에서 제외**,
+미지원(텍스트형 정규식·V2 트리거·CJS·lowLevelAccess)만 ⚠️. 검증: 실카드 3종.
 
-
-**무엇**: import 시 카드에 우리가 미지원하는 요소가 들어있는지 **구조적으로 스캔**해서 사용자에게 명세.
-
-**왜 거의 공짜**: 3~4순위 추출을 하려면 어차피 **RPack 디코더 + `readModule`**을 포팅함 → 그 순간 `RisuModule` 객체 전체가 메모리에. **객체 트리만 훑으면 됨.**
-
-```ts
-const SUPPORTED_EFFECTS = new Set(['setvar','systemprompt','impersonate']);
-for (const t of module.trigger ?? [])
-  for (const e of t.effect)
-    if (!SUPPORTED_EFFECTS.has(e.type)) skipped.push(e.type); // runLLM, modifychat, v2If...
-if (module.cjs?.trim()) skipped.push('cjs');
-// regex[].type === 'editoutput' 등도 분류
-```
-
-**산출물(사용자 노출)**:
-```
-✅ 로어북 8개 가져옴
-✅ 트리거 3개 중 2개 적용 (호감도, 감정추적)
-⚠️ 트리거 1개 스킵 — runLLM(추가 AI 호출) 미지원
-⚠️ 정규식 5개 중 4개 적용, 1개 스킵(출력 변조형)
-❌ 커스텀 코드(CJS) 있음 — 미동작
-```
-
-**한계(정직)**: "있다/없다"는 100% 정확. "정확히 동작하냐"는 보장 못 함(우리 변수엔진과 미묘한 차이 가능) → import 캐릭터를 `imported:true`(수정불가)로 두고 경고 유지하는 현 방침이 옳음. 텍스트 박힌 CBS는 `cbs.ts` `usedScripting` 플래그가 이미 잡음 → 구조 스캔과 합치면 사각지대 거의 없음.
-
-> **단독 선행 가능**: 3~4순위 실제 구현 없이 **RPack 디코더 + 스캔 + 경고만** 먼저 붙여도 "조용히 누락 → 명시적 고지"로 개선됨. 로어북 다음 가성비 2순위.
+> 한계(정직): "있다/없다"는 정확하나 "정확히 동작"은 미보장(우리 엔진과 미묘한 차이 가능) → imported 캐릭터는
+> `imported:true`(수정불가) + 경고 유지 방침. 텍스트 박힌 CBS 는 `cbs.ts` usedScripting 플래그가 보조로 잡음.
 
 ---
 
@@ -281,12 +200,13 @@ if (module.cjs?.trim()) skipped.push('cjs');
 ## 3. 권장 순서 (가성비선)
 
 ```
-1   로어북            ← card.json, RPack 불필요. 쉽고 효과 큼
-2   변수엔진          ← chat_sessions.script_state. 트리거 토대
-3   경량 트리거        ← 조건평가 + setvar + systemprompt주입 + impersonate(append)
-4   정규식 치환        ← editdisplay 우선. modifychat 수요 흡수
-4.5 미지원 탐지+경고    ← RPack 디코더 + 구조 스캔. 조용한 누락 → 명시 고지
-──────────────── 여기까지가 가성비선 ────────────────
+1   로어북            ✅ card.json, RPack 불필요. 쉽고 효과 큼
+2   변수엔진          ✅ chat_sessions.script_state. 트리거 토대
+4.5 미지원 탐지+경고    ✅ RPack 디코더 + 구조 스캔. 조용한 누락 → 명시 고지
+4   정규식 치환(표시형)  ✅ editdisplay → 감정 스프라이트 HTML(§1-4b)
+──────────────── 여기까지 완료 ────────────────
+3   경량 트리거        ⬜ 조건평가 + setvar + systemprompt주입 + impersonate(append) ← 다음
+   ↳ 그 위에: Celis 류 인터랙티브 UI(상태창·설정 토글) + 텍스트형 정규식
 (수요 확인 후) CJS 클라 샌드박스 실행 ← QuickJS-WASM + 브릿지 + 동의 UX
 스킵: modifychat(과거변조), runLLM/runImgGen, V2 비주얼 인터프리터, 서버사이드 CJS
 ```
