@@ -49,11 +49,13 @@ src/
       CharacterForm.svelte          # 캐릭터 생성/수정 공용 폼
       CharacterImagesModal.svelte   # 장면 이미지(축×조합) 편집
       Sidebar.svelte                # 최근 채팅 목록
-      LoginModal / ProfileModal / NsfwBadge / PromptGuideModal / TextReplaceModal
+      LoginModal / ProfileModal / ApiKeyModal / NsfwBadge / PromptGuideModal / TextReplaceModal
     state/
-      loginModal.svelte.ts / profileModal.svelte.ts   # 공유 $state
+      loginModal.svelte.ts / profileModal.svelte.ts / apiKeyModal.svelte.ts   # 공유 $state
     server/
       auth.ts         # Google OAuth, 세션 토큰 sign/verify, isEmailAllowed(화이트리스트)
+      crypto.ts       # 양방향(대칭) 암호화 AES-GCM(encryptSecret/decryptSecret) — 외부 API 키 보관용
+      novelai.ts      # NovelAI 연동: verifySubscription(Opus 검증), generateImage(고정 프롬프트/파라미터, ZIP 해제)
       characters.ts   # 캐릭터 조회 래퍼(getVisibleCharacters/findCharacter) — D1 위임
       characterForm.ts# 캐릭터 폼·이미지셋 파싱/검증(parseCharacterForm/parseImageSet)
       imageStore.ts   # R2 업로드/정리(commitImageSet, deleteKeys, deleteAllSceneImages)
@@ -61,6 +63,7 @@ src/
         users.ts      # findOrCreateOAuthUser, getUserProfile, getPublicProfile, updateProfile, updateAvatarKey
         characters.ts # CRUD(listCharacters, getCharacterById, createCharacter, updateCharacter, deleteCharacter, ownership)
         chats.ts      # 세션/메시지(getSession, createSession, appendMessage, getWindow, updateSummary, listRecentSessions, estimateTokens)
+        userKeys.ts   # 외부 API 키 보관(getKeyStatus/getDecryptedKey/setKey/deleteKey) — 암호문만 저장
   routes/
     +layout.{svelte,server.ts}   # 상단바, 사이드바(최근 채팅), 모달 렌더, 최초로그인 시 프로필모달
     +page.{svelte,server.ts}     # 메인(캐릭터 그리드, 검색/태그). 비로그인=NSFW 숨김
@@ -73,11 +76,13 @@ src/
     api/
       chat/+server.ts            # 스트리밍(로그인 필수). system조립/모델라우팅/토큰전략/영속화/요약
       chat/summary/+server.ts    # 세션 요약 조회(GET)·수동 수정(POST)
+      chat/image/+server.ts      # 실시간 이미지 생성(POST): Gemini 상황프롬프트→NovelAI→R2 저장→image_generation 메시지
+      keys/novelai/+server.ts    # NovelAI 키 관리: GET(상태)·POST(Opus 검증+암호화 저장)·DELETE
       characters/+server.ts      # 캐릭터 생성(POST)
       characters/[id]/+server.ts # 캐릭터 수정(PUT)·삭제(DELETE). 소유자 검증
       profile/+server.ts         # 프로필·아바타 저장(POST)
     auth/google/+server.ts, auth/google/callback/+server.ts, auth/logout/+server.ts
-migrations/           # D1 마이그레이션 0001~0008
+migrations/           # D1 마이그레이션 0001~0019
 static/favicon.svg    # 로고 스파클(✦) SVG
 static/models/*.avif  # 모델 아이콘
 ```
@@ -88,7 +93,8 @@ static/models/*.avif  # 모델 아이콘
 - **oauth_accounts**: `(provider, provider_user_id)` PK → `user_id`
 - **characters**(유저 제작): `id`(uuid PK), `creator_id`→users, `name`, `tagline`, `intro`(상세모달 표시용, 프롬프트엔 미포함), `description`(시스템 프롬프트 본문), `thumbnail_key`(R2), `audience`('all'|'male'|'female'), `content_rating`('sfw'|'nsfw'), `tags`(JSON), `greetings`(JSON, 오프닝 목록), `image_set`(JSON, 축×조합 장면이미지/NULL), `chats`(누적 대화수), `created_at`/`updated_at`
 - **chat_sessions**: `id`(uuid PK), `user_id`, `character_id`(빌트인slug+uuid 혼재 가능 → **FK 미설정**), `model`(마지막 사용), `summary`/`summary_upto_seq`(요약 상태), `message_count`(마지막 seq), `created_at`/`updated_at`/`last_message_at`
-- **chat_messages**: `id`(uuid PK), `session_id`→sessions, `seq`(세션 내 1-based), `role`('user'|'assistant'), `content`, `token_est`, `input_tokens`(assistant 행에 그 응답 생성 시 input 토큰 실측/추정), `created_at`. unique(session_id, seq)
+- **chat_messages**: `id`(uuid PK), `session_id`→sessions, `seq`(세션 내 1-based), `role`('user'|'assistant'|**'image_generation'**), `content`(image_generation 은 **R2 키**), `token_est`, `input_tokens`(assistant 행에 그 응답 생성 시 input 토큰 실측/추정), `cost`(assistant=추론비용, image_generation=Gemini 상황프롬프트 비용), `created_at`. unique(session_id, seq). **`image_generation` 행은 LLM window/요약에서 제외**(`getWindow`·프리뷰 서브쿼리에서 `role != 'image_generation'`), 표시·페이징엔 포함.
+- **user_keys**: `(user_id, provider)` PK, `ciphertext`(**AES-GCM 양방향 암호화** `base64url(iv‖ct)` — 평문 미저장), `meta`(JSON 검증 스냅샷: NovelAI `{tier,active,isOpus}`), `created_at`/`updated_at`. provider 현재 `'novelai'`. 복호화 키는 `KEY_SECRET`(폴백 `AUTH_SECRET`)에서 파생.
 - 세션 id = 내부 user uuid. 프로필 완료 = `display_name` 존재. 오프닝(greeting)은 세션 시작 시 seq=1 메시지로 저장(세션별 앵커). **캐릭터 데이터는 세션에 스냅샷하지 않음** — characters 테이블이 source of truth.
 
 ## 구현된 기능
@@ -100,6 +106,7 @@ static/models/*.avif  # 모델 아이콘
 - **대화 영속화**: 세션+메시지 D1 저장. 유저 메시지는 즉시 저장(스트림 끊겨도 유실 방지), assistant는 `onFinish`에 저장. **사이드바 최근 채팅**(`listRecentSessions`, 마지막 대사 미리보기). `/chat/[id]/session/[sessionId]` 경로로 이어가기(구버전 `?s=`도 하위호환). 새 세션은 첫 전송 시 lazy 생성 후 `replaceState`로 세션 URL로 교체(기본은 항상 새 세션).
 - **장기 맥락**: sliding window + rolling summary(백그라운드 갱신). 요약은 모달에서 조회/수동 수정 가능(`/api/chat/summary`).
 - **채팅 설정 모달**: **모델 선택**(아이콘 드롭다운, 5개), **답변 길이**(5~30문장 슬라이더), **'나' 행동·대사 생성**(0금지/1적정/2풍부). localStorage 저장.
+- **실시간 이미지 생성(NovelAI)**: 채팅 헤더 🖼 버튼으로 켜면(localStorage) 매 assistant 턴 직후 클라가 `/api/chat/image` 호출 → ① Gemini(`google/gemini-3.5-flash`)가 마지막 응답을 **상황 프롬프트**(best-effort danbooru 태그+자연어)로 변환(이 비용이 메시지 cost 로 표시) → ② 그림체+상황+고정 퀄리티/네거티브로 **NovelAI(nai-diffusion-4-5-full)** 생성(응답 ZIP→매직바이트로 webp/png 판별) → ③ R2(`chatimg/<sessionId>/<msgId>.<ext>`) 저장 + `role=image_generation` 메시지 영속. 해상도(832×1216/1024×1024)·그림체 프롬프트는 헤더 모달에서 설정. 키는 **프로필 메뉴 > API 키 관리**에서 등록(NovelAI **Opus 등급** 검증 후 암호화 저장). 고정 프롬프트/파라미터·검증·ZIP 해제는 `lib/server/novelai.ts`.
 - **인증**: Google 로그인 → **이메일 화이트리스트(테스트용)** → 프로필 모달(이름/페르소나/취향/아바타) → DB 저장. 네비바 이름 클릭 시 재편집.
 - **게이팅**: 채팅 전송·`/api/chat`·캐릭터 생성/수정은 **로그인 필수(서버 검증)**, NSFW는 비로그인 접근 차단.
 
@@ -109,6 +116,8 @@ static/models/*.avif  # 모델 아이콘
 - `AI_GATEWAY_API_KEY` — Vercel AI Gateway. **없으면 mock 스트리머로 폴백**(로컬 키 없이 UI 동작).
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`(선택, 미설정 시 요청 origin 기준)
 - `AUTH_SECRET` — 세션 서명
+- `KEY_SECRET` — 유저 외부 API 키(NovelAI 등) **양방향 암호화** 키(AES-GCM). **미설정 시 `AUTH_SECRET`로 폴백**(로컬 동작). 바꾸면 기존 암호문 복호화 불가 → 키 재등록 필요. 생성: `openssl rand -base64 48`.
+- (NovelAI 키는 **env 가 아니라 유저별 `user_keys` 테이블**에 암호화 저장 — 환경변수 아님)
 - `ALLOWED_EMAILS` — 로그인 허용 이메일(쉼표). **미설정 시 기본 `owner@example.com`만 허용**, 빈 문자열로 두면 전체 허용. **테스트 종료 시 해제**.
 - `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` — wrangler 인증 (프로젝트별 `.env`로 관리)
 
@@ -131,7 +140,7 @@ npx wrangler pages secret put <KEY> --project-name havenchats  # prod 시크릿
 
 - Pages 프로젝트: `havenchats` (production branch `main`)
 - D1: `haven` (id `b8c2b1a3-78e8-4527-aefa-461bcd3486b7`, region APAC) — `wrangler.jsonc`에 `DB` 바인딩
-- R2: `haven-images` — `IMAGES` 바인딩. 키 규칙: 썸네일 `char/<id>.<ext>`, 장면 `charimg/<charId>/<entryId>.<ext>`, 아바타 `avatar/<...>`. 서빙은 `/img/[...key]`
+- R2: `haven-images` — `IMAGES` 바인딩. 키 규칙: 썸네일 `char/<id>.<ext>`, 장면 `charimg/<charId>/<entryId>.<ext>`, 아바타 `avatar/<...>`, 실시간 생성 이미지 `chatimg/<sessionId>/<msgId>.<ext>`. 서빙은 `/img/[...key]`
 - 커스텀 도메인 `havenchats.com` 연결됨. **Google 콘솔 승인 리디렉트 URI**: `https://havenchats.com/auth/google/callback` (+ `http://localhost:5173/auth/google/callback`)
 
 ## 아직 안 된 것 / 다음 단계
@@ -143,3 +152,4 @@ npx wrangler pages secret put <KEY> --project-name havenchats  # prod 시크릿
 - Repository 추상화(Postgres 확장 경로)는 미구현 — 현재 `lib/server/db`에 raw D1
 - NSFW 전용 허용 모델 미확정 (모델 드롭다운에서 선택, 메인스트림은 거부됨)
 - `age_verified` 컬럼 존재하나 NSFW 게이트엔 미사용(로그인 여부로만 게이팅)
+- **실시간 이미지 R2 정리 없음** — `image_generation` 메시지 삭제/세션 삭제 시 DB 행은 지워도 `chatimg/...` R2 오브젝트는 **고아로 잔존**(기존 캐릭터 삭제 캐비엇과 동일). 정리(cron) 미정. webp 는 NovelAI per-request 옵션이 없어 **계정 Image Format 설정**을 따름 → 보통 PNG, 응답 매직바이트로 실제 포맷 판별 저장.

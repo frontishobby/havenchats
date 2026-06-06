@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { Character } from '$lib/types';
-	import type { ChatDebugSnapshot } from '$lib/chatDebug';
+	import type { ChatDebugSnapshot, ImageDebug } from '$lib/chatDebug';
 
 	let {
 		character,
 		sessionId,
 		snapshot,
 		meta,
+		imageDebug,
 		model,
 		maxSentences,
 		userActs,
@@ -20,6 +21,8 @@
 		snapshot: ChatDebugSnapshot | null;
 		/** 직전 응답의 전체 메타(finishReason·usage·providerMetadata·warnings…). */
 		meta: Record<string, unknown> | null;
+		/** 마지막 실시간 이미지 생성에 사용한 프롬프트/파라미터(없을 수 있음). */
+		imageDebug: ImageDebug | null;
 		model: string;
 		maxSentences: number;
 		userActs: number;
@@ -299,6 +302,79 @@
 						{#each warnings as w, i (i)}<li>{typeof w === 'string' ? w : JSON.stringify(w)}</li>{/each}
 					</ul>
 				{/if}
+			</details>
+		{/if}
+
+		<!-- 실시간 이미지 생성 프롬프트(직전 생성) -->
+		{#if imageDebug}
+			{@const imgFail = !imageDebug.situation || imageDebug.llmError}
+			<details open class="sec">
+				<summary>이미지 생성 프롬프트 🖼 {imgFail ? '⚠️' : ''}</summary>
+				<div class="meta-grid">
+					<div><span>prompt LLM</span><b class="mono">{imageDebug.promptModel}</b></div>
+					<div>
+						<span>finishReason</span>
+						<b class="mono" class:bad={imageDebug.finishReason && imageDebug.finishReason !== 'stop'}>
+							{imageDebug.finishReason ?? '–'}
+						</b>
+					</div>
+					<div><span>model</span><b class="mono">{imageDebug.model}</b></div>
+					<div><span>해상도</span><b class="mono">{imageDebug.resolution}</b></div>
+					<div><span>sampler</span><b class="mono">{imageDebug.params.sampler}</b></div>
+					<div><span>scheduler</span><b class="mono">{imageDebug.params.scheduler}</b></div>
+					<div><span>steps</span><b class="mono">{imageDebug.params.steps}</b></div>
+					<div><span>CFG</span><b class="mono">{imageDebug.params.cfgScale}</b></div>
+					<div><span>rescale</span><b class="mono">{imageDebug.params.cfgRescale}</b></div>
+				</div>
+
+				{#if imageDebug.llmError}
+					<p class="warn-line bad">LLM 에러: {imageDebug.llmError}</p>
+				{/if}
+				{#if imageDebug.warnings.length > 0}
+					<ul class="warns">
+						{#each imageDebug.warnings as w, i (i)}
+							<li>{typeof w === 'string' ? w : JSON.stringify(w)}</li>
+						{/each}
+					</ul>
+				{/if}
+
+				<div class="sub">캐릭터 외형 레퍼런스 (LLM 입력)</div>
+				{#if imageDebug.characterRef}
+					<pre class="dump small">{imageDebug.characterRef}</pre>
+				{:else}
+					<p class="muted">없음(description 비어 있음).</p>
+				{/if}
+
+				<div class="sub">상황 프롬프트 모델 응답 (원문)</div>
+				{#if imageDebug.rawSituation}
+					<pre class="dump small">{imageDebug.rawSituation}</pre>
+				{:else}
+					<p class="muted">빈 응답 — 모델이 아무 텍스트도 내지 않았습니다(안전필터 차단/길이 초과 등 finishReason 확인).</p>
+				{/if}
+
+				<div class="sub">정리 후 상황 프롬프트</div>
+				{#if imageDebug.situation}
+					<pre class="dump small">{imageDebug.situation}</pre>
+				{:else}
+					<p class="muted">없음 → NovelAI 요청을 보내지 않았습니다.</p>
+				{/if}
+
+				<div class="sub">그림체 프롬프트</div>
+				{#if imageDebug.stylePrompt}
+					<pre class="dump small">{imageDebug.stylePrompt}</pre>
+				{:else}
+					<p class="muted">미지정 → 기본 그림체 사용.</p>
+				{/if}
+
+				<div class="sub">최종 positive (NovelAI 전송)</div>
+				{#if imageDebug.positive}
+					<pre class="dump small">{imageDebug.positive}</pre>
+				{:else}
+					<p class="muted">생성 안 됨(상황 프롬프트 실패로 NovelAI 미요청).</p>
+				{/if}
+
+				<div class="sub">negative</div>
+				<pre class="dump small">{imageDebug.negative}</pre>
 			</details>
 		{/if}
 

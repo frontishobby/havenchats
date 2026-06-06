@@ -316,8 +316,15 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 				});
 			}
 			if (streamError) {
-				// 상세 에러는 서버 로그(onError)에만 남기고, 사용자에겐 일반 메시지만 노출
-				controller.enqueue(encoder.encode('⚠️ 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요.'));
+				// 상세 에러는 서버 로그(onError)에만 남기고, 사용자에겐 일반 메시지만 노출.
+				// 단, 공급자 일시 과부하(503/"temporarily unavailable")는 모델 교체를 유도하는 안내로 구분.
+				controller.enqueue(
+					encoder.encode(
+						isOverloadError(streamError)
+							? '⚠️ 지금 이 모델(AI 공급자)이 일시적으로 과부하 상태예요. 잠시 후 다시 보내거나, 설정(⚙)에서 다른 모델로 바꿔보세요.'
+							: '⚠️ 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요.'
+					)
+				);
 			}
 			// 응답 메타(finishReason·usage 등)를 스트림 맨 끝에 sentinel 프레임으로 붙인다.
 			// 클라이언트는 이를 떼어 console 에만 찍고 화면엔 렌더하지 않는다.
@@ -380,6 +387,23 @@ function parseGatewayCost(providerMetadata: unknown): number | undefined {
 	if (raw == null) return undefined;
 	const n = typeof raw === 'number' ? raw : Number(raw);
 	return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * 공급자 일시 과부하/가용성 에러인지(503·"Service temporarily unavailable"·overloaded 등).
+ * AI Gateway 가 자동 페일오버/재시도로도 못 살린 경우 → 사용자에게 모델 교체를 안내한다.
+ */
+function isOverloadError(e: unknown): boolean {
+	const err = e as { name?: string; statusCode?: number; message?: string } | undefined;
+	const code = err?.statusCode;
+	if (typeof code === 'number' && [429, 500, 502, 503, 504, 529].includes(code)) return true;
+	const name = err?.name ?? '';
+	if (/Gateway(Internal|Timeout|Response)|Overloaded|ServiceUnavailable|RetryError/i.test(name))
+		return true;
+	const msg = (err?.message ?? '').toLowerCase();
+	return /temporarily unavailable|service unavailable|overloaded|try again shortly|rate limit/.test(
+		msg
+	);
 }
 
 /** 메타 직렬화(직렬화 불가 값이 섞여도 스트림이 깨지지 않게 방어). */

@@ -3,10 +3,12 @@
 	import { invalidate } from '$app/navigation';
 	import LoginModal from '$lib/components/LoginModal.svelte';
 	import ProfileModal from '$lib/components/ProfileModal.svelte';
+	import ApiKeyModal from '$lib/components/ApiKeyModal.svelte';
 	import BlockedModal from '$lib/components/BlockedModal.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { loginModal } from '$lib/state/loginModal.svelte';
 	import { profileModal } from '$lib/state/profileModal.svelte';
+	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { privacyMode } from '$lib/state/privacyMode.svelte';
 	import { isAdmin } from '$lib/admin';
 	import type { LayoutData } from './$types';
@@ -53,6 +55,10 @@
 
 	function openProfileSettings() {
 		profileModal.open = true;
+		menuOpen = false;
+	}
+	function openApiKeys() {
+		apiKeyModal.open = true;
 		menuOpen = false;
 	}
 	function onWindowClick(e: MouseEvent) {
@@ -117,6 +123,9 @@
 							<button class="menu-item" role="menuitem" onclick={openProfileSettings}>
 								프로필 설정
 							</button>
+							<button class="menu-item" role="menuitem" onclick={openApiKeys}>
+								API 키 관리
+							</button>
 							{#if isAdminUser}
 								<a
 									class="menu-item"
@@ -158,6 +167,9 @@
 />
 <LoginModal />
 <ProfileModal user={data.user} />
+{#if data.user}
+	<ApiKeyModal />
+{/if}
 
 <!-- 차단된 유저: 종료 불가 모달로 모든 동작 차단. 다른 모든 모달/UI 위에 렌더. -->
 {#if data.user?.blockedReason}

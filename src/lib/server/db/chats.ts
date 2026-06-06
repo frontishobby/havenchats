@@ -144,7 +144,8 @@ export async function listRecentSessions(
 		.prepare(
 			`SELECT s.id, s.character_id, s.last_message_at,
 			        (SELECT m.content FROM chat_messages m
-			           WHERE m.session_id = s.id ORDER BY m.seq DESC LIMIT 1) AS last_content
+			           WHERE m.session_id = s.id AND m.role != 'image_generation'
+			           ORDER BY m.seq DESC LIMIT 1) AS last_content
 			 FROM chat_sessions s
 			 WHERE s.user_id = ?
 			 ORDER BY s.last_message_at DESC NULLS LAST, s.created_at DESC
@@ -381,8 +382,9 @@ export async function getWindow(
 ): Promise<Array<StoredMessage & { tokenEst: number }>> {
 	const { results } = await db
 		.prepare(
+			// image_generation 메시지는 모델에 보내지 않으므로 window 에서 제외(요약 transcript 도 동일).
 			`SELECT id, seq, role, content, token_est FROM chat_messages
-			 WHERE session_id = ? AND seq > ? ORDER BY seq`
+			 WHERE session_id = ? AND seq > ? AND role != 'image_generation' ORDER BY seq`
 		)
 		.bind(sessionId, summaryUptoSeq)
 		.all<MessageRow & { token_est: number }>();

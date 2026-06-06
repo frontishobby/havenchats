@@ -196,7 +196,13 @@ export interface NamedImageSet {
  */
 export type CharacterImageSet = GridImageSet | NamedImageSet;
 
-export type Role = 'user' | 'assistant';
+/**
+ * 메시지 역할.
+ *  - 'user'/'assistant': 일반 대화. 모델에 전송되는 sliding window 대상.
+ *  - 'image_generation': 실시간 이미지 생성 결과(content = R2 오브젝트 키). 세션에 표시만 하고
+ *    이후 LLM 프롬프트(window/요약)에서는 제외된다.
+ */
+export type Role = 'user' | 'assistant' | 'image_generation';
 
 export interface ChatMessage {
 	id: string;
@@ -206,6 +212,8 @@ export interface ChatMessage {
 	cost?: number;
 	/** 응답 실패·비정상 종료 시 사용자에게 보여줄 사유(클라 임시 표시용, 영속 X). */
 	errorReason?: string;
+	/** 생성 중 표시용(클라 임시 — 실시간 이미지 생성 진행 중). 영속 X. */
+	pending?: boolean;
 }
 
 /** DB 영속 메시지 — ChatMessage + 세션 내 순번(seq). */

@@ -86,20 +86,33 @@ function userActsLine(level: number): string {
  * 게이트웨이 캐싱 + (모델별) thinking 예산 제한.
  * 무제한 추론은 output 예산을 잠식해 본문을 자르고 비용·지연을 키우므로 소량만 허용한다.
  */
-export function buildProviderOptions(modelId: string): ProviderOptions {
-	const opts: ProviderOptions = { gateway: { caching: 'auto' } };
+export function buildProviderOptions(
+	modelId: string,
+	opts?: { noThinking?: boolean }
+): ProviderOptions {
+	// noThinking: 단순 변환(상황 프롬프트 등)에선 thinking 을 꺼서 지연·빈응답을 줄인다.
+	const noThink = opts?.noThinking === true;
+	const out: ProviderOptions = { gateway: { caching: 'auto' } };
 	if (modelId.startsWith('google/')) {
-		opts.google = {
-			thinkingConfig: { thinkingBudget: GOOGLE_THINKING_BUDGET, includeThoughts: false }
+		// Gemini 는 Vertex AI·AI Studio 두 공급자에 모두 있다. AI Gateway 는 일시적 503/500
+		// (GatewayInternalServerError "Service temporarily unavailable")을 자동 재시도하지 않고
+		// 공급자 1회만 시도하므로, order 로 vertex→google 공급자 페일오버를 켜 가용성을 높인다.
+		// (vercel/ai#14148 — 같은 모델을 여러 공급자로 순서대로 시도한다.)
+		out.gateway = { caching: 'auto', order: ['vertex', 'google'] };
+		out.google = {
+			thinkingConfig: {
+				thinkingBudget: noThink ? 0 : GOOGLE_THINKING_BUDGET,
+				includeThoughts: false
+			}
 		};
 	} else if (modelId.startsWith('openai/')) {
-		opts.openai = { reasoningEffort: OPENAI_REASONING_EFFORT };
+		out.openai = { reasoningEffort: noThink ? 'minimal' : OPENAI_REASONING_EFFORT };
 	} else if (modelId.startsWith('xai/')) {
-		opts.xai = { reasoningEffort: XAI_REASONING_EFFORT };
+		out.xai = { reasoningEffort: noThink ? 'low' : XAI_REASONING_EFFORT };
 	} else if (modelId.startsWith('deepseek/')) {
-		opts.deepseek = { thinking: { type: 'disabled' } };
+		out.deepseek = { thinking: { type: 'disabled' } };
 	}
-	return opts;
+	return out;
 }
 
 /** 캐릭터의 첫 상황(오프닝) 본문. 인덱스 범위 밖이면 기본(0), 없으면 ''. */
@@ -212,8 +225,9 @@ export function buildMessages(
 	loreBlock: string | null
 ): ModelMessage[] {
 	const out: ModelMessage[] = window
-		.filter((m) => m.content.trim() !== '')
-		.map((m) => ({ role: m.role, content: m.content }));
+		// image_generation 등 비대화 역할은 모델 전송에서 제외(window 쿼리에서도 제외되지만 타입·안전망).
+		.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim() !== '')
+		.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
 
 	if (memory && memory.trim()) {
 		out.unshift({

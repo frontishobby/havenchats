@@ -60,3 +60,40 @@ export interface ChatDebugSnapshot {
 		imported: boolean;
 	};
 }
+
+/**
+ * 실시간 이미지 생성 디버그 정보 — 디버그 모드에서 `/api/chat/image` 가 응답에 동봉.
+ * 디버그 패널이 "어떤 프롬프트/파라미터로 NovelAI 에 요청했는지" 표시하는 데 쓴다.
+ */
+export interface ImageDebug {
+	/** 상황 프롬프트 생성에 사용한 LLM 모델 id. */
+	promptModel: string;
+	/** 외형 일관성용으로 LLM 에 함께 넣은 캐릭터 description(통짜, 길이 제한 적용). 없으면 ''. */
+	characterRef: string;
+	/** 정리(trim/공백 압축) 후 상황 프롬프트(빈 문자열이면 생성 실패/미생성). */
+	situation: string;
+	/** 상황 프롬프트 모델의 원문 응답(정리 전). 빈 응답 진단용. */
+	rawSituation: string;
+	/** 상황 프롬프트 호출의 종료 사유(예: stop / length / content-filter). 없으면 null. */
+	finishReason: string | null;
+	/** 상황 프롬프트 호출 경고(AI SDK warnings). 없으면 빈 배열. */
+	warnings: unknown[];
+	/** 상황 프롬프트 생성이 예외로 실패한 경우의 에러 메시지. 정상이면 null. */
+	llmError: string | null;
+	/** 그림체 프롬프트(설정값, 비었으면 기본값 사용됨을 의미). */
+	stylePrompt: string;
+	/** NovelAI 에 보낸 최종 positive(그림체+상황+퀄리티). 상황 생성 실패 시 null. */
+	positive: string | null;
+	/** 고정 네거티브 프롬프트. */
+	negative: string;
+	model: string;
+	resolution: string;
+	/** 고정 생성 파라미터(표시용). */
+	params: {
+		sampler: string;
+		scheduler: string;
+		steps: number;
+		cfgScale: number;
+		cfgRescale: number;
+	};
+}

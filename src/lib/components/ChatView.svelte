@@ -3,6 +3,7 @@
 	import { invalidate, replaceState } from '$app/navigation';
 	import { MODELS, DEFAULT_MODEL_ID, getModel } from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
+	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import { resolveSceneLine, looksLikeSceneToken, isLocalSet, isGrid, isNamed } from '$lib/imageCodes';
 	import { localSceneURL, getLocalSceneBlob, localSceneKey } from '$lib/import/localImages';
@@ -10,7 +11,7 @@
 	import { renderCardHtml } from '$lib/htmlRender';
 	import { personalize as fillPlaceholders } from '$lib/placeholders';
 	import type { ChatMessage, Character } from '$lib/types';
-	import type { ChatDebugSnapshot } from '$lib/chatDebug';
+	import type { ChatDebugSnapshot, ImageDebug } from '$lib/chatDebug';
 	import ChatDebugPanel from '$lib/components/ChatDebugPanel.svelte';
 
 	/** 메인·디버그 라우트가 공용으로 넘기는 페이지 데이터(두 loader 가 같은 형태 반환). */
@@ -32,6 +33,19 @@
 	const USER_ACTS_LABELS = ['금지', '적정', '풍부'];
 
 	const MODEL_KEY = 'haven:model';
+
+	// ── 실시간 이미지 생성(NovelAI) 설정 ──
+	const IMG_ENABLED_KEY = 'haven:img:enabled';
+	const IMG_RES_KEY = 'haven:img:resolution';
+	const IMG_STYLE_KEY = 'haven:img:style';
+	const IMG_PROMPT_MODEL_KEY = 'haven:img:promptModel';
+	const IMG_EARLY_KEY = 'haven:img:early';
+	// '빠른 생성 우선': 스트리밍 응답이 이만큼(자) 도달하면 마지막 부분을 포기하고 이미지를 미리 발사.
+	const IMG_EARLY_TRIGGER_CHARS = 600;
+	const IMG_RESOLUTIONS = ['832x1216', '1024x1024'] as const;
+	type ImgResolution = (typeof IMG_RESOLUTIONS)[number];
+	// 상황 프롬프트 생성 기본 모델(이미지 설정에서 변경 가능).
+	const DEFAULT_IMG_PROMPT_MODEL = 'google/gemini-3.5-flash';
 
 	// 서버가 스트림 끝에 붙이는 응답 메타 프레임 구분자(서버 META_SEP 와 동일).
 	const META_SEP = '␞';
@@ -123,6 +137,8 @@
 	// ── 디버그 모드 ── 전송 시 응답 메타에 동봉된 조립 스냅샷을 받아 패널에 표시.
 	let debugSnapshot = $state<ChatDebugSnapshot | null>(null);
 	let debugMeta = $state<Record<string, unknown> | null>(null);
+	// 마지막 실시간 이미지 생성에 사용한 프롬프트/파라미터(디버그 패널 표시용).
+	let imageDebug = $state<ImageDebug | null>(null);
 
 	// imported(charx) 카드의 editdisplay 표시 정규식 — 모델 `<img="감정">` → 감정 스프라이트 HTML.
 	const displayCompiled = $derived(compileScripts(character.displayScripts));
@@ -297,6 +313,19 @@
 	let userActs = $state(1); // '나' 행동·대사 생성: 0=금지, 1=적정, 2=풍부
 	let iconFailed = $state<Record<string, boolean>>({});
 
+	// ── 실시간 이미지 생성 설정/상태 ──
+	let showImageSettings = $state(false); // 이미지 설정 모달
+	let imageEnabled = $state(false); // 켜져 있으면 매 assistant 턴마다 이미지 생성
+	let imageResolution = $state<ImgResolution>('832x1216');
+	let imageStyle = $state(''); // 항상 적용할 그림체 프롬프트(비면 기본값)
+	let imagePromptModel = $state(DEFAULT_IMG_PROMPT_MODEL); // 상황 프롬프트 생성 모델
+	let imgModelOpen = $state(false); // 이미지 프롬프트 모델 드롭다운 열림
+	let imageEarly = $state(false); // 빠른 생성 우선(스트리밍 중 미리 발사)
+	let naiKeyRegistered = $state<boolean | null>(null); // null=미확인, false=미등록, true=등록됨
+	let naiStatusLoading = $state(false);
+
+	const currentImgModel = $derived(getModel(imagePromptModel) ?? MODELS[0]);
+
 	const currentModel = $derived(getModel(model) ?? MODELS[0]);
 
 	// charx import 로컬(IndexedDB) 장면 이미지 — 바이트가 이 기기에 없으면(다른 기기에서 import)
@@ -328,6 +357,16 @@
 		if (savedLen) maxSentences = Math.min(SENTENCE_MAX, Math.max(SENTENCE_MIN, savedLen));
 		const savedActs = localStorage.getItem(USER_ACTS_KEY);
 		if (savedActs !== null) userActs = Math.min(2, Math.max(0, Number(savedActs)));
+		// 실시간 이미지 설정 복원
+		imageEnabled = localStorage.getItem(IMG_ENABLED_KEY) === '1';
+		const savedRes = localStorage.getItem(IMG_RES_KEY);
+		if (savedRes === '832x1216' || savedRes === '1024x1024') imageResolution = savedRes;
+		imageStyle = localStorage.getItem(IMG_STYLE_KEY) ?? '';
+		const savedPM = localStorage.getItem(IMG_PROMPT_MODEL_KEY);
+		if (savedPM && getModel(savedPM)) imagePromptModel = savedPM;
+		imageEarly = localStorage.getItem(IMG_EARLY_KEY) === '1';
+		// 켜진 상태로 복원됐으면 키 등록 여부를 검증(키 없으면 loadNaiStatus 가 끈다).
+		if (imageEnabled && data.user) loadNaiStatus();
 		// 터치 기반(소프트 키보드) 기기 감지 → Enter 는 개행으로
 		isTouch = window.matchMedia('(pointer: coarse)').matches;
 		// 이어가는 세션은 최신 메시지(맨 아래)로, 새 채팅(오프닝만)은 맨 위로.
@@ -344,6 +383,112 @@
 	$effect(() => {
 		localStorage.setItem(USER_ACTS_KEY, String(userActs));
 	});
+	$effect(() => {
+		localStorage.setItem(IMG_ENABLED_KEY, imageEnabled ? '1' : '0');
+	});
+	$effect(() => {
+		localStorage.setItem(IMG_RES_KEY, imageResolution);
+	});
+	$effect(() => {
+		localStorage.setItem(IMG_STYLE_KEY, imageStyle);
+	});
+	$effect(() => {
+		localStorage.setItem(IMG_PROMPT_MODEL_KEY, imagePromptModel);
+	});
+	$effect(() => {
+		localStorage.setItem(IMG_EARLY_KEY, imageEarly ? '1' : '0');
+	});
+
+	// NovelAI 키 등록 상태 조회(이미지 설정 모달 열 때 1회). 미등록이면 등록 안내를 띄운다.
+	async function loadNaiStatus() {
+		if (naiStatusLoading) return;
+		naiStatusLoading = true;
+		try {
+			const res = await fetch('/api/keys/novelai');
+			if (res.ok) {
+				const d = (await res.json()) as { registered: boolean };
+				naiKeyRegistered = !!d.registered;
+				// 키가 없으면 활성화 불가 → 이전에 켜져 있었더라도 끈다.
+				if (!naiKeyRegistered) imageEnabled = false;
+			}
+		} catch (e) {
+			console.error(e);
+		} finally {
+			naiStatusLoading = false;
+		}
+	}
+
+	function toggleImageSettings() {
+		showImageSettings = !showImageSettings;
+		if (showImageSettings && naiKeyRegistered === null) loadNaiStatus();
+	}
+	function closeImageSettings() {
+		showImageSettings = false;
+		imgModelOpen = false;
+	}
+	function selectImgModel(id: string) {
+		imagePromptModel = id;
+		imgModelOpen = false;
+	}
+	function openApiKeys() {
+		apiKeyModal.open = true;
+	}
+
+	/**
+	 * 방금 완료된 assistant 응답을 바탕으로 NovelAI 장면 이미지를 생성해 메시지로 추가한다.
+	 * 매 assistant 턴 직후(send 의 finally) 호출. 세션이 확정된 상태에서만 동작.
+	 */
+	async function generateSceneImage(assistantText: string) {
+		const sid = sessionId;
+		const text = assistantText.trim();
+		if (!sid || !imageEnabled || !text) return;
+
+		// 생성 중 플레이스홀더(프록시로 감싸지므로 messages[idx] 로 수정).
+		const tempId = crypto.randomUUID();
+		messages.push({ id: tempId, role: 'image_generation', content: '', pending: true });
+		const idx = messages.length - 1;
+		await scrollToBottom();
+		try {
+			const res = await fetch('/api/chat/image', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					sessionId: sid,
+					assistantText: text,
+					resolution: imageResolution,
+					stylePrompt: imageStyle,
+					promptModel: imagePromptModel,
+					debug: debug || undefined
+				})
+			});
+			const d = (await res.json().catch(() => ({}))) as {
+				id?: string;
+				key?: string;
+				cost?: number | null;
+				error?: string;
+				message?: string;
+				debug?: ImageDebug;
+			};
+			// 디버그 정보는 성공·실패 무관하게(상황 프롬프트 생성 실패 진단용) 패널에 반영.
+			if (debug && d.debug) imageDebug = d.debug;
+			if (res.ok && d.key) {
+				messages[idx].content = d.key;
+				if (d.id) messages[idx].id = d.id; // 서버 PK 로 교체(삭제 동기화)
+				if (d.cost != null) messages[idx].cost = d.cost;
+				messages[idx].pending = false;
+			} else {
+				messages[idx].pending = false;
+				messages[idx].errorReason = d.message ?? '이미지 생성에 실패했습니다.';
+				if (d.error === 'no_key') naiKeyRegistered = false;
+			}
+		} catch (e) {
+			messages[idx].pending = false;
+			messages[idx].errorReason = e instanceof Error ? e.message : '이미지 생성에 실패했습니다.';
+		} finally {
+			await scrollToBottom();
+			invalidate('app:recentChats');
+		}
+	}
 
 	function selectModel(id: string) {
 		model = id;
@@ -546,6 +691,12 @@
 		const newSessionMemory = sessionId ? undefined : memoryDraft.trim() || undefined;
 		await scrollToBottom();
 
+		// 응답 완료 후 실시간 이미지를 생성할지(정상 응답일 때만) — finally 에서 트리거.
+		let imageAfter = false;
+		let imageText = '';
+		// '빠른 이미지'(imageEarly) 가 켜져 있으면 스트리밍 도중 일정량 도달 시 미리 발사(아래 루프).
+		let imageFired = false;
+
 		try {
 			// 서버가 history 의 주인. 새 유저 메시지만 보내고, 세션이 없으면 오프닝 인덱스로 생성.
 			const res = await fetch('/api/chat', {
@@ -596,6 +747,18 @@
 				raw += decoder.decode(value, { stream: true });
 				const sep = raw.indexOf(META_SEP);
 				messages[idx].content = sep >= 0 ? raw.slice(0, sep) : raw;
+				// '빠른 이미지': 응답이 일정량 도달하면 마지막 부분 반영을 포기하고 이미지를 미리 발사
+				// → NovelAI 생성이 채팅 스트리밍과 겹쳐 돌아 체감 대기를 줄인다. 턴당 1회만.
+				if (
+					imageEnabled &&
+					imageEarly &&
+					!imageFired &&
+					sessionId &&
+					messages[idx].content.length >= IMG_EARLY_TRIGGER_CHARS
+				) {
+					imageFired = true;
+					generateSceneImage(messages[idx].content);
+				}
 			}
 			raw += decoder.decode(); // 멀티바이트 잔여 flush
 			const sep = raw.indexOf(META_SEP);
@@ -622,6 +785,10 @@
 				parseErrorReason(metaJson) ??
 				(messages[idx].content.trim() ? null : emptyResponseReason(metaJson));
 			if (reason) messages[idx].errorReason = reason;
+			// 정상 응답이고 실시간 이미지가 켜져 있으면 이번 응답으로 이미지 생성 예약.
+			// 단, '빠른 생성 우선'으로 스트리밍 중 이미 발사했으면(imageFired) 다시 생성하지 않는다.
+			imageText = messages[idx].content;
+			imageAfter = imageEnabled && !imageFired && !reason && imageText.trim() !== '';
 		} catch (e) {
 			messages[idx].content = '⚠️ 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.';
 			messages[idx].errorReason = e instanceof Error ? e.message : String(e);
@@ -630,6 +797,8 @@
 			streaming = false;
 			// 새 세션·최신 미리보기가 새로고침 없이 사이드바에 반영되도록 목록만 무효화.
 			invalidate('app:recentChats');
+			// 텍스트 응답 완료 후 이미지 생성(비동기 — 스트리밍 종료를 막지 않음).
+			if (imageAfter) generateSceneImage(imageText);
 		}
 	}
 
@@ -676,7 +845,9 @@
 	function onWindowKey(e: KeyboardEvent) {
 		if (e.key !== 'Escape') return;
 		if (modelOpen) modelOpen = false;
+		else if (imgModelOpen) imgModelOpen = false;
 		else if (showSettings) showSettings = false;
+		else if (showImageSettings) closeImageSettings();
 	}
 
 	function autoGrow() {
@@ -716,6 +887,16 @@
 			<span class="tagline">{character.tagline}</span>
 		</div>
 		<div class="header-right">
+			<button
+				class="settings-btn"
+				class:active={imageEnabled}
+				onclick={toggleImageSettings}
+				aria-label="실시간 이미지"
+				aria-expanded={showImageSettings}
+				title="실시간 이미지 생성"
+			>
+				🖼
+			</button>
 			<button
 				class="settings-btn"
 				class:active={showSettings}
@@ -937,6 +1118,170 @@
 		</div>
 	{/if}
 
+	{#if showImageSettings}
+		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+		<div class="modal-backdrop" onclick={closeImageSettings} role="presentation">
+			<div
+				class="modal"
+				role="dialog"
+				aria-modal="true"
+				aria-label="실시간 이미지"
+				tabindex="-1"
+				onclick={(e) => e.stopPropagation()}
+			>
+				<div class="modal-head">
+					<h2>실시간 이미지</h2>
+					<button class="modal-close" onclick={closeImageSettings} aria-label="닫기">✕</button>
+				</div>
+
+				<div class="setting">
+					<div class="setting-row">
+						<span class="field-label" id="img-enable-label">실시간 이미지 생성</span>
+						<button
+							class="switch"
+							class:on={imageEnabled}
+							role="switch"
+							aria-checked={imageEnabled}
+							aria-labelledby="img-enable-label"
+							disabled={naiKeyRegistered !== true}
+							onclick={() => (imageEnabled = !imageEnabled)}
+						>
+							<span class="knob"></span>
+						</button>
+					</div>
+					<p class="setting-hint">
+						켜면 AI 응답마다 그 장면을 <strong>NovelAI</strong>로 그려 함께 보여줍니다. NovelAI
+						<strong>Opus</strong> 키 등록이 필요해요.
+					</p>
+					<!-- 키 미등록이면 토글을 켤 수 없음을 안내(등록 후 사용 가능). -->
+					{#if naiStatusLoading && naiKeyRegistered === null}
+						<p class="setting-hint">키 등록 여부 확인 중…</p>
+					{:else if naiKeyRegistered === false}
+						<div class="img-notice">
+							NovelAI 키가 없어 켤 수 없어요.
+							<button class="link-btn" onclick={openApiKeys}>API 키 등록</button>
+						</div>
+					{/if}
+				</div>
+
+				{#if imageEnabled}
+					<div class="setting">
+						<div class="setting-row">
+							<span class="field-label" id="img-model-label">상황 프롬프트 모델</span>
+						</div>
+						<div class="model-select">
+							<button
+								class="model-trigger"
+								class:open={imgModelOpen}
+								onclick={() => (imgModelOpen = !imgModelOpen)}
+								aria-haspopup="listbox"
+								aria-expanded={imgModelOpen}
+								aria-labelledby="img-model-label"
+							>
+								{#if iconFailed[currentImgModel.id]}
+									<span class="model-icon fallback">{currentImgModel.label.charAt(0)}</span>
+								{:else}
+									<img
+										class="model-icon"
+										src={currentImgModel.icon}
+										alt=""
+										onerror={() => (iconFailed[currentImgModel.id] = true)}
+									/>
+								{/if}
+								<span class="model-name">{currentImgModel.label}</span>
+								<span class="chev">▾</span>
+							</button>
+							{#if imgModelOpen}
+								<ul class="model-list" role="listbox" aria-labelledby="img-model-label">
+									{#each MODELS as m (m.id)}
+										<li>
+											<button
+												class="model-option"
+												class:selected={m.id === imagePromptModel}
+												role="option"
+												aria-selected={m.id === imagePromptModel}
+												onclick={() => selectImgModel(m.id)}
+											>
+												{#if iconFailed[m.id]}
+													<span class="model-icon fallback">{m.label.charAt(0)}</span>
+												{:else}
+													<img
+														class="model-icon"
+														src={m.icon}
+														alt=""
+														onerror={() => (iconFailed[m.id] = true)}
+													/>
+												{/if}
+												<span class="model-name">{m.label}</span>
+												{#if m.id === imagePromptModel}<span class="check">✓</span>{/if}
+											</button>
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+						<p class="setting-hint">
+							마지막 응답을 그림 프롬프트로 변환할 모델입니다. 기본은 빠른 Gemini Flash.
+						</p>
+					</div>
+
+					<div class="setting">
+						<div class="setting-row">
+							<span class="field-label">해상도</span>
+						</div>
+						<div class="res-row">
+							{#each IMG_RESOLUTIONS as r (r)}
+								<button
+									class="res-btn"
+									class:active={imageResolution === r}
+									onclick={() => (imageResolution = r)}
+								>
+									{r}
+								</button>
+							{/each}
+						</div>
+					</div>
+
+					<div class="setting">
+						<div class="setting-row">
+							<label for="img-style">그림체 프롬프트 <span class="opt">(선택)</span></label>
+						</div>
+						<textarea
+							id="img-style"
+							class="summary-edit"
+							bind:value={imageStyle}
+							rows="3"
+							placeholder="예: artist:xxx, soft lighting, watercolor …"
+						></textarea>
+						<p class="setting-hint">
+							모든 이미지에 항상 적용할 화풍 태그입니다. 비우면 기본 그림체가 적용돼요.
+						</p>
+					</div>
+
+					<div class="setting">
+						<div class="setting-row">
+							<span class="field-label" id="img-early-label">빠른 생성 우선</span>
+							<button
+								class="switch"
+								class:on={imageEarly}
+								role="switch"
+								aria-checked={imageEarly}
+								aria-labelledby="img-early-label"
+								onclick={() => (imageEarly = !imageEarly)}
+							>
+								<span class="knob"></span>
+							</button>
+						</div>
+						<p class="setting-hint">
+							응답이 어느 정도 나오면 끝까지 기다리지 않고 <strong>미리 이미지를 생성</strong>해 대기를
+							줄입니다. 대신 응답 <strong>마지막 부분은 그림에 반영되지 않을 수</strong> 있어요.
+						</p>
+					</div>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
 	{#snippet novelBody(content: string, isUser: boolean)}
 		{#each parseBody(content) as item, i (i)}
 			{#if item.kind === 'block'}
@@ -993,10 +1338,10 @@
 		{/if}
 		<article class="novel">
 			{#each messages as m (m.id)}
-				{#if m.content || m.errorReason || (streaming && m === lastMessage)}
+				{#if m.content || m.errorReason || m.role === 'image_generation' || (streaming && m === lastMessage)}
 					<div class="para {m.role}">
-						{#if !(streaming && m === lastMessage)}
-							{#if m.role === 'assistant' && m.cost != null}
+						{#if !(streaming && m === lastMessage) && !m.pending}
+							{#if (m.role === 'assistant' || m.role === 'image_generation') && m.cost != null && Number.isFinite(m.cost) && m.cost > 0}
 								<span class="msg-cost" title="이 응답 생성 비용(USD)">{formatCost(m.cost)}</span>
 							{/if}
 							<button
@@ -1009,7 +1354,23 @@
 								×
 							</button>
 						{/if}
-						{@render novelBody(m.content, m.role === 'user')}
+						{#if m.role === 'image_generation'}
+							{#if m.pending}
+								<div class="scene-loading">
+									<span class="typing"><i></i><i></i><i></i></span>
+									<span>이미지 생성 중…</span>
+								</div>
+							{:else if m.content}
+								<img
+									class="scene-img"
+									src={`/img/${m.content}`}
+									alt="생성된 장면 이미지"
+									loading="lazy"
+								/>
+							{/if}
+						{:else}
+							{@render novelBody(m.content, m.role === 'user')}
+						{/if}
 						{#if m.errorReason}
 							<p class="msg-error-reason">사유: {m.errorReason}</p>
 						{/if}
@@ -1054,6 +1415,7 @@
 			{sessionId}
 			snapshot={debugSnapshot}
 			meta={debugMeta}
+			{imageDebug}
 			{model}
 			{maxSentences}
 			{userActs}
@@ -1447,6 +1809,104 @@
 	.check {
 		color: var(--accent);
 		font-weight: 700;
+	}
+
+	/* ── 실시간 이미지 설정 ── */
+	.switch {
+		position: relative;
+		width: 42px;
+		height: 24px;
+		flex-shrink: 0;
+		border-radius: 999px;
+		border: none;
+		background: var(--bg-elev);
+		box-shadow: inset 0 0 0 1px var(--border);
+		transition: background 0.15s ease;
+		cursor: pointer;
+	}
+	.switch.on {
+		background: var(--accent);
+		box-shadow: none;
+	}
+	.switch:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.switch .knob {
+		position: absolute;
+		top: 3px;
+		left: 3px;
+		width: 18px;
+		height: 18px;
+		border-radius: 50%;
+		background: #fff;
+		transition: transform 0.15s ease;
+	}
+	.switch.on .knob {
+		transform: translateX(18px);
+	}
+	.res-row {
+		display: flex;
+		gap: 8px;
+	}
+	.res-btn {
+		flex: 1;
+		padding: 9px 8px;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		color: var(--text);
+		font-size: 0.85rem;
+		font-weight: 600;
+		transition: all 0.15s ease;
+	}
+	.res-btn:hover {
+		border-color: var(--text-faint);
+	}
+	.res-btn.active {
+		border-color: var(--accent);
+		background: var(--accent-soft);
+		color: var(--accent);
+	}
+	.opt {
+		color: var(--text-faint);
+		font-weight: 400;
+	}
+	.img-notice {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+		margin-top: 14px;
+		padding: 10px 12px;
+		font-size: 0.78rem;
+		color: var(--text-dim);
+		background: color-mix(in srgb, var(--nsfw, #f59e0b) 14%, var(--bg));
+		border-radius: var(--radius-sm);
+	}
+	.link-btn {
+		background: none;
+		border: none;
+		padding: 0;
+		color: var(--accent);
+		font-size: 0.78rem;
+		font-weight: 700;
+		text-decoration: underline;
+		cursor: pointer;
+	}
+	/* 생성 중 이미지 플레이스홀더 */
+	.scene-loading {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: 0.8em 0;
+		padding: 18px 16px;
+		border: 1px dashed var(--border);
+		border-radius: var(--radius);
+		background: var(--bg-elev);
+		font-family: 'Pretendard', system-ui, sans-serif;
+		font-size: 0.82rem;
+		color: var(--text-dim);
 	}
 
 	/* ── 소설 리더 ── */
