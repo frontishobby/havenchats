@@ -654,9 +654,7 @@
 		// 생성 중 플레이스홀더(프록시로 감싸지므로 messages[idx] 로 수정).
 		const tempId = crypto.randomUUID();
 		messages.push({ id: tempId, role: 'image_generation', content: '', pending: true });
-		await scrollToBottom();
 		await runSceneImage({ sid, text, msgId: tempId });
-		await scrollToBottom();
 	}
 
 	/** 재생성 중인 이미지 메시지 id(버튼 비활성·스피너 표시용). */
