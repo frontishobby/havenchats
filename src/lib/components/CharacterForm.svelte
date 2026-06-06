@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { untrack, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import PromptGuideModal from '$lib/components/PromptGuideModal.svelte';
@@ -17,6 +17,7 @@
 	import { isGrid, isNamed, namedUrl } from '$lib/imageCodes';
 	import { estimatePromptTokens } from '$lib/tokens';
 	import type {
+		ArtStyle,
 		Audience,
 		CharacterImageSet,
 		CharacterLorebook,
@@ -44,6 +45,8 @@
 		lorebook?: CharacterLorebook | null;
 		/** 기존 스크립트 기본 변수(관리자 import 편집 시). */
 		defaultVariables?: Record<string, string> | null;
+		/** 기존 추천 그림체 id(수정 시). */
+		recommendedStyleId?: string | null;
 	}
 
 	let {
@@ -92,6 +95,18 @@
 	let audience = $state<Audience>(init?.audience ?? 'all');
 	let nsfw = $state(init?.contentRating === 'nsfw');
 	let isPrivate = $state(init?.visibility === 'private');
+
+	// 추천 그림체 — 내가 만들거나 즐겨찾기한 그림체 중 택1(선택). 채팅 이미지 모달에 '추천'으로 노출.
+	let recommendedStyleId = $state(init?.recommendedStyleId ?? '');
+	let myStyles = $state<ArtStyle[]>([]);
+	onMount(async () => {
+		try {
+			const res = await fetch('/api/styles/mine');
+			if (res.ok) myStyles = ((await res.json()) as { styles: ArtStyle[] }).styles ?? [];
+		} catch {
+			/* 무시 */
+		}
+	});
 
 	// 첫 상황(오프닝) — 첫 항목이 기본(필수). 각 항목은 이름(선택용)과 본문을 가진다.
 	let greetings = $state<Opening[]>(
@@ -314,6 +329,7 @@
 			fd.set('audience', audience);
 			fd.set('contentRating', nsfw ? 'nsfw' : 'sfw');
 			fd.set('visibility', isPrivate ? 'private' : 'public');
+			fd.set('recommendedStyleId', recommendedStyleId);
 			fd.set('tags', JSON.stringify(tags));
 			fd.set(
 				'greetings',
@@ -526,6 +542,24 @@
 		<p class="field-hint">
 			키워드별 설정을 등록하면, 그 키워드가 최근 대화에 등장할 때만 해당 설정이 프롬프트에 주입돼요.
 			항상 반영할 항목은 “항상 켜기”로 둘 수 있어요.
+		</p>
+	</div>
+
+	<!-- 추천 그림체 -->
+	<div class="field">
+		<div class="label-row">
+			<span class="field-label" id="rec-style-label">추천 그림체 <span class="opt">(선택)</span></span>
+			<a class="opt-link" href="/styles" target="_blank" rel="noreferrer">그림체 Hub →</a>
+		</div>
+		<select class="rec-select" aria-labelledby="rec-style-label" bind:value={recommendedStyleId}>
+			<option value="">지정 안 함</option>
+			{#each myStyles as st (st.id)}
+				<option value={st.id}>{st.title}{st.creatorName ? ` · ${st.creatorName}` : ''}</option>
+			{/each}
+		</select>
+		<p class="field-hint">
+			내가 만들거나 즐겨찾기한 그림체를 지정하면, 이 캐릭터로 채팅할 때 이미지 설정에 <strong>제작자
+			추천</strong>으로 노출돼요.
 		</p>
 	</div>
 
@@ -956,6 +990,25 @@
 	.opt {
 		color: var(--text-faint);
 		font-weight: 400;
+	}
+	.opt-link {
+		font-size: 0.74rem;
+		font-weight: 700;
+		color: var(--accent);
+	}
+	.rec-select {
+		width: 100%;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		padding: 10px 12px;
+		color: var(--text);
+		font: inherit;
+		font-size: 0.9rem;
+		outline: none;
+	}
+	.rec-select:focus {
+		border-color: var(--accent);
 	}
 	.hint {
 		font-size: 0.74rem;

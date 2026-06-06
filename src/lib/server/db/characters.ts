@@ -40,6 +40,8 @@ export interface NewCharacter {
 	displayScripts: DisplayScript[] | null;
 	/** charx import 캐릭터 여부(프롬프트 숨김·비공개·수정 불가). 기본 false. */
 	imported?: boolean;
+	/** 제작자 추천 그림체 id(선택). 없으면 null. */
+	recommendedStyleId?: string | null;
 }
 
 interface CharacterRow {
@@ -58,6 +60,7 @@ interface CharacterRow {
 	lorebook: string | null;
 	display_scripts: string | null;
 	imported: number;
+	recommended_style_id: string | null;
 	chats: number;
 	updated_at: number;
 	creator_id: string;
@@ -274,7 +277,8 @@ function rowToCharacter(row: CharacterRow): Character {
 		// imported 캐릭터의 로어북도 숨김 프롬프트 → 클라엔 null. 채팅 조립은 getCharacterLorebook() 으로.
 		lorebook: imported ? null : parseLorebook(row.lorebook),
 		// 표시용 정규식은 숨김 프롬프트가 아니라 렌더용 → imported 여도 클라로 내려간다.
-		displayScripts: parseDisplayScripts(row.display_scripts)
+		displayScripts: parseDisplayScripts(row.display_scripts),
+		recommendedStyleId: row.recommended_style_id ?? null
 	};
 }
 
@@ -282,7 +286,7 @@ function rowToCharacter(row: CharacterRow): Character {
 // chats = 이 캐릭터의 모든 세션에 실제로 남아있는 메시지 행 수 합(개별 삭제 반영).
 // characters.chats 컬럼은 더 이상 증가시키지 않으므로 실측 서브쿼리로 대체.
 const SELECT_COLS =
-	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.lorebook, c.display_scripts, c.imported, c.updated_at, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key, u.updated_at AS creator_updated_at";
+	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.lorebook, c.display_scripts, c.imported, c.recommended_style_id, c.updated_at, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key, u.updated_at AS creator_updated_at";
 const FROM_JOIN = 'FROM characters c LEFT JOIN users u ON u.id = c.creator_id';
 
 /** 공개(public) 유저 캐릭터 전체 (최신순). 비공개는 제외. */
@@ -422,6 +426,8 @@ export interface CharacterUpdate {
 	lorebook: CharacterLorebook | null;
 	/** 스크립트 설정(기본 변수 등). 없으면 null. */
 	scriptData: CharacterScriptData | null;
+	/** 제작자 추천 그림체 id(선택). 없으면 null. */
+	recommendedStyleId: string | null;
 	/** 새 이미지 키. undefined 면 썸네일 변경 없음. */
 	thumbnailKey?: string;
 }
@@ -439,6 +445,7 @@ export async function updateCharacter(
 			`UPDATE characters SET
 			   name = ?, tagline = ?, intro = ?, description = ?,
 			   audience = ?, content_rating = ?, visibility = ?, tags = ?, greetings = ?, image_set = ?, lorebook = ?, script_data = ?,
+			   recommended_style_id = ?,
 			   ${setThumb ? 'thumbnail_key = ?,' : ''}
 			   updated_at = ?
 			 WHERE id = ?`
@@ -457,6 +464,7 @@ export async function updateCharacter(
 				c.imageSet ? JSON.stringify(c.imageSet) : null,
 				c.lorebook ? JSON.stringify(c.lorebook) : null,
 				c.scriptData ? JSON.stringify(c.scriptData) : null,
+				c.recommendedStyleId ?? null,
 				...(setThumb ? [c.thumbnailKey] : []),
 				now,
 				id
@@ -488,8 +496,8 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 	await db
 		.prepare(
 			`INSERT INTO characters
-			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, lorebook, script_data, display_scripts, imported, chats, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, lorebook, script_data, display_scripts, imported, recommended_style_id, chats, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
 		)
 		.bind(
 			c.id,
@@ -509,6 +517,7 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 			c.scriptData ? JSON.stringify(c.scriptData) : null,
 			c.displayScripts && c.displayScripts.length ? JSON.stringify(c.displayScripts) : null,
 			c.imported ? 1 : 0,
+			c.recommendedStyleId ?? null,
 			now,
 			now
 		)

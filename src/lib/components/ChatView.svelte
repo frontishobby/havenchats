@@ -4,13 +4,14 @@
 	import { MODELS, DEFAULT_MODEL_ID, getModel } from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
+	import { base64ToBlob } from '$lib/imagePreview';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import { resolveSceneLine, looksLikeSceneToken, isLocalSet, isGrid, isNamed } from '$lib/imageCodes';
 	import { localSceneURL, getLocalSceneBlob, localSceneKey } from '$lib/import/localImages';
 	import { compileScripts, makeAssetResolver, evalDisplayLine } from '$lib/import/displayScripts';
 	import { renderCardHtml } from '$lib/htmlRender';
 	import { personalize as fillPlaceholders } from '$lib/placeholders';
-	import type { ChatMessage, Character } from '$lib/types';
+	import type { ChatMessage, Character, ArtStyle } from '$lib/types';
 	import type { ChatDebugSnapshot, ImageDebug } from '$lib/chatDebug';
 	import ChatDebugPanel from '$lib/components/ChatDebugPanel.svelte';
 
@@ -23,6 +24,7 @@
 		resumed: ChatMessage[] | null;
 		oldestSeq: number;
 		hasMore: boolean;
+		recommendedStyle: ArtStyle | null;
 	}
 
 	const SENTENCE_MIN = 5;
@@ -37,9 +39,10 @@
 	// ── 실시간 이미지 생성(NovelAI) 설정 ──
 	const IMG_ENABLED_KEY = 'haven:img:enabled';
 	const IMG_RES_KEY = 'haven:img:resolution';
-	const IMG_STYLE_KEY = 'haven:img:style';
+	const IMG_STYLE_ID_KEY = 'haven:img:styleId';
 	const IMG_PROMPT_MODEL_KEY = 'haven:img:promptModel';
 	const IMG_EARLY_KEY = 'haven:img:early';
+	const IMG_IGNORE_ASSETS_KEY = 'haven:img:ignoreAssets';
 	// '빠른 생성 우선': 스트리밍 응답이 이만큼(자) 도달하면 마지막 부분을 포기하고 이미지를 미리 발사.
 	const IMG_EARLY_TRIGGER_CHARS = 600;
 	const IMG_RESOLUTIONS = ['832x1216', '1024x1024'] as const;
@@ -317,10 +320,39 @@
 	let showImageSettings = $state(false); // 이미지 설정 모달
 	let imageEnabled = $state(false); // 켜져 있으면 매 assistant 턴마다 이미지 생성
 	let imageResolution = $state<ImgResolution>('832x1216');
-	let imageStyle = $state(''); // 항상 적용할 그림체 프롬프트(비면 기본값)
+	// 선택된 그림체 id('' = 기본 그림체). 즐겨찾기·추천 목록에서 prompt 를 해석해 사용.
+	let imageStyleId = $state('');
+	let favStyles = $state<ArtStyle[]>([]); // 즐겨찾기(내 생성 제외)
+	let savedStyles = $state<ArtStyle[]>([]); // 내가 만든(공유/저장)
+	let fallbackStyle = $state<ArtStyle | null>(null); // 아무것도 없을 때 기본(가장 먼저 공유된 그림체)
+	let favStylesLoaded = $state(false);
+	let styleOpen = $state(false); // 그림체 드롭다운 열림
+	const recommendedStyle = $derived(data.recommendedStyle ?? null);
+	// 추천·즐겨찾기·저장이 하나도 없는지 → 그러면 '기본'이 fallback 그림체를 가리킨다.
+	const noOwnStyles = $derived(
+		!recommendedStyle && favStyles.length === 0 && savedStyles.length === 0
+	);
+	// 현재 선택된 그림체 객체(드롭다운 트리거 표시용). 기본 선택('')이면 null.
+	const selectedStyle = $derived.by(() => {
+		if (!imageStyleId) return null;
+		if (recommendedStyle?.id === imageStyleId) return recommendedStyle;
+		return (
+			favStyles.find((s) => s.id === imageStyleId) ??
+			savedStyles.find((s) => s.id === imageStyleId) ??
+			null
+		);
+	});
+	// 선택된 그림체의 화풍 프롬프트. 기본('')일 때: 내 그림체가 하나도 없으면 fallback, 있으면 서버 기본.
+	const selectedStylePrompt = $derived.by(() => {
+		if (imageStyleId) return selectedStyle?.prompt ?? '';
+		return noOwnStyles && fallbackStyle ? fallbackStyle.prompt : '';
+	});
+	// 드롭다운 트리거 썸네일: 선택된 그림체, 없으면(기본) noOwnStyles 시 fallback 썸네일.
+	const trigStyle = $derived(selectedStyle ?? (noOwnStyles ? fallbackStyle : null));
 	let imagePromptModel = $state(DEFAULT_IMG_PROMPT_MODEL); // 상황 프롬프트 생성 모델
 	let imgModelOpen = $state(false); // 이미지 프롬프트 모델 드롭다운 열림
 	let imageEarly = $state(false); // 빠른 생성 우선(스트리밍 중 미리 발사)
+	let ignoreCharacterAssets = $state(false); // 캐릭터 내장 이미지(장면·감정 스프라이트) 표시 안 함
 	let naiKeyRegistered = $state<boolean | null>(null); // null=미확인, false=미등록, true=등록됨
 	let naiStatusLoading = $state(false);
 
@@ -361,10 +393,11 @@
 		imageEnabled = localStorage.getItem(IMG_ENABLED_KEY) === '1';
 		const savedRes = localStorage.getItem(IMG_RES_KEY);
 		if (savedRes === '832x1216' || savedRes === '1024x1024') imageResolution = savedRes;
-		imageStyle = localStorage.getItem(IMG_STYLE_KEY) ?? '';
+		imageStyleId = localStorage.getItem(IMG_STYLE_ID_KEY) ?? '';
 		const savedPM = localStorage.getItem(IMG_PROMPT_MODEL_KEY);
 		if (savedPM && getModel(savedPM)) imagePromptModel = savedPM;
 		imageEarly = localStorage.getItem(IMG_EARLY_KEY) === '1';
+		ignoreCharacterAssets = localStorage.getItem(IMG_IGNORE_ASSETS_KEY) === '1';
 		// 켜진 상태로 복원됐으면 키 등록 여부를 검증(키 없으면 loadNaiStatus 가 끈다).
 		if (imageEnabled && data.user) loadNaiStatus();
 		// 터치 기반(소프트 키보드) 기기 감지 → Enter 는 개행으로
@@ -390,13 +423,37 @@
 		localStorage.setItem(IMG_RES_KEY, imageResolution);
 	});
 	$effect(() => {
-		localStorage.setItem(IMG_STYLE_KEY, imageStyle);
+		localStorage.setItem(IMG_STYLE_ID_KEY, imageStyleId);
 	});
+
+	// 채팅 그림체 선택지(즐겨찾기 + 내 저장). 모달 열 때 1회 로드.
+	async function loadFavStyles() {
+		if (favStylesLoaded) return;
+		favStylesLoaded = true;
+		try {
+			const res = await fetch('/api/styles/forchat');
+			if (res.ok) {
+				const d = (await res.json()) as {
+					favorites: ArtStyle[];
+					saved: ArtStyle[];
+					fallback: ArtStyle | null;
+				};
+				favStyles = d.favorites ?? [];
+				savedStyles = d.saved ?? [];
+				fallbackStyle = d.fallback ?? null;
+			}
+		} catch (e) {
+			console.error(e);
+		}
+	}
 	$effect(() => {
 		localStorage.setItem(IMG_PROMPT_MODEL_KEY, imagePromptModel);
 	});
 	$effect(() => {
 		localStorage.setItem(IMG_EARLY_KEY, imageEarly ? '1' : '0');
+	});
+	$effect(() => {
+		localStorage.setItem(IMG_IGNORE_ASSETS_KEY, ignoreCharacterAssets ? '1' : '0');
 	});
 
 	// NovelAI 키 등록 상태 조회(이미지 설정 모달 열 때 1회). 미등록이면 등록 안내를 띄운다.
@@ -420,15 +477,23 @@
 
 	function toggleImageSettings() {
 		showImageSettings = !showImageSettings;
-		if (showImageSettings && naiKeyRegistered === null) loadNaiStatus();
+		if (showImageSettings) {
+			if (naiKeyRegistered === null) loadNaiStatus();
+			loadFavStyles();
+		}
 	}
 	function closeImageSettings() {
 		showImageSettings = false;
 		imgModelOpen = false;
+		styleOpen = false;
 	}
 	function selectImgModel(id: string) {
 		imagePromptModel = id;
 		imgModelOpen = false;
+	}
+	function selectStyle(id: string) {
+		imageStyleId = id;
+		styleOpen = false;
 	}
 	function openApiKeys() {
 		apiKeyModal.open = true;
@@ -447,6 +512,17 @@
 		const tempId = crypto.randomUUID();
 		messages.push({ id: tempId, role: 'image_generation', content: '', pending: true });
 		const idx = messages.length - 1;
+		let lastPreview: string | null = null;
+		const setPreview = (b64: string) => {
+			try {
+				const url = URL.createObjectURL(base64ToBlob(b64));
+				if (lastPreview) URL.revokeObjectURL(lastPreview);
+				lastPreview = url;
+				messages[idx].previewUrl = url;
+			} catch {
+				/* 무시 — 프리뷰 디코드 실패는 무해 */
+			}
+		};
 		await scrollToBottom();
 		try {
 			const res = await fetch('/api/chat/image', {
@@ -456,35 +532,88 @@
 					sessionId: sid,
 					assistantText: text,
 					resolution: imageResolution,
-					stylePrompt: imageStyle,
+					stylePrompt: selectedStylePrompt,
 					promptModel: imagePromptModel,
 					debug: debug || undefined
 				})
 			});
-			const d = (await res.json().catch(() => ({}))) as {
-				id?: string;
-				key?: string;
-				cost?: number | null;
-				error?: string;
-				message?: string;
-				debug?: ImageDebug;
-			};
-			// 디버그 정보는 성공·실패 무관하게(상황 프롬프트 생성 실패 진단용) 패널에 반영.
-			if (debug && d.debug) imageDebug = d.debug;
-			if (res.ok && d.key) {
-				messages[idx].content = d.key;
-				if (d.id) messages[idx].id = d.id; // 서버 PK 로 교체(삭제 동기화)
-				if (d.cost != null) messages[idx].cost = d.cost;
-				messages[idx].pending = false;
-			} else {
+
+			// 상황 프롬프트 실패 등은 JSON 에러로 옴(스트림 아님).
+			const ctype = res.headers.get('content-type') ?? '';
+			if (!res.ok || !res.body || !ctype.includes('ndjson')) {
+				const d = (await res.json().catch(() => ({}))) as {
+					error?: string;
+					message?: string;
+					debug?: ImageDebug;
+				};
+				if (debug && d.debug) imageDebug = d.debug;
 				messages[idx].pending = false;
 				messages[idx].errorReason = d.message ?? '이미지 생성에 실패했습니다.';
 				if (d.error === 'no_key') naiKeyRegistered = false;
+				return;
 			}
+
+			// NDJSON 스트림: t:frame(중간 프리뷰) → t:done/t:error.
+			const handle = (obj: Record<string, unknown>) => {
+				if (obj.t === 'frame' && typeof obj.img === 'string') {
+					setPreview(obj.img);
+					scrollToBottom();
+				} else if (obj.t === 'done') {
+					messages[idx].content = String(obj.key ?? '');
+					if (obj.id) messages[idx].id = String(obj.id);
+					if (obj.cost != null) messages[idx].cost = Number(obj.cost);
+					messages[idx].previewUrl = undefined;
+					messages[idx].pending = false;
+					if (lastPreview) {
+						URL.revokeObjectURL(lastPreview);
+						lastPreview = null;
+					}
+					if (debug && obj.debug) imageDebug = obj.debug as ImageDebug;
+				} else if (obj.t === 'error') {
+					messages[idx].pending = false;
+					messages[idx].errorReason = (obj.message as string) ?? '이미지 생성에 실패했습니다.';
+					if (debug && obj.debug) imageDebug = obj.debug as ImageDebug;
+					if (obj.error === 'no_key') naiKeyRegistered = false;
+				}
+			};
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+			let buf = '';
+			const drain = (flush = false) => {
+				let nl: number;
+				while ((nl = buf.indexOf('\n')) >= 0) {
+					const ln = buf.slice(0, nl).trim();
+					buf = buf.slice(nl + 1);
+					if (ln) {
+						try {
+							handle(JSON.parse(ln));
+						} catch {
+							/* 무시 */
+						}
+					}
+				}
+				if (flush && buf.trim()) {
+					try {
+						handle(JSON.parse(buf.trim()));
+					} catch {
+						/* 무시 */
+					}
+					buf = '';
+				}
+			};
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buf += decoder.decode(value, { stream: true });
+				drain();
+			}
+			drain(true);
 		} catch (e) {
 			messages[idx].pending = false;
 			messages[idx].errorReason = e instanceof Error ? e.message : '이미지 생성에 실패했습니다.';
 		} finally {
+			// 최종 이미지가 들어왔으면 남은 프리뷰 URL 정리.
+			if (lastPreview && messages[idx]?.content) URL.revokeObjectURL(lastPreview);
 			await scrollToBottom();
 			invalidate('app:recentChats');
 		}
@@ -846,6 +975,7 @@
 		if (e.key !== 'Escape') return;
 		if (modelOpen) modelOpen = false;
 		else if (imgModelOpen) imgModelOpen = false;
+		else if (styleOpen) styleOpen = false;
 		else if (showSettings) showSettings = false;
 		else if (showImageSettings) closeImageSettings();
 	}
@@ -895,7 +1025,21 @@
 				aria-expanded={showImageSettings}
 				title="실시간 이미지 생성"
 			>
-				🖼
+				<svg
+					viewBox="0 0 24 24"
+					width="18"
+					height="18"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<rect x="3" y="3" width="18" height="18" rx="2" />
+					<circle cx="8.5" cy="8.5" r="1.5" />
+					<path d="m21 15-5-5L5 21" />
+				</svg>
 			</button>
 			<button
 				class="settings-btn"
@@ -904,7 +1048,22 @@
 				aria-label="채팅 설정"
 				aria-expanded={showSettings}
 			>
-				⚙
+				<svg
+					viewBox="0 0 24 24"
+					width="18"
+					height="18"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<circle cx="12" cy="12" r="3" />
+					<path
+						d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+					/>
+				</svg>
 			</button>
 		</div>
 	</header>
@@ -1244,17 +1403,86 @@
 
 					<div class="setting">
 						<div class="setting-row">
-							<label for="img-style">그림체 프롬프트 <span class="opt">(선택)</span></label>
+							<span class="field-label">그림체</span>
+							<a class="hub-mini" href="/styles">Hub →</a>
 						</div>
-						<textarea
-							id="img-style"
-							class="summary-edit"
-							bind:value={imageStyle}
-							rows="3"
-							placeholder="예: artist:xxx, soft lighting, watercolor …"
-						></textarea>
+						{#snippet styleOption(st: ArtStyle, badge: string | null)}
+							<li>
+								<button
+									class="style-opt"
+									class:active={imageStyleId === st.id}
+									role="option"
+									aria-selected={imageStyleId === st.id}
+									onclick={() => selectStyle(st.id)}
+								>
+									{#if st.thumbnailUrl}
+										<img class="style-swatch" src={st.thumbnailUrl} alt="" />
+									{:else}
+										<span class="style-swatch default">✦</span>
+									{/if}
+									<span class="style-title">{st.title}</span>
+									{#if badge}<span class="style-badge">{badge}</span>{/if}
+								</button>
+							</li>
+						{/snippet}
+
+						<div class="style-select">
+							<button
+								class="style-trigger"
+								class:open={styleOpen}
+								onclick={() => (styleOpen = !styleOpen)}
+								aria-haspopup="listbox"
+								aria-expanded={styleOpen}
+							>
+								{#if trigStyle?.thumbnailUrl}
+									<img class="style-swatch" src={trigStyle.thumbnailUrl} alt="" />
+								{:else}
+									<span class="style-swatch default">✦</span>
+								{/if}
+								<span class="style-title">{selectedStyle ? selectedStyle.title : '기본 그림체'}</span>
+								<span class="chev">▾</span>
+							</button>
+							{#if styleOpen}
+								<ul class="style-list" role="listbox" aria-label="그림체">
+									<li>
+										<button
+											class="style-opt"
+											class:active={imageStyleId === ''}
+											role="option"
+											aria-selected={imageStyleId === ''}
+											onclick={() => selectStyle('')}
+										>
+											{#if noOwnStyles && fallbackStyle?.thumbnailUrl}
+												<img class="style-swatch" src={fallbackStyle.thumbnailUrl} alt="" />
+											{:else}
+												<span class="style-swatch default">✦</span>
+											{/if}
+											<span class="style-title">기본 그림체</span>
+										</button>
+									</li>
+									{#if recommendedStyle}
+										<li class="style-group">추천</li>
+										{@render styleOption(recommendedStyle, '추천')}
+									{/if}
+									{#if favStyles.filter((s) => s.id !== recommendedStyle?.id).length}
+										<li class="style-group">즐겨찾기</li>
+										{#each favStyles as st (st.id)}
+											{#if st.id !== recommendedStyle?.id}{@render styleOption(st, null)}{/if}
+										{/each}
+									{/if}
+									{#if savedStyles.filter((s) => s.id !== recommendedStyle?.id).length}
+										<li class="style-group">저장</li>
+										{#each savedStyles as st (st.id)}
+											{#if st.id !== recommendedStyle?.id}
+												{@render styleOption(st, st.shared ? null : '비공개')}
+											{/if}
+										{/each}
+									{/if}
+								</ul>
+							{/if}
+						</div>
 						<p class="setting-hint">
-							모든 이미지에 항상 적용할 화풍 태그입니다. 비우면 기본 그림체가 적용돼요.
+							<a href="/styles">그림체 Hub</a>에서 깎거나 즐겨찾기해 골라보세요.
 						</p>
 					</div>
 
@@ -1278,6 +1506,26 @@
 						</p>
 					</div>
 				{/if}
+
+				<div class="setting">
+					<div class="setting-row">
+						<span class="field-label" id="img-ignore-label">캐릭터 에셋 무시</span>
+						<button
+							class="switch"
+							class:on={ignoreCharacterAssets}
+							role="switch"
+							aria-checked={ignoreCharacterAssets}
+							aria-labelledby="img-ignore-label"
+							onclick={() => (ignoreCharacterAssets = !ignoreCharacterAssets)}
+						>
+							<span class="knob"></span>
+						</button>
+					</div>
+					<p class="setting-hint">
+						켜면 캐릭터에 원래 들어있는 이미지(장면·감정 스프라이트)를 채팅에 표시하지 않습니다.
+						실시간 생성 이미지는 그대로 보여요.
+					</p>
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -1296,12 +1544,16 @@
 			{:else}
 				{@const line = item.text}
 				{@const cardLine = displayEval(line)}
-				{#if cardLine !== null}
+				{@const scene =
+					cardLine === null
+						? resolveSceneLine(line, character.id, character.imageSet, character.updatedAt)
+						: null}
+				{#if ignoreCharacterAssets && (cardLine !== null || scene || looksLikeSceneToken(line))}
+					<!-- '캐릭터 에셋 무시' → 캐릭터 내장 이미지(장면·감정 스프라이트)·토큰 숨김 -->
+				{:else if cardLine !== null}
 					<!-- imported 카드 editdisplay: 감정 스프라이트 HTML(세정 후 주입). -->
 					<div class="chattext" use:cardHtml={cardLine}></div>
-				{:else}
-					{@const scene = resolveSceneLine(line, character.id, character.imageSet, character.updatedAt)}
-					{#if scene}
+				{:else if scene}
 					<!-- 장면 이미지 토큰({AAB}/{#id}) → 이미지 블록 -->
 					{#if scene.localKey}
 						{@const lk = scene.localKey}
@@ -1325,8 +1577,7 @@
 						{#each sp || isUser ? parseInline(sp ? sp.rest : line) : parseNarration(line) as seg, j (j)}
 							{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
 						{/each}
-						</span>
-					{/if}
+					</span>
 				{/if}
 			{/if}
 		{/each}
@@ -1355,7 +1606,15 @@
 							</button>
 						{/if}
 						{#if m.role === 'image_generation'}
-							{#if m.pending}
+							{#if m.pending && m.previewUrl}
+								<!-- 스트리밍 중간 프레임 프리뷰(점점 또렷해짐) + 진행 표시 -->
+								<div class="scene-streaming">
+									<img class="scene-img" src={m.previewUrl} alt="생성 중" />
+									<span class="scene-streaming-tag">
+										<span class="typing"><i></i><i></i><i></i></span> 생성 중…
+									</span>
+								</div>
+							{:else if m.pending}
 								<div class="scene-loading">
 									<span class="typing"><i></i><i></i><i></i></span>
 									<span>이미지 생성 중…</span>
@@ -1872,6 +2131,111 @@
 		color: var(--text-faint);
 		font-weight: 400;
 	}
+	/* 그림체 선택 목록 */
+	.hub-mini {
+		font-size: 0.74rem;
+		font-weight: 700;
+		color: var(--accent);
+	}
+	/* 그림체 드롭다운 */
+	.style-select {
+		position: relative;
+	}
+	.style-trigger {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 6px 10px 6px 6px;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		color: var(--text);
+		transition: border-color 0.15s ease;
+	}
+	.style-trigger:hover,
+	.style-trigger.open {
+		border-color: var(--accent);
+	}
+	.style-trigger .chev {
+		color: var(--text-faint);
+		font-size: 0.8rem;
+	}
+	.style-list {
+		position: absolute;
+		top: calc(100% + 6px);
+		left: 0;
+		right: 0;
+		z-index: 6;
+		margin: 0;
+		padding: 6px;
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		max-height: 300px;
+		overflow-y: auto;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+	}
+	.style-group {
+		font-size: 0.66rem;
+		font-weight: 700;
+		color: var(--text-faint);
+		letter-spacing: 0.04em;
+		margin: 6px 2px 0;
+	}
+	.style-opt {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 6px 8px;
+		background: transparent;
+		border: 1px solid transparent;
+		border-radius: var(--radius-sm);
+		color: var(--text);
+		text-align: left;
+	}
+	.style-opt:hover {
+		background: var(--bg-elev);
+	}
+	.style-opt.active {
+		border-color: var(--accent);
+		background: var(--accent-soft);
+	}
+	.style-swatch {
+		width: 34px;
+		height: 34px;
+		border-radius: 6px;
+		object-fit: cover;
+		flex-shrink: 0;
+		background: var(--bg-card);
+	}
+	.style-swatch.default {
+		display: grid;
+		place-items: center;
+		color: var(--accent);
+		font-size: 1rem;
+	}
+	.style-title {
+		flex: 1;
+		font-size: 0.85rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.style-badge {
+		flex-shrink: 0;
+		font-size: 0.66rem;
+		font-weight: 700;
+		padding: 2px 7px;
+		border-radius: 999px;
+		background: var(--accent);
+		color: #fff;
+	}
 	.img-notice {
 		display: flex;
 		align-items: center;
@@ -1907,6 +2271,29 @@
 		font-family: 'Pretendard', system-ui, sans-serif;
 		font-size: 0.82rem;
 		color: var(--text-dim);
+	}
+	/* 스트리밍 프리뷰(중간 프레임) + 진행 태그 */
+	.scene-streaming {
+		position: relative;
+		margin: 0.8em 0;
+	}
+	.scene-streaming .scene-img {
+		margin: 0;
+	}
+	.scene-streaming-tag {
+		position: absolute;
+		left: 8px;
+		bottom: 8px;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 10px;
+		border-radius: 999px;
+		background: rgba(0, 0, 0, 0.55);
+		backdrop-filter: blur(2px);
+		color: #fff;
+		font-family: 'Pretendard', system-ui, sans-serif;
+		font-size: 0.74rem;
 	}
 
 	/* ── 소설 리더 ── */

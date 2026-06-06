@@ -1,5 +1,6 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { createCharacter } from '$lib/server/db/characters';
+import { styleExists } from '$lib/server/db/styles';
 import { ALLOWED_IMAGE, parseCharacterForm } from '$lib/server/characterForm';
 import { commitSceneImages, deleteKeys } from '$lib/server/imageStore';
 
@@ -44,6 +45,10 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 	const { imageSet, uploadedKeys } = committed.result;
 
+	// 추천 그림체는 실제 존재하는 것만 저장(삭제·위조 방지).
+	const recommendedStyleId =
+		c.recommendedStyleId && (await styleExists(db, c.recommendedStyleId)) ? c.recommendedStyleId : null;
+
 	try {
 		await createCharacter(db, {
 			id,
@@ -61,7 +66,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			imageSet,
 			lorebook: c.lorebook,
 			scriptData: null,
-			displayScripts: null
+			displayScripts: null,
+			recommendedStyleId
 		});
 	} catch (e) {
 		// DB 실패 시 업로드한 이미지는 모두 정리 (고아 오브젝트 방지)

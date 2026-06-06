@@ -2,7 +2,8 @@ import { error, redirect } from '@sveltejs/kit';
 import { findCharacter } from '$lib/server/characters';
 import { getCharacterOwnership } from '$lib/server/db/characters';
 import { getSession, getMessagePage } from '$lib/server/db/chats';
-import type { Character, ChatMessage } from '$lib/types';
+import { getStyle } from '$lib/server/db/styles';
+import type { ArtStyle, Character, ChatMessage } from '$lib/types';
 
 /** 최초 진입 시 가져올 최근 메시지 수. 더 위로 올리면 같은 크기로 페이징. */
 const PAGE_SIZE = 20;
@@ -16,6 +17,8 @@ export interface ChatPageLoadData {
 	resumed: ChatMessage[] | null;
 	oldestSeq: number;
 	hasMore: boolean;
+	/** 캐릭터 제작자가 지정한 추천 그림체(없으면 null). 이미지 모달에 '추천'으로 노출. */
+	recommendedStyle: ArtStyle | null;
 }
 
 /**
@@ -78,5 +81,26 @@ export async function loadChatPage(opts: {
 		}
 	}
 
-	return { character, user: locals.user, openingIndex, sessionId, resumed, oldestSeq, hasMore };
+	// 캐릭터 추천 그림체(있으면) 로드 — 이미지 모달에 '제작자 추천'으로 노출.
+	let recommendedStyle: ArtStyle | null = null;
+	if (db) {
+		const row = await db
+			.prepare('SELECT recommended_style_id FROM characters WHERE id = ?')
+			.bind(params.id)
+			.first<{ recommended_style_id: string | null }>();
+		if (row?.recommended_style_id) {
+			recommendedStyle = await getStyle(db, row.recommended_style_id, locals.user?.id ?? null);
+		}
+	}
+
+	return {
+		character,
+		user: locals.user,
+		openingIndex,
+		sessionId,
+		resumed,
+		oldestSeq,
+		hasMore,
+		recommendedStyle
+	};
 }

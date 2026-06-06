@@ -9,6 +9,8 @@ import { getDecryptedKey } from '$lib/server/db/userKeys';
 import {
 	buildPositivePrompt,
 	generateImage,
+	generateImageStream,
+	b64ToImage,
 	isResolutionKey,
 	DEFAULT_RESOLUTION,
 	NEGATIVE_PROMPT,
@@ -263,28 +265,64 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	const positive = buildPositivePrompt(stylePrompt, situation, isNsfw);
 
-	// ── 2) NovelAI 생성 ──
-	const gen = await generateImage(naiKey, { positive, resolution });
-	if (!gen.ok) {
-		console.error(`[chat/image] NovelAI 실패 (${gen.status}): ${gen.message}`);
-		return json({ error: 'novelai', message: gen.message, debug: makeDebug(positive) }, { status: 502 });
-	}
+	// ── 2) NovelAI 생성(스트리밍) ──
+	// NDJSON 스트림으로 중간 프레임(t:frame)을 흘려보내 진행 상황을 보여주고, 끝에 R2 저장 후
+	// t:done(또는 t:error). 스트리밍 미지원/실패 시 비스트리밍 generateImage 로 폴백한다.
+	const sid = sessionId; // 클로저에서 non-null 보장
+	const enc = new TextEncoder();
+	const line = (obj: unknown) => enc.encode(JSON.stringify(obj) + '\n');
 
-	// ── 3) R2 저장 + 메시지 영속 ──
-	const msgId = crypto.randomUUID();
-	const key = `chatimg/${sessionId}/${msgId}.${gen.image.ext}`;
-	try {
-		await bucket.put(key, gen.image.bytes, {
-			httpMetadata: { contentType: gen.image.contentType }
-		});
-	} catch (e) {
-		console.error('[chat/image] R2 put 실패:', e);
-		return json({ error: 'storage', message: '이미지 저장에 실패했습니다.' }, { status: 500 });
-	}
+	const stream = new ReadableStream({
+		async start(controller) {
+			// 2-1) 스트리밍 시도(프레임 emit, 마지막 프레임 = 최종 후보).
+			let finalB64: string | null = null;
+			try {
+				for await (const b64 of generateImageStream(naiKey, { positive, resolution })) {
+					finalB64 = b64;
+					controller.enqueue(line({ t: 'frame', img: b64 }));
+				}
+			} catch (e) {
+				console.warn('[chat/image] 스트리밍 실패 → 비스트리밍 폴백:', String(e));
+				finalB64 = null;
+			}
 
-	// content = R2 키. model 미전달(세션 모델 유지). cost = Gemini 비용(표시용).
-	await appendMessage(db, sessionId, 'image_generation', key, undefined, undefined, cost, msgId);
+			// 2-2) 최종 이미지 확정(스트림 성공 시 마지막 프레임, 실패 시 비스트리밍 재생성).
+			let image: { bytes: Uint8Array; ext: string; contentType: string } | null = null;
+			if (finalB64) {
+				try {
+					image = b64ToImage(finalB64);
+				} catch {
+					image = null;
+				}
+			}
+			if (!image) {
+				const gen = await generateImage(naiKey, { positive, resolution });
+				if (!gen.ok) {
+					controller.enqueue(line({ t: 'error', error: 'novelai', message: gen.message, debug: makeDebug(positive) }));
+					controller.close();
+					return;
+				}
+				image = gen.image;
+			}
 
-	// 디버그 모드면 어떤 프롬프트/파라미터로 요청했는지 동봉(세션 소유자만 호출하므로 안전).
-	return json({ id: msgId, key, cost: cost ?? null, debug: makeDebug(positive) });
+			// 2-3) R2 저장 + 메시지 영속.
+			const msgId = crypto.randomUUID();
+			const key = `chatimg/${sid}/${msgId}.${image.ext}`;
+			try {
+				await bucket.put(key, image.bytes, { httpMetadata: { contentType: image.contentType } });
+			} catch (e) {
+				console.error('[chat/image] R2 put 실패:', e);
+				controller.enqueue(line({ t: 'error', error: 'storage', message: '이미지 저장에 실패했습니다.' }));
+				controller.close();
+				return;
+			}
+			await appendMessage(db, sid, 'image_generation', key, undefined, undefined, cost, msgId);
+			controller.enqueue(line({ t: 'done', id: msgId, key, cost: cost ?? null, debug: makeDebug(positive) }));
+			controller.close();
+		}
+	});
+
+	return new Response(stream, {
+		headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' }
+	});
 };

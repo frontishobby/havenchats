@@ -6,6 +6,7 @@ import {
 	getCharacterOwnership,
 	updateCharacter
 } from '$lib/server/db/characters';
+import { styleExists } from '$lib/server/db/styles';
 import { ALLOWED_IMAGE, parseCharacterForm } from '$lib/server/characterForm';
 import { commitSceneImages, deleteAllSceneImages, deleteKeys } from '$lib/server/imageStore';
 import { isAdmin } from '$lib/server/auth';
@@ -95,6 +96,10 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 				? c.scriptData
 				: existingVars
 					? { defaultVariables: existingVars }
+					: null,
+			recommendedStyleId:
+				c.recommendedStyleId && (await styleExists(db, c.recommendedStyleId))
+					? c.recommendedStyleId
 					: null,
 			thumbnailKey: newKey
 		});

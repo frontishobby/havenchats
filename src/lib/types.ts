@@ -116,6 +116,8 @@ export interface Character {
 	 * 영구 비공개·수정 불가. 장면 이미지는 기기 한정(IndexedDB) → '기기간 공유'로만 R2 전환.
 	 */
 	imported: boolean;
+	/** 제작자가 지정한 추천 그림체 id(선택). 없으면 null. */
+	recommendedStyleId: string | null;
 	/**
 	 * 마지막 수정 시각(epoch ms). 이미지 캐시 버스팅 버전(`?v=`)으로 쓴다 — 썸네일·장면
 	 * 이미지 키는 엔티티 id 로 고정이라, 재업로드 시 이 값이 바뀌어야 immutable 캐시가 안전.
@@ -202,6 +204,29 @@ export type CharacterImageSet = GridImageSet | NamedImageSet;
  *  - 'image_generation': 실시간 이미지 생성 결과(content = R2 오브젝트 키). 세션에 표시만 하고
  *    이후 LLM 프롬프트(window/요약)에서는 제외된다.
  */
+/**
+ * 그림체(아트 스타일) — 유저가 만들어 Hub 에 공유하는 화풍 프롬프트.
+ * prompt 는 화풍(아티스트/스타일) 태그. 채팅 이미지 생성 시 자동 상황 프롬프트와 합쳐진다.
+ * thumbnailUrl 은 고정 표준 장면으로 생성한 일관 썸네일(servable URL, 없으면 null).
+ */
+export interface ArtStyle {
+	id: string;
+	creatorId: string;
+	creatorName: string | null;
+	title: string;
+	memo: string | null;
+	/** 화풍(스타일) 프롬프트 본문. */
+	prompt: string;
+	/** 썸네일 servable URL(`/img/<key>?v=updatedAt`). 없으면 null. */
+	thumbnailUrl: string | null;
+	/** Hub 공개 여부. false=저장(비공개, 본인 채팅 전용), true=공유(Hub 노출). */
+	shared: boolean;
+	/** 현재 유저가 즐겨찾기했는지(목록·상세에서 채워짐). */
+	favorited: boolean;
+	createdAt: number;
+	updatedAt: number;
+}
+
 export type Role = 'user' | 'assistant' | 'image_generation';
 
 export interface ChatMessage {
@@ -214,6 +239,8 @@ export interface ChatMessage {
 	errorReason?: string;
 	/** 생성 중 표시용(클라 임시 — 실시간 이미지 생성 진행 중). 영속 X. */
 	pending?: boolean;
+	/** 스트리밍 중간 프레임 프리뷰(클라 임시 object URL — image_generation). 영속 X. */
+	previewUrl?: string;
 }
 
 /** DB 영속 메시지 — ChatMessage + 세션 내 순번(seq). */

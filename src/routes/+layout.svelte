@@ -90,6 +90,7 @@
 			</a>
 		</div>
 		<nav>
+			<a class="hub-link" href="/styles">그림체 Hub</a>
 			{#if data.user}
 				<div class="user-menu" bind:this={menuRef}>
 					<button
@@ -257,6 +258,19 @@
 	}
 	.login-btn:hover {
 		background: var(--accent-hover);
+	}
+	.hub-link {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--text-dim);
+		padding: 6px 10px;
+		border-radius: 8px;
+		white-space: nowrap;
+		transition: color 0.12s ease, background 0.12s ease;
+	}
+	.hub-link:hover {
+		color: var(--text);
+		background: var(--bg-card);
 	}
 	.user-menu {
 		position: relative;

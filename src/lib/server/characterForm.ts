@@ -47,6 +47,8 @@ export interface ParsedCharacterForm {
 	lorebook: CharacterLorebook | null;
 	/** 스크립트 기본 변수(import 캐릭터의 defaultVariables). 폼에 없거나 비면 null. */
 	scriptData: CharacterScriptData | null;
+	/** 제작자 추천 그림체 id(선택). 없으면 null. */
+	recommendedStyleId: string | null;
 	/** 업로드된 이미지(있으면). 없으면 null. */
 	image: File | null;
 }
@@ -68,6 +70,7 @@ export function parseCharacterForm(form: FormData): ParseResult {
 	const audienceRaw = String(form.get('audience') ?? 'all');
 	const nsfw = String(form.get('contentRating') ?? 'sfw') === 'nsfw';
 	const isPrivate = String(form.get('visibility') ?? 'public') === 'private';
+	const recommendedStyleId = String(form.get('recommendedStyleId') ?? '').trim() || null;
 	const imageRaw = form.get('image');
 
 	let tags: string[] = [];
@@ -150,7 +153,7 @@ export function parseCharacterForm(form: FormData): ParseResult {
 
 	return {
 		ok: true,
-		data: { name, tagline, intro, description, audience, contentRating, visibility, tags: tagsClean, greetings, lorebook, scriptData, image }
+		data: { name, tagline, intro, description, audience, contentRating, visibility, recommendedStyleId, tags: tagsClean, greetings, lorebook, scriptData, image }
 	};
 }
 

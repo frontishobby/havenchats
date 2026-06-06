@@ -71,6 +71,13 @@ export const NEGATIVE_PROMPT =
 
 export const MODEL = 'nai-diffusion-4-5-full';
 
+/**
+ * 그림체 Hub 썸네일용 고정 표준 장면(SFW). 모든 그림체를 같은 장면으로 렌더해 카드 비교가 일관되게.
+ * 채팅의 자동 상황 프롬프트 대신 이 값을 상황으로 써서 화풍만 비교되도록 한다.
+ */
+export const THUMBNAIL_SITUATION =
+	'1girl, white_background, black hair, red eyes, white shirt, black skirt';
+
 /** 고정 생성 파라미터(docs/realtime-image.md). 디버그 표시·요청 바디 공용. */
 export const IMAGE_PARAMS = {
 	sampler: 'k_euler_ancestral',
@@ -120,16 +127,13 @@ export type GenerateResult =
 	| { ok: false; status: number; message: string };
 
 /** NovelAI 이미지 생성 요청 → ZIP 해제 → 이미지 바이트. */
-export async function generateImage(
-	token: string,
-	opts: { positive: string; resolution: ResolutionKey }
-): Promise<GenerateResult> {
-	const { width, height } = RESOLUTIONS[opts.resolution];
+/** generate / generate-stream 공용 요청 바디. */
+function buildPayload(positive: string, resolution: ResolutionKey) {
+	const { width, height } = RESOLUTIONS[resolution];
 	// 0 ~ 2^32-1 시드(Workers: crypto.getRandomValues).
 	const seed = crypto.getRandomValues(new Uint32Array(1))[0];
-
-	const payload = {
-		input: opts.positive,
+	return {
+		input: positive,
 		model: MODEL,
 		action: 'generate',
 		parameters: {
@@ -154,7 +158,7 @@ export async function generateImage(
 			seed,
 			negative_prompt: NEGATIVE_PROMPT,
 			v4_prompt: {
-				caption: { base_caption: opts.positive, char_captions: [] },
+				caption: { base_caption: positive, char_captions: [] },
 				use_coords: false,
 				use_order: true
 			},
@@ -164,6 +168,13 @@ export async function generateImage(
 			}
 		}
 	};
+}
+
+export async function generateImage(
+	token: string,
+	opts: { positive: string; resolution: ResolutionKey }
+): Promise<GenerateResult> {
+	const payload = buildPayload(opts.positive, opts.resolution);
 
 	let res: Response;
 	try {
@@ -202,6 +213,95 @@ export async function generateImage(
 
 	const { ext, contentType } = sniffImage(imgBytes);
 	return { ok: true, image: { bytes: imgBytes, ext, contentType } };
+}
+
+const STREAM_URL = 'https://image.novelai.net/ai/generate-image-stream';
+
+/** base64(또는 data URL) → 이미지 바이트 + 포맷 판별. */
+export function b64ToImage(b64: string): GeneratedImage {
+	const bytes = base64ToBytes(b64);
+	const { ext, contentType } = sniffImage(bytes);
+	return { bytes, ext, contentType };
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+	const clean = (b64.includes(',') ? b64.slice(b64.indexOf(',') + 1) : b64).replace(/\s/g, '');
+	const bin = atob(clean);
+	const out = new Uint8Array(bin.length);
+	for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+	return out;
+}
+
+/**
+ * NovelAI 스트리밍 생성(SSE). 각 이벤트의 base64 이미지(중간 프리뷰 → 최종)를 순서대로 yield.
+ * **마지막 yield 가 최종 이미지**. 엔드포인트/포맷 미지원·무프레임이면 throw → 호출부가 비스트리밍 폴백.
+ */
+export async function* generateImageStream(
+	token: string,
+	opts: { positive: string; resolution: ResolutionKey }
+): AsyncGenerator<string, void, unknown> {
+	const payload = buildPayload(opts.positive, opts.resolution);
+	const res = await fetch(STREAM_URL, {
+		method: 'POST',
+		headers: {
+			authorization: `Bearer ${token}`,
+			'content-type': 'application/json',
+			accept: 'text/event-stream'
+		},
+		body: JSON.stringify(payload)
+	});
+	const ctype = res.headers.get('content-type') ?? '';
+	if (!res.ok || !res.body || !ctype.includes('event-stream')) {
+		throw new Error(`stream unavailable (${res.status} ${ctype})`);
+	}
+	const reader = res.body.getReader();
+	const dec = new TextDecoder();
+	let buf = '';
+	let yielded = 0;
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		buf += dec.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+		let sep: number;
+		while ((sep = buf.indexOf('\n\n')) >= 0) {
+			const evt = buf.slice(0, sep);
+			buf = buf.slice(sep + 2);
+			const b64 = parseEventImage(evt);
+			if (b64) {
+				yielded++;
+				yield b64;
+			}
+		}
+	}
+	const tail = parseEventImage(buf);
+	if (tail) {
+		yielded++;
+		yield tail;
+	}
+	if (yielded === 0) throw new Error('stream had no image frames');
+}
+
+/** SSE 이벤트 블록에서 base64 이미지 추출(data: 라인 합치기 → JSON.image|img|data 또는 raw base64). */
+function parseEventImage(evt: string): string | null {
+	const data = evt
+		.split('\n')
+		.filter((l) => l.startsWith('data:'))
+		.map((l) => l.slice(5).trim())
+		.join('');
+	if (!data || data === '[DONE]') return null;
+	if (data.startsWith('{')) {
+		try {
+			const obj = JSON.parse(data) as Record<string, unknown>;
+			for (const k of ['image', 'img', 'b64', 'data', 'image_b64']) {
+				const v = obj[k];
+				if (typeof v === 'string' && v.length > 64) return v;
+			}
+			return null;
+		} catch {
+			return null;
+		}
+	}
+	return data.length > 64 && /^[A-Za-z0-9+/=_-]+$/.test(data) ? data : null;
 }
 
 /** 이미지 매직바이트로 포맷 판별(webp/png/jpeg). 알 수 없으면 png 로 간주. */

@@ -49,7 +49,7 @@ src/
       CharacterForm.svelte          # 캐릭터 생성/수정 공용 폼
       CharacterImagesModal.svelte   # 장면 이미지(축×조합) 편집
       Sidebar.svelte                # 최근 채팅 목록
-      LoginModal / ProfileModal / ApiKeyModal / NsfwBadge / PromptGuideModal / TextReplaceModal
+      LoginModal / ProfileModal / ApiKeyModal / StyleWorkshopModal / NsfwBadge / PromptGuideModal / TextReplaceModal
     state/
       loginModal.svelte.ts / profileModal.svelte.ts / apiKeyModal.svelte.ts   # 공유 $state
     server/
@@ -64,6 +64,7 @@ src/
         characters.ts # CRUD(listCharacters, getCharacterById, createCharacter, updateCharacter, deleteCharacter, ownership)
         chats.ts      # 세션/메시지(getSession, createSession, appendMessage, getWindow, updateSummary, listRecentSessions, estimateTokens)
         userKeys.ts   # 외부 API 키 보관(getKeyStatus/getDecryptedKey/setKey/deleteKey) — 암호문만 저장
+        styles.ts     # 그림체 Hub(list/getStyle/createStyle/deleteStyle/favorite/listFavorites/listMine)
   routes/
     +layout.{svelte,server.ts}   # 상단바, 사이드바(최근 채팅), 모달 렌더, 최초로그인 시 프로필모달
     +page.{svelte,server.ts}     # 메인(캐릭터 그리드, 검색/태그). 비로그인=NSFW 숨김
@@ -72,17 +73,19 @@ src/
     user/[id]/+page.{svelte,server.ts}           # 유저 공개 프로필 + 제작 캐릭터 목록
     chat/[id]/+page.{svelte,server.ts}           # 소설모드 채팅(새 세션). ?o=오프닝. NSFW 비로그인 차단
     chat/[id]/session/[sessionId]/+page.*        # 세션 이어가기(하위 /debug 포함). 로더는 chatPageLoad 공용
-    img/[...key]/+server.ts      # R2 오브젝트 서빙(썸네일/장면/아바타)
+    styles/+page.{svelte,server.ts}              # 그림체 Hub(카드 그리드·상세·즐겨찾기·깎기 워크숍)
+    img/[...key]/+server.ts      # R2 오브젝트 서빙(썸네일/장면/아바타/그림체)
     api/
       chat/+server.ts            # 스트리밍(로그인 필수). system조립/모델라우팅/토큰전략/영속화/요약
       chat/summary/+server.ts    # 세션 요약 조회(GET)·수동 수정(POST)
       chat/image/+server.ts      # 실시간 이미지 생성(POST): Gemini 상황프롬프트→NovelAI→R2 저장→image_generation 메시지
       keys/novelai/+server.ts    # NovelAI 키 관리: GET(상태)·POST(Opus 검증+암호화 저장)·DELETE
+      styles/+server.ts, styles/[id]/(+server,favorite), styles/{generate,favorites,mine}  # 그림체 Hub API
       characters/+server.ts      # 캐릭터 생성(POST)
       characters/[id]/+server.ts # 캐릭터 수정(PUT)·삭제(DELETE). 소유자 검증
       profile/+server.ts         # 프로필·아바타 저장(POST)
     auth/google/+server.ts, auth/google/callback/+server.ts, auth/logout/+server.ts
-migrations/           # D1 마이그레이션 0001~0019
+migrations/           # D1 마이그레이션 0001~0020
 static/favicon.svg    # 로고 스파클(✦) SVG
 static/models/*.avif  # 모델 아이콘
 ```
@@ -95,6 +98,8 @@ static/models/*.avif  # 모델 아이콘
 - **chat_sessions**: `id`(uuid PK), `user_id`, `character_id`(빌트인slug+uuid 혼재 가능 → **FK 미설정**), `model`(마지막 사용), `summary`/`summary_upto_seq`(요약 상태), `message_count`(마지막 seq), `created_at`/`updated_at`/`last_message_at`
 - **chat_messages**: `id`(uuid PK), `session_id`→sessions, `seq`(세션 내 1-based), `role`('user'|'assistant'|**'image_generation'**), `content`(image_generation 은 **R2 키**), `token_est`, `input_tokens`(assistant 행에 그 응답 생성 시 input 토큰 실측/추정), `cost`(assistant=추론비용, image_generation=Gemini 상황프롬프트 비용), `created_at`. unique(session_id, seq). **`image_generation` 행은 LLM window/요약에서 제외**(`getWindow`·프리뷰 서브쿼리에서 `role != 'image_generation'`), 표시·페이징엔 포함.
 - **user_keys**: `(user_id, provider)` PK, `ciphertext`(**AES-GCM 양방향 암호화** `base64url(iv‖ct)` — 평문 미저장), `meta`(JSON 검증 스냅샷: NovelAI `{tier,active,isOpus}`), `created_at`/`updated_at`. provider 현재 `'novelai'`. 복호화 키는 `KEY_SECRET`(폴백 `AUTH_SECRET`)에서 파생.
+- **art_styles**(그림체 Hub): `id`(uuid PK), `creator_id`→users, `title`, `memo`, `prompt`(화풍 태그), `thumbnail_key`(R2 `style/<id>.<ext>` — 고정 표준 장면 SFW 썸네일), `created_at`/`updated_at`
+- **art_style_favorites**: `(user_id, style_id)` PK — 채팅 이미지 모달에서 고를 수 있는 후보. `characters.recommended_style_id`(추가됨): 제작자 추천 그림체.
 - 세션 id = 내부 user uuid. 프로필 완료 = `display_name` 존재. 오프닝(greeting)은 세션 시작 시 seq=1 메시지로 저장(세션별 앵커). **캐릭터 데이터는 세션에 스냅샷하지 않음** — characters 테이블이 source of truth.
 
 ## 구현된 기능
@@ -106,7 +111,8 @@ static/models/*.avif  # 모델 아이콘
 - **대화 영속화**: 세션+메시지 D1 저장. 유저 메시지는 즉시 저장(스트림 끊겨도 유실 방지), assistant는 `onFinish`에 저장. **사이드바 최근 채팅**(`listRecentSessions`, 마지막 대사 미리보기). `/chat/[id]/session/[sessionId]` 경로로 이어가기(구버전 `?s=`도 하위호환). 새 세션은 첫 전송 시 lazy 생성 후 `replaceState`로 세션 URL로 교체(기본은 항상 새 세션).
 - **장기 맥락**: sliding window + rolling summary(백그라운드 갱신). 요약은 모달에서 조회/수동 수정 가능(`/api/chat/summary`).
 - **채팅 설정 모달**: **모델 선택**(아이콘 드롭다운, 5개), **답변 길이**(5~30문장 슬라이더), **'나' 행동·대사 생성**(0금지/1적정/2풍부). localStorage 저장.
-- **실시간 이미지 생성(NovelAI)**: 채팅 헤더 🖼 버튼으로 켜면(localStorage) 매 assistant 턴 직후 클라가 `/api/chat/image` 호출 → ① Gemini(`google/gemini-3.5-flash`)가 마지막 응답을 **상황 프롬프트**(best-effort danbooru 태그+자연어)로 변환(이 비용이 메시지 cost 로 표시) → ② 그림체+상황+고정 퀄리티/네거티브로 **NovelAI(nai-diffusion-4-5-full)** 생성(응답 ZIP→매직바이트로 webp/png 판별) → ③ R2(`chatimg/<sessionId>/<msgId>.<ext>`) 저장 + `role=image_generation` 메시지 영속. 해상도(832×1216/1024×1024)·그림체 프롬프트는 헤더 모달에서 설정. 키는 **프로필 메뉴 > API 키 관리**에서 등록(NovelAI **Opus 등급** 검증 후 암호화 저장). 고정 프롬프트/파라미터·검증·ZIP 해제는 `lib/server/novelai.ts`.
+- **실시간 이미지 생성(NovelAI)**: 채팅 헤더 🖼 버튼으로 켜면(localStorage) 매 assistant 턴 직후 클라가 `/api/chat/image` 호출 → ① Gemini(`google/gemini-3.5-flash`)가 마지막 응답을 **상황 프롬프트**(best-effort danbooru 태그+자연어)로 변환(이 비용이 메시지 cost 로 표시) → ② 그림체+상황+고정 퀄리티/네거티브로 **NovelAI(nai-diffusion-4-5-full)** 생성(응답 ZIP→매직바이트로 webp/png 판별) → ③ R2(`chatimg/<sessionId>/<msgId>.<ext>`) 저장 + `role=image_generation` 메시지 영속. 해상도(832×1216/1024×1024)·**그림체(즐겨찾기에서 택1)**·상황프롬프트 모델·'빠른 생성 우선'은 헤더 모달에서 설정. NSFW 캐릭터면 positive 앞에 `rating:nsfw`. 캐릭터 description 통짜를 외형 레퍼런스로 LLM 에 주입. 키는 **프로필 메뉴 > API 키 관리**에서 등록(NovelAI **Opus 등급** 검증 후 암호화 저장). 고정 프롬프트/파라미터·검증·ZIP 해제는 `lib/server/novelai.ts`. 공급자 일시 과부하 대비로 Gemini 는 `gateway.order:['vertex','google']` 페일오버.
+- **그림체 Hub**(`/styles`): 유저가 화풍(스타일) 프롬프트를 만들어 공유·즐겨찾기. **깎기 워크숍**(`StyleWorkshopModal`)에서 화풍+상황(테스트)으로 자기 NovelAI 키로 미리보기 생성 → 공유 시 제목·메모 + **고정 표준 장면**(`THUMBNAIL_SITUATION`, SFW)으로 일관 썸네일 리롤·결정 → R2 저장. 카드(썸네일+제목+작성자) 클릭 시 상세(프롬프트+즐겨찾기). 채팅 이미지 모달은 즐겨찾기 그림체 중 택1(캐릭터 추천 그림체 상단). 캐릭터 제작 폼에서 추천 그림체 지정 가능. API: `/api/styles*`(목록·생성·상세·삭제·즐겨찾기·`mine`·`generate`).
 - **인증**: Google 로그인 → **이메일 화이트리스트(테스트용)** → 프로필 모달(이름/페르소나/취향/아바타) → DB 저장. 네비바 이름 클릭 시 재편집.
 - **게이팅**: 채팅 전송·`/api/chat`·캐릭터 생성/수정은 **로그인 필수(서버 검증)**, NSFW는 비로그인 접근 차단.
 
@@ -140,7 +146,7 @@ npx wrangler pages secret put <KEY> --project-name havenchats  # prod 시크릿
 
 - Pages 프로젝트: `havenchats` (production branch `main`)
 - D1: `haven` (id `b8c2b1a3-78e8-4527-aefa-461bcd3486b7`, region APAC) — `wrangler.jsonc`에 `DB` 바인딩
-- R2: `haven-images` — `IMAGES` 바인딩. 키 규칙: 썸네일 `char/<id>.<ext>`, 장면 `charimg/<charId>/<entryId>.<ext>`, 아바타 `avatar/<...>`, 실시간 생성 이미지 `chatimg/<sessionId>/<msgId>.<ext>`. 서빙은 `/img/[...key]`
+- R2: `haven-images` — `IMAGES` 바인딩. 키 규칙: 썸네일 `char/<id>.<ext>`, 장면 `charimg/<charId>/<entryId>.<ext>`, 아바타 `avatar/<...>`, 실시간 생성 이미지 `chatimg/<sessionId>/<msgId>.<ext>`, 그림체 썸네일 `style/<id>.<ext>`. 서빙은 `/img/[...key]`
 - 커스텀 도메인 `havenchats.com` 연결됨. **Google 콘솔 승인 리디렉트 URI**: `https://havenchats.com/auth/google/callback` (+ `http://localhost:5173/auth/google/callback`)
 
 ## 아직 안 된 것 / 다음 단계

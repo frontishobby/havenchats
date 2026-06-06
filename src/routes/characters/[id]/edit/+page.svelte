@@ -29,6 +29,7 @@
 		avatarUrl: c.avatarUrl,
 		imageSet: c.imageSet,
 		lorebook: c.lorebook,
-		defaultVariables: data.defaultVariables
+		defaultVariables: data.defaultVariables,
+		recommendedStyleId: c.recommendedStyleId
 	}}
 />
