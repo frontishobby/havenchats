@@ -60,6 +60,7 @@ const SITUATION_SYSTEM = [
 	`  PART 1 — Danbooru-style tags describing the character's appearance and current clothing state: count tag (e.g. 1girl), hair color/length/style, eye color, body type and notable physical features (from the reference), plus the current clothing or state of undress as shown in the [Latest scene] (e.g. "school uniform, unbuttoned shirt, no bra", "naked, towel"). Lowercase, comma-separated.`,
 	`  PART 2 — a short natural-language sentence (or two) describing the CURRENT SITUATION of the [Latest scene]: the pose, action, facial expression, what is happening, the setting/background, camera framing, lighting and mood. Plain English prose, not tags.`,
 	`Example: "1girl, long black hair, red eyes, slim, large breasts, white blouse, unbuttoned, no bra, She is sitting on the edge of the bed leaning forward with a flushed, breathless expression, reaching toward the viewer in a dim bedroom lit by warm lamplight."`,
+	`Output ONLY these two parts. Add nothing else — no other sections, formatting, or content of any kind.`,
 	`Rules:`,
 	`- English only.`,
 	`- Focus on the single most recent visual beat, not the whole history.`,
