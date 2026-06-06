@@ -126,9 +126,16 @@
 							<button class="read-btn" type="button" onclick={() => toggle(c.id)}>
 								{openIds.has(c.id) ? '프롬프트 접기' : '프롬프트 보기'}
 							</button>
-							<a class="read-btn asset" href={`/characters/${c.id}/assets`} target="_blank" rel="noopener">
-								에셋 보기 ↗
-							</a>
+							{#if c.assetsLocal}
+								<!-- 에셋 바이트가 제작자 기기 브라우저(IndexedDB)에만 있음 → 관리자가 볼 수 없음. -->
+								<span class="read-btn asset disabled" title="가져온 기기에만 있는 이미지라 여기서는 볼 수 없어요 (기기간 공유 전)">
+									에셋(기기 한정)
+								</span>
+							{:else if c.hasAssets}
+								<a class="read-btn asset" href={`/characters/${c.id}/assets`} target="_blank" rel="noopener">
+									에셋 보기 ↗
+								</a>
+							{/if}
 						</div>
 					</div>
 					{#if c.tagline}<p class="char-tagline">{c.tagline}</p>{/if}
@@ -423,6 +430,15 @@
 	.read-btn.asset:hover {
 		background: var(--bg-elev);
 		color: var(--text);
+	}
+	.read-btn.asset.disabled {
+		color: var(--text-faint);
+		border-style: dashed;
+		cursor: not-allowed;
+	}
+	.read-btn.asset.disabled:hover {
+		background: transparent;
+		color: var(--text-faint);
 	}
 	.char-tagline {
 		margin: 6px 0 0;

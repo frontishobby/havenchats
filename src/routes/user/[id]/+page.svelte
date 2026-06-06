@@ -3,9 +3,9 @@
 	import CharacterCard from '$lib/components/CharacterCard.svelte';
 	import CharacterDetailModal from '$lib/components/CharacterDetailModal.svelte';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
-	import { isLocalSet } from '$lib/imageCodes';
+	import { isLocalSet, isNamed, localSceneKey } from '$lib/imageCodes';
 	import { promoteLocalCharacter, type PromoteProgress } from '$lib/import/promote';
-	import { deleteLocalScenes } from '$lib/import/localImages';
+	import { deleteLocalScenes, getLocalSceneBlob } from '$lib/import/localImages';
 	import { addAssetsFromZip, type AddAssetsProgress } from '$lib/import/addAssets';
 	import type { Character } from '$lib/types';
 	import type { PageData } from './$types';
@@ -31,6 +31,29 @@
 	function isLocal(c: Character): boolean {
 		return isLocalSet(c.imageSet);
 	}
+
+	// '기기간 공유'는 이 기기(IndexedDB)에 실제로 장면 이미지가 있는 기기에서만 가능하다.
+	// storage:'local' 은 DB(전 기기 공통) 값이라, 가져온 적 없는 다른 기기에서도 버튼이 떠
+	// 눌러도 promote 가 실패하던 문제 → 로컬 blob 존재를 확인해 그 기기에서만 노출.
+	let localPresent = $state<Set<string>>(new Set());
+	async function checkLocalPresence() {
+		const next = new Set<string>();
+		for (const c of items) {
+			const set = c.imageSet;
+			if (!isLocalSet(set) || !isNamed(set)) continue;
+			for (const img of set.images) {
+				if (await getLocalSceneBlob(localSceneKey(c.id, img.id))) {
+					next.add(c.id);
+					break; // 하나라도 있으면 이 기기가 가져온 기기 → 노출
+				}
+			}
+		}
+		localPresent = next;
+	}
+	$effect(() => {
+		void items; // items 변동(promote/에셋 추가/유저 전환) 시 재확인
+		checkLocalPresence();
+	});
 
 	// 방문자 모드: 상세 모달.
 	let detail = $state<Character | null>(null);
@@ -192,7 +215,7 @@
 							＋에셋
 						{/if}
 					</button>
-					{#if isLocal(c)}
+					{#if isLocal(c) && localPresent.has(c.id)}
 						<button
 							class="edit promote"
 							type="button"

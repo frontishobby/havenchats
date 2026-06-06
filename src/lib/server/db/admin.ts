@@ -6,6 +6,20 @@
  * created_at 은 epoch ms. 일자 버킷팅은 KST(+9h) 기준.
  */
 
+import { hasScenes, isLocalSet } from '$lib/imageCodes';
+import type { CharacterImageSet } from '$lib/types';
+
+/** image_set JSON → CharacterImageSet 안전 파싱(에셋 유무·로컬 여부 판정용). */
+function parseImageSet(json: string | null): CharacterImageSet | null {
+	if (!json) return null;
+	try {
+		const v = JSON.parse(json);
+		return v && typeof v === 'object' ? (v as CharacterImageSet) : null;
+	} catch {
+		return null;
+	}
+}
+
 /** 유저 1행 + 사용량 집계. */
 export interface AdminUserRow {
 	id: string;
@@ -311,6 +325,10 @@ export interface AdminCharacter {
 	openings: { name: string; content: string }[];
 	chats: number;
 	createdAt: number;
+	/** 등록된 장면 이미지(에셋)가 있는지. */
+	hasAssets: boolean;
+	/** 에셋 바이트가 가져온 기기 브라우저(IndexedDB)에만 있는지 → 관리자가 볼 수 없음. */
+	assetsLocal: boolean;
 }
 
 /** greetings JSON → Opening[] 안전 파싱(구버전 string[] 호환). */
@@ -338,7 +356,7 @@ export async function listCharactersForAdmin(
 	const { results } = await db
 		.prepare(
 			`SELECT c.id, c.name, c.tagline, c.intro, c.description, c.visibility, c.content_rating,
-			        c.imported, c.greetings, c.created_at,
+			        c.imported, c.greetings, c.image_set, c.created_at,
 			        (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id
 			           WHERE s.character_id = c.id) AS chats
 			 FROM characters c
@@ -356,22 +374,28 @@ export async function listCharactersForAdmin(
 			content_rating: string;
 			imported: number;
 			greetings: string;
+			image_set: string | null;
 			created_at: number;
 			chats: number;
 		}>();
-	return (results ?? []).map((r) => ({
-		id: r.id,
-		name: r.name,
-		tagline: r.tagline,
-		intro: r.intro,
-		description: r.description,
-		visibility: r.visibility === 'private' ? 'private' : 'public',
-		contentRating: r.content_rating === 'nsfw' ? 'nsfw' : 'sfw',
-		imported: r.imported === 1,
-		openings: parseOpenings(r.greetings),
-		chats: r.chats,
-		createdAt: r.created_at
-	}));
+	return (results ?? []).map((r) => {
+		const set = parseImageSet(r.image_set);
+		return {
+			id: r.id,
+			name: r.name,
+			tagline: r.tagline,
+			intro: r.intro,
+			description: r.description,
+			visibility: r.visibility === 'private' ? 'private' : 'public',
+			contentRating: r.content_rating === 'nsfw' ? 'nsfw' : 'sfw',
+			imported: r.imported === 1,
+			openings: parseOpenings(r.greetings),
+			chats: r.chats,
+			createdAt: r.created_at,
+			hasAssets: hasScenes(set),
+			assetsLocal: isLocalSet(set)
+		};
+	});
 }
 
 /** 캐릭터별 사용량 1행. */
