@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { invalidate } from '$app/navigation';
+	import { invalidate, replaceState } from '$app/navigation';
 	import { MODELS, DEFAULT_MODEL_ID, getModel } from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
@@ -574,6 +574,9 @@
 			const newSession = res.headers.get('x-haven-session');
 			if (newSession) {
 				sessionId = newSession;
+				// URL 을 세션 경로로 교체(새로고침/공유 시 이어가기). load 재실행 없는 shallow routing.
+				const sessionPath = `/chat/${character.id}/session/${newSession}${debug ? '/debug' : ''}`;
+				replaceState(sessionPath, {});
 				// 첫 전송과 함께 저장된 상시 기억을 클라 상태에도 반영(모달 재오픈 시 일관성).
 				if (newSessionMemory !== undefined) {
 					memory = newSessionMemory;

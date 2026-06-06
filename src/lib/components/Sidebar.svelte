@@ -81,7 +81,7 @@
 					<div class="row" class:confirming={confirmId === c.sessionId}>
 						<a
 							class="item"
-							href={`/chat/${c.characterId}?s=${c.sessionId}`}
+							href={`/chat/${c.characterId}/session/${c.sessionId}`}
 							onclick={onClose}
 						>
 							<img class="thumb" src={c.avatarUrl} alt={c.characterName} loading="lazy" />

@@ -67,7 +67,8 @@ src/
     create/+page.{svelte,server.ts}              # 캐릭터 만들기(로그인 필수)
     characters/[id]/edit/+page.{svelte,server.ts}# 캐릭터 수정(소유자만)
     user/[id]/+page.{svelte,server.ts}           # 유저 공개 프로필 + 제작 캐릭터 목록
-    chat/[id]/+page.{svelte,server.ts}           # 소설모드 채팅. ?s=세션이어가기 ?o=오프닝. NSFW 비로그인 차단
+    chat/[id]/+page.{svelte,server.ts}           # 소설모드 채팅(새 세션). ?o=오프닝. NSFW 비로그인 차단
+    chat/[id]/session/[sessionId]/+page.*        # 세션 이어가기(하위 /debug 포함). 로더는 chatPageLoad 공용
     img/[...key]/+server.ts      # R2 오브젝트 서빙(썸네일/장면/아바타)
     api/
       chat/+server.ts            # 스트리밍(로그인 필수). system조립/모델라우팅/토큰전략/영속화/요약
@@ -96,7 +97,7 @@ static/models/*.avif  # 모델 아이콘
 - **캐릭터 제작/관리**: `/create`로 캐릭터 등록(이름·소개·프롬프트·태그·오프닝 다중·썸네일·장면 이미지). 소유자만 수정(`/characters/[id]/edit`)·삭제. 폼/이미지 파싱은 `characterForm.ts`, R2 정리는 `imageStore.ts`.
 - **유저 프로필 페이지**(`/user/[id]`): 공개 프로필 + 제작 캐릭터 목록. 본인이면 전체, 외부 방문자에겐 NSFW 숨김.
 - **채팅**: **소설 모드**(말풍선 X, 산문). 괄호 `()`/`*..*` 지시문=기울임, 대사=`발화자 | "대사"`(`|` 제거·이름 강조). **장면 이미지** 인라인 표시(위치코드/핀 토큰). 실시간 스트리밍.
-- **대화 영속화**: 세션+메시지 D1 저장. 유저 메시지는 즉시 저장(스트림 끊겨도 유실 방지), assistant는 `onFinish`에 저장. **사이드바 최근 채팅**(`listRecentSessions`, 마지막 대사 미리보기). `?s=세션id`로만 이어가기(기본은 항상 새 세션).
+- **대화 영속화**: 세션+메시지 D1 저장. 유저 메시지는 즉시 저장(스트림 끊겨도 유실 방지), assistant는 `onFinish`에 저장. **사이드바 최근 채팅**(`listRecentSessions`, 마지막 대사 미리보기). `/chat/[id]/session/[sessionId]` 경로로 이어가기(구버전 `?s=`도 하위호환). 새 세션은 첫 전송 시 lazy 생성 후 `replaceState`로 세션 URL로 교체(기본은 항상 새 세션).
 - **장기 맥락**: sliding window + rolling summary(백그라운드 갱신). 요약은 모달에서 조회/수동 수정 가능(`/api/chat/summary`).
 - **채팅 설정 모달**: **모델 선택**(아이콘 드롭다운, 5개), **답변 길이**(5~30문장 슬라이더), **'나' 행동·대사 생성**(0금지/1적정/2풍부). localStorage 저장.
 - **인증**: Google 로그인 → **이메일 화이트리스트(테스트용)** → 프로필 모달(이름/페르소나/취향/아바타) → DB 저장. 네비바 이름 클릭 시 재편집.

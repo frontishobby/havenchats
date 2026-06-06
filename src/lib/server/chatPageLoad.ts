@@ -19,14 +19,15 @@ export interface ChatPageLoadData {
 }
 
 /**
- * 채팅 페이지 로더(메인 `/chat/[id]` 과 디버그 `/chat/[id]/debug` 공용).
+ * 채팅 페이지 로더(메인·디버그·세션 라우트 공용).
  *
  * 세션 진입 규칙:
- *  - ?s=<id>  → 그 세션 이어가기 (사이드바 '최근 세션'에서만 진입)
- *  - 그 외   → 항상 새 세션(전송 시 lazy 생성). ?o=<idx> 오프닝, 없으면 0
+ *  - `/chat/[id]/session/[sessionId]`  → 그 세션 이어가기 (사이드바 '최근 세션'에서 진입)
+ *  - `/chat/[id]` (세션 없음)          → 항상 새 세션(전송 시 lazy 생성). ?o=<idx> 오프닝, 없으면 0
+ *  - 구버전 `?s=<id>` 도 하위호환으로 인정.
  */
 export async function loadChatPage(opts: {
-	params: { id: string };
+	params: { id: string; sessionId?: string };
 	locals: App.Locals;
 	platform: Readonly<App.Platform> | undefined;
 	url: URL;
@@ -54,9 +55,9 @@ export async function loadChatPage(opts: {
 	// 첫 상황(오프닝) 선택 — 메인 상세 모달에서 ?o=<index> 로 전달. 범위 밖이면 기본(0).
 	const o = Number(url.searchParams.get('o'));
 	const openingIndex = Number.isInteger(o) && o >= 0 && o < character.greetings.length ? o : 0;
-	const sessionParam = url.searchParams.get('s');
+	const sessionParam = params.sessionId ?? url.searchParams.get('s');
 
-	// 이어갈 세션은 ?s=<id> 로 명시했을 때만 (사이드바 진입). 그 외엔 항상 새로 시작.
+	// 이어갈 세션은 경로(/session/<id>)나 구버전 ?s=<id> 로 명시했을 때만. 그 외엔 항상 새로 시작.
 	let resumed: ChatMessage[] | null = null;
 	let sessionId: string | null = null;
 	let oldestSeq = 0;
