@@ -72,7 +72,7 @@ export const MODEL = 'nai-diffusion-4-5-full';
  * 채팅의 자동 상황 프롬프트 대신 이 값을 상황으로 써서 화풍만 비교되도록 한다.
  */
 export const THUMBNAIL_SITUATION =
-	'1girl, white_background, black hair, red eyes, white shirt, black skirt';
+	'1girl, white_background, black_hair, red_eyes, white_shirt, black_skirt, standing, upper_body, slight_smile, braided_bangs, straight_hair';
 
 /** 고정 생성 파라미터(docs/realtime-image.md). 디버그 표시·요청 바디 공용. */
 export const IMAGE_PARAMS = {
