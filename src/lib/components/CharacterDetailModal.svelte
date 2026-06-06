@@ -219,11 +219,18 @@
 		inset: 0;
 		z-index: 120;
 		background: rgba(0, 0, 0, 0.65);
-		backdrop-filter: blur(3px);
 		display: grid;
 		place-items: center;
 		padding: 20px;
 		overflow-y: auto;
+	}
+	/* 블러를 가상요소로 분리 — 모달(이미지)이 합성 레이어에 묶여 저품질 축소되는 것 방지 */
+	.backdrop::before {
+		content: '';
+		position: fixed;
+		inset: 0;
+		backdrop-filter: blur(3px);
+		pointer-events: none;
 	}
 	.modal {
 		position: relative;
