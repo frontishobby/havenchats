@@ -326,9 +326,10 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			}
 
 			// 2-3) R2 저장 + 메시지 영속.
-			// 재생성이면 같은 msgId 로 키를 만들어 같은 행을 덮어쓴다(순서 유지). 신규면 새 msgId.
-			const msgId = replaceMsgId ?? crypto.randomUUID();
-			const key = `chatimg/${sid}/${msgId}.${image.ext}`;
+			// R2 키는 항상 새 무작위 id 로 만든다 — 재생성 때 같은 키를 덮어쓰면 /img 의 1일 캐시·엣지
+			// 캐시가 옛 이미지를 계속 서빙하므로(URL 동일), 새 키로 만들어 캐시 충돌을 피한다.
+			const keyId = crypto.randomUUID();
+			const key = `chatimg/${sid}/${keyId}.${image.ext}`;
 			try {
 				await bucket.put(key, image.bytes, { httpMetadata: { contentType: image.contentType } });
 			} catch (e) {
@@ -338,8 +339,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 				return;
 			}
 			if (replaceMsgId) {
+				// 같은 메시지 행(순서 유지)의 content 만 새 키로 갱신하고 이전 오브젝트는 정리.
 				await updateMessageContentCost(db, replaceMsgId, key, cost);
-				// 확장자가 바뀌어 키가 달라졌으면 이전 오브젝트 정리(orphan 방지).
 				if (oldImageKey && oldImageKey !== key) {
 					try {
 						await bucket.delete(oldImageKey);
@@ -348,9 +349,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 					}
 				}
 			} else {
-				await appendMessage(db, sid, 'image_generation', key, undefined, undefined, cost, msgId);
+				await appendMessage(db, sid, 'image_generation', key, undefined, undefined, cost, keyId);
 			}
-			controller.enqueue(line({ t: 'done', id: msgId, key, cost: cost ?? null, debug: makeDebug(positive) }));
+			// done.id = 클라가 매칭할 메시지 행 id (재생성이면 기존 행, 신규면 키 id 와 동일).
+			const rowId = replaceMsgId ?? keyId;
+			controller.enqueue(line({ t: 'done', id: rowId, key, cost: cost ?? null, debug: makeDebug(positive) }));
 			controller.close();
 		}
 	});
