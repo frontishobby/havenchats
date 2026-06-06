@@ -1631,7 +1631,10 @@
 					cardLine === null
 						? resolveSceneLine(line, character.id, character.imageSet, character.updatedAt)
 						: null}
-				{#if ignoreCharacterAssets && (cardLine !== null || scene || looksLikeSceneToken(line))}
+				<!-- 이 줄이 '캐릭터 내장 에셋'(장면·감정 스프라이트·토큰)인지. 별도 const 로 빼야
+				     컴파일 시 `a && (b||c||d)` 의 괄호가 풀려 우선순위가 깨지는 문제를 피한다. -->
+				{@const isCharacterAsset = cardLine !== null || scene !== null || looksLikeSceneToken(line)}
+				{#if ignoreCharacterAssets && isCharacterAsset}
 					<!-- '캐릭터 에셋 무시' → 캐릭터 내장 이미지(장면·감정 스프라이트)·토큰 숨김 -->
 				{:else if cardLine !== null}
 					<!-- imported 카드 editdisplay: 감정 스프라이트 HTML(세정 후 주입). -->
