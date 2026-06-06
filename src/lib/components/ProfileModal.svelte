@@ -210,7 +210,7 @@
 			</div>
 
 			<div class="field">
-				<label class="toggle-row" for="pf-hide-history">
+				<label class="toggle-row">
 					<span class="toggle-text">
 						<span class="field-label">브라우저 기록 숨김</span>
 						<span class="toggle-desc">브라우저 탭 제목을 항상 "Haven" 으로만 표시해요.</span>
@@ -401,7 +401,7 @@
 	.pref-btn.active span {
 		color: var(--text-dim);
 	}
-	.toggle-row {
+	.field .toggle-row {
 		display: flex;
 		align-items: center;
 		gap: 12px;
@@ -420,11 +420,14 @@
 		margin-top: 2px;
 		line-height: 1.4;
 	}
-	.toggle-input {
+	.field .toggle-input {
 		position: absolute;
 		opacity: 0;
 		width: 0;
 		height: 0;
+		padding: 0;
+		border: none;
+		background: none;
 	}
 	.toggle-switch {
 		position: relative;
