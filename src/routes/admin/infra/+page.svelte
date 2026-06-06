@@ -16,16 +16,19 @@
 		return num(Math.round(n));
 	}
 
-	/** 청구 항목 사용량 표기: 'gb' 는 GB, 'count' 는 압축 수. */
-	function usageText(item: { monthly: number | null; unit: 'gb' | 'count' }): string {
+	/** 청구 항목 사용량 표기: 'gb' 는 GB, 'ms' 는 CPU-ms, 'count' 는 압축 수. */
+	function usageText(item: { monthly: number | null; unit: 'gb' | 'count' | 'ms' }): string {
 		if (item.monthly == null) return '—';
 		if (item.unit === 'gb') return `${item.monthly.toFixed(item.monthly >= 10 ? 1 : 3)} GB`;
+		if (item.unit === 'ms') return `${compact(item.monthly)} ms`;
 		return compact(item.monthly);
 	}
 
-	function freeText(item: { unit: 'gb' | 'count'; free: number }): string {
+	function freeText(item: { unit: 'gb' | 'count' | 'ms'; free: number }): string {
 		if (item.free <= 0) return '—';
-		return item.unit === 'gb' ? `${item.free} GB` : compact(item.free);
+		if (item.unit === 'gb') return `${item.free} GB`;
+		if (item.unit === 'ms') return `${compact(item.free)} ms`;
+		return compact(item.free);
 	}
 
 	// 테이블 라벨(스키마 대응).
@@ -120,6 +123,33 @@
 		</p>
 	</section>
 {/if}
+
+<!-- Workers / Pages Functions -->
+<section>
+	<h2 class="section-label">Workers · Pages Functions — 최근 7일</h2>
+	{#if infra.workers.last7d}
+		<div class="cards">
+			<div class="card">
+				<span class="k">요청 수</span>
+				<span class="v">{num(infra.workers.last7d.requests)}</span>
+			</div>
+			<div class="card">
+				<span class="k">오류</span>
+				<span class="v">{num(infra.workers.last7d.errors)}</span>
+			</div>
+			<div class="card">
+				<span class="k">CPU 시간 (추정)</span>
+				<span class="v">{compact(infra.workers.last7d.cpuMsEst)} ms</span>
+			</div>
+		</div>
+		<p class="dim-note">
+			CPU 시간은 데이터셋에 합계가 없어 <strong>요청수 × 일별 CPU 중앙값(P50)</strong>으로 근사한
+			값이에요. 정적 에셋 서빙은 과금 대상이 아니라 여기 안 잡혀요.
+		</p>
+	{:else}
+		<p class="dim-note">Workers 지표 없음 — 토큰에 Account Analytics:Read 권한이 필요해요.</p>
+	{/if}
+</section>
 
 <!-- D1 -->
 <section>

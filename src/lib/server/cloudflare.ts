@@ -219,6 +219,64 @@ async function fetchR2(): Promise<R2Metrics> {
 	return { storage: snap, ops, classA, classB };
 }
 
+// ── Workers / Pages Functions ─────────────────────────────────────────────────
+
+export interface WorkersMetrics {
+	/** 최근 7일 합계(Analytics). 권한/조회 실패 시 null. */
+	last7d: {
+		requests: number;
+		errors: number;
+		/**
+		 * 추정 총 CPU 시간(ms). 데이터셋에 CPU 합계가 없어서
+		 * 일별 `requests × cpuTimeP50(µs, 중앙값)` 합을 ms 로 환산한 근사치다.
+		 * 분포가 우측으로 치우쳐(꼬리 김) 실제보다 과소추정될 수 있음.
+		 */
+		cpuMsEst: number;
+	} | null;
+}
+
+const WORKERS_QUERY = `
+query Workers($acct: String!, $start: Date!) {
+  viewer {
+    accounts(filter: { accountTag: $acct }) {
+      pagesFunctionsInvocationsAdaptiveGroups(
+        limit: 10000
+        filter: { date_geq: $start }
+      ) {
+        sum { requests errors }
+        quantiles { cpuTimeP50 }
+        dimensions { date }
+      }
+    }
+  }
+}`;
+
+async function fetchWorkers(): Promise<WorkersMetrics> {
+	const start = new Date(Date.now() - 7 * DAY).toISOString().slice(0, 10);
+	const acct = creds()?.account ?? '';
+
+	const gql = await cfGraphql<{
+		pagesFunctionsInvocationsAdaptiveGroups: {
+			sum: { requests: number; errors: number };
+			quantiles: { cpuTimeP50: number };
+			dimensions: { date: string };
+		}[];
+	}>(WORKERS_QUERY, { acct, start });
+
+	if (!gql) return { last7d: null };
+
+	let requests = 0;
+	let errors = 0;
+	let cpuUs = 0; // 마이크로초 누적.
+	for (const g of gql.pagesFunctionsInvocationsAdaptiveGroups ?? []) {
+		const r = g.sum.requests ?? 0;
+		requests += r;
+		errors += g.sum.errors ?? 0;
+		cpuUs += r * (g.quantiles?.cpuTimeP50 ?? 0); // 요청수 × 그날 중앙 CPU(µs).
+	}
+	return { last7d: { requests, errors, cpuMsEst: cpuUs / 1000 } };
+}
+
 // ── Pages ────────────────────────────────────────────────────────────────────
 
 export interface PagesDeployment {
@@ -263,21 +321,28 @@ async function fetchPages(): Promise<PagesDeployment[] | null> {
 export interface InfraMetrics {
 	/** 토큰/계정 미설정 시 true — 페이지에 안내만 표시. */
 	configured: boolean;
+	workers: WorkersMetrics;
 	d1: D1Metrics;
 	r2: R2Metrics;
 	pages: PagesDeployment[] | null;
 }
 
-/** 인프라 탭 전체 지표(D1·R2·Pages)를 병렬로 조회. */
+/** 인프라 탭 전체 지표(Workers·D1·R2·Pages)를 병렬로 조회. */
 export async function fetchInfraMetrics(): Promise<InfraMetrics> {
 	if (!creds()) {
 		return {
 			configured: false,
+			workers: { last7d: null },
 			d1: { sizeBytes: null, tableCount: null, last7d: null },
 			r2: { storage: null, ops: null, classA: 0, classB: 0 },
 			pages: null
 		};
 	}
-	const [d1, r2, pages] = await Promise.all([fetchD1(), fetchR2(), fetchPages()]);
-	return { configured: true, d1, r2, pages };
+	const [workers, d1, r2, pages] = await Promise.all([
+		fetchWorkers(),
+		fetchD1(),
+		fetchR2(),
+		fetchPages()
+	]);
+	return { configured: true, workers, d1, r2, pages };
 }

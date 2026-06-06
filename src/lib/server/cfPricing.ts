@@ -22,6 +22,12 @@ const MILLION = 1e6;
 const BASE_FEE = 5;
 
 const PRICING = {
+	workers: {
+		requestsFree: 10_000_000, // 1,000만 req/월(기본료 포함)
+		requestsRatePerMillion: 0.3,
+		cpuMsFree: 30_000_000, // 3,000만 CPU-ms/월(기본료 포함)
+		cpuMsRatePerMillion: 0.02
+	},
 	d1: {
 		storageFreeGb: 5,
 		storageRatePerGb: 0.75, // GB-month 초과분
@@ -44,7 +50,7 @@ export interface BillItem {
 	name: string;
 	/** 추정 월 사용량(unit 기준). 지표 없으면 null. */
 	monthly: number | null;
-	unit: 'gb' | 'count';
+	unit: 'gb' | 'count' | 'ms';
 	/** 무료 허용량(unit 기준). */
 	free: number;
 	/** 추정 월 비용(USD). */
@@ -87,6 +93,36 @@ export function estimateBilling(infra: InfraMetrics): BillingEstimate {
 	}
 
 	const p = PRICING;
+
+	// ── Workers / Pages Functions ──
+	const w = infra.workers.last7d;
+	const reqMonthly = w ? w.requests * TO_MONTH : null;
+	const cpuMonthly = w ? w.cpuMsEst * TO_MONTH : null;
+	const wReqCost = reqMonthly != null ? meteredCost(reqMonthly, p.workers.requestsFree, p.workers.requestsRatePerMillion) : 0;
+	const wCpuCost = cpuMonthly != null ? meteredCost(cpuMonthly, p.workers.cpuMsFree, p.workers.cpuMsRatePerMillion) : 0;
+
+	const workersItems: BillItem[] = [
+		{ name: '기본료', monthly: null, unit: 'count', free: 0, cost: BASE_FEE, available: true, projected: false },
+		{
+			name: '요청',
+			monthly: reqMonthly,
+			unit: 'count',
+			free: p.workers.requestsFree,
+			cost: wReqCost,
+			available: reqMonthly != null,
+			projected: true
+		},
+		{
+			name: 'CPU 시간',
+			monthly: cpuMonthly,
+			unit: 'ms',
+			free: p.workers.cpuMsFree,
+			cost: wCpuCost,
+			available: cpuMonthly != null,
+			projected: true
+		}
+	];
+	const workersSubtotal = BASE_FEE + wReqCost + wCpuCost;
 
 	// ── D1 ──
 	const d1 = infra.d1;
@@ -171,21 +207,14 @@ export function estimateBilling(infra: InfraMetrics): BillingEstimate {
 	const r2Subtotal = r2StorageCost + r2ACost + r2BCost;
 
 	const services: BillService[] = [
-		{
-			key: 'workers',
-			label: 'Workers 유료 플랜',
-			subtotal: BASE_FEE,
-			items: [
-				{ name: '기본료', monthly: null, unit: 'count', free: 0, cost: BASE_FEE, available: true, projected: false }
-			]
-		},
+		{ key: 'workers', label: 'Workers 유료 플랜', subtotal: workersSubtotal, items: workersItems },
 		{ key: 'd1', label: 'D1', subtotal: d1Subtotal, items: d1Items },
 		{ key: 'r2', label: 'R2', subtotal: r2Subtotal, items: r2Items }
 	];
 
 	return {
 		available: true,
-		monthlyTotal: BASE_FEE + d1Subtotal + r2Subtotal,
+		monthlyTotal: workersSubtotal + d1Subtotal + r2Subtotal,
 		baseFee: BASE_FEE,
 		services
 	};
