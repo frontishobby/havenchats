@@ -360,12 +360,14 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 					}
 				}
 			} else {
-				// assistant 영속(비동기)이 아직이면 이미지가 먼저 append 돼 seq 가 역전된다(새로고침 시
-				// 유저→이미지→응답 순서로 뒤바뀜). 그 assistant 행이 박힐 때까지 잠깐 기다린 뒤 append →
-				// 항상 응답 다음 seq 를 받는다. 한도 내에 안 박히면(에러 등) 그냥 진행한다.
+				// assistant 영속(비동기 onFinish/waitUntil)이 아직이면 이미지가 먼저 append 돼 seq 가
+				// 역전된다(새로고침 시 유저→이미지→응답 순서로 뒤바뀜). 특히 '빠른 생성 우선'은 응답 중간
+				// (600자)에 발사하므로, 긴 응답이 계속 스트리밍되는 동안 NovelAI(빠르면 ~7s)가 먼저 끝나
+				// 이미지가 앞설 수 있다. 그 assistant 행이 박힐 때까지 기다린 뒤 append → 항상 응답 다음 seq.
+				// 한도(~30s, 긴 응답 스트리밍 시간 커버)를 넘기면(응답 에러로 영속이 스킵된 경우 등) 그냥 진행.
 				if (assistantMsgId) {
-					for (let i = 0; i < 20 && !(await messageExists(db, assistantMsgId, sid)); i++) {
-						await new Promise((r) => setTimeout(r, 150));
+					for (let i = 0; i < 120 && !(await messageExists(db, assistantMsgId, sid)); i++) {
+						await new Promise((r) => setTimeout(r, 250));
 					}
 				}
 				await appendMessage(db, sid, 'image_generation', key, undefined, undefined, cost, keyId);
