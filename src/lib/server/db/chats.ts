@@ -223,6 +223,19 @@ export async function getOwnedMessage(
 	return row ?? null;
 }
 
+/** 메시지 행 존재 여부(세션 한정). 이미지 영속 전 assistant 행이 먼저 박혔는지 확인용. */
+export async function messageExists(
+	db: D1Database,
+	messageId: string,
+	sessionId: string
+): Promise<boolean> {
+	const row = await db
+		.prepare('SELECT 1 AS x FROM chat_messages WHERE id = ? AND session_id = ?')
+		.bind(messageId, sessionId)
+		.first<{ x: number }>();
+	return !!row;
+}
+
 /** 메시지 content/cost 제자리 갱신(seq·순서 보존). 이미지 재생성 시 같은 행을 덮어쓴다. */
 export async function updateMessageContentCost(
 	db: D1Database,

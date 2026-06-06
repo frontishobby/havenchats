@@ -6,6 +6,7 @@ import {
 	getSession,
 	appendMessage,
 	getOwnedMessage,
+	messageExists,
 	updateMessageContentCost
 } from '$lib/server/db/chats';
 import { findCharacter } from '$lib/server/characters';
@@ -73,6 +74,12 @@ interface ImageRequestBody {
 	sessionId?: string;
 	/** 방금 완료된 assistant 응답 본문(상황 프롬프트 입력). */
 	assistantText?: string;
+	/**
+	 * 이 이미지를 만든 assistant 메시지 행 id. 채팅의 assistant 영속(onFinish/waitUntil)은
+	 * 비동기라, '빠른 생성 우선'이면 이미지가 먼저 append 돼 seq 가 역전될 수 있다 →
+	 * append 직전 이 행이 박힐 때까지 기다려 항상 assistant 다음 seq 를 받게 한다.
+	 */
+	assistantMsgId?: string;
 	resolution?: string;
 	/** 항상 적용할 그림체 프롬프트(없으면 기본값). */
 	stylePrompt?: string;
@@ -170,6 +177,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	const assistantText = (body?.assistantText ?? '').trim().slice(0, MAX_ASSISTANT_CHARS);
 	if (!assistantText) return json({ error: 'empty assistant text' }, { status: 400 });
+	const assistantMsgId = typeof body?.assistantMsgId === 'string' ? body.assistantMsgId : '';
 
 	const resolution: ResolutionKey = isResolutionKey(body?.resolution)
 		? body.resolution
@@ -352,6 +360,14 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 					}
 				}
 			} else {
+				// assistant 영속(비동기)이 아직이면 이미지가 먼저 append 돼 seq 가 역전된다(새로고침 시
+				// 유저→이미지→응답 순서로 뒤바뀜). 그 assistant 행이 박힐 때까지 잠깐 기다린 뒤 append →
+				// 항상 응답 다음 seq 를 받는다. 한도 내에 안 박히면(에러 등) 그냥 진행한다.
+				if (assistantMsgId) {
+					for (let i = 0; i < 20 && !(await messageExists(db, assistantMsgId, sid)); i++) {
+						await new Promise((r) => setTimeout(r, 150));
+					}
+				}
 				await appendMessage(db, sid, 'image_generation', key, undefined, undefined, cost, keyId);
 			}
 			// done.id = 클라가 매칭할 메시지 행 id (재생성이면 기존 행, 신규면 키 id 와 동일).

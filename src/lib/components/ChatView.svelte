@@ -515,8 +515,9 @@
 		text: string;
 		msgId: string;
 		replaceId?: string;
+		assistantMsgId?: string;
 	}) {
-		const { sid, text, replaceId } = opts;
+		const { sid, text, replaceId, assistantMsgId } = opts;
 		let currentId = opts.msgId; // 신규 생성은 done 에서 서버 id 로 교체됨
 		const at = () => messages.findIndex((x) => x.id === currentId);
 		let lastPreview: string | null = null;
@@ -542,6 +543,7 @@
 					stylePrompt: selectedStylePrompt,
 					promptModel: imagePromptModel,
 					replaceId: replaceId || undefined,
+					assistantMsgId: assistantMsgId || undefined,
 					debug: debug || undefined
 				})
 			});
@@ -646,7 +648,7 @@
 	 * 방금 완료된 assistant 응답을 바탕으로 NovelAI 장면 이미지를 생성해 메시지로 추가한다.
 	 * 매 assistant 턴 직후(send 의 finally) 호출. 세션이 확정된 상태에서만 동작.
 	 */
-	async function generateSceneImage(assistantText: string) {
+	async function generateSceneImage(assistantText: string, assistantMsgId?: string) {
 		const sid = sessionId;
 		const text = assistantText.trim();
 		if (!sid || !imageEnabled || !text) return;
@@ -654,7 +656,7 @@
 		// 생성 중 플레이스홀더(프록시로 감싸지므로 messages[idx] 로 수정).
 		const tempId = crypto.randomUUID();
 		messages.push({ id: tempId, role: 'image_generation', content: '', pending: true });
-		await runSceneImage({ sid, text, msgId: tempId });
+		await runSceneImage({ sid, text, msgId: tempId, assistantMsgId });
 	}
 
 	/** 재생성 중인 이미지 메시지 id(버튼 비활성·스피너 표시용). */
@@ -956,7 +958,7 @@
 					messages[idx].content.length >= IMG_EARLY_TRIGGER_CHARS
 				) {
 					imageFired = true;
-					generateSceneImage(messages[idx].content);
+					generateSceneImage(messages[idx].content, assistantMsgId);
 				}
 			}
 			raw += decoder.decode(); // 멀티바이트 잔여 flush
@@ -997,7 +999,7 @@
 			// 새 세션·최신 미리보기가 새로고침 없이 사이드바에 반영되도록 목록만 무효화.
 			invalidate('app:recentChats');
 			// 텍스트 응답 완료 후 이미지 생성(비동기 — 스트리밍 종료를 막지 않음).
-			if (imageAfter) generateSceneImage(imageText);
+			if (imageAfter) generateSceneImage(imageText, assistantMsgId);
 		}
 	}
 
