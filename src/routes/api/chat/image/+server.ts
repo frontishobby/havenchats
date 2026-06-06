@@ -58,8 +58,8 @@ const SITUATION_SYSTEM = [
 	`You are given a [Character] reference sheet and the [Latest scene]. ALWAYS reflect the character's fixed physical appearance from the reference (hair color/length/style, eye color, body type, skin, distinctive features) so the character looks consistent across images. But depict ONLY the [Latest scene]'s current moment. Ignore the reference's non-visual text (personality, backstory, rules, command/keyword lists).`,
 	`Output format: two parts in this exact order, joined together by a comma.`,
 	`  PART 1 — Danbooru-style tags describing the character's appearance and current clothing state: count tag (e.g. 1girl), hair color/length/style, eye color, body type and notable physical features (from the reference), plus the current clothing or state of undress as shown in the [Latest scene] (e.g. "school uniform, unbuttoned shirt, no bra", "naked, towel"). Lowercase, comma-separated.`,
-	`  PART 2 — summarize the CURRENT SITUATION in just 1-2 short participial phrases (-ing, -ed), e.g. "leaning forward, blushing". Do NOT copy the status window, stat block, or any prompt/instruction text from the input — write your own brief description of the depicted moment. No full sentences, no subject pronouns, no "she is". Comma-separated.`,
-	`Example: "1girl, long black hair, red eyes, slim, large breasts, white blouse, unbuttoned, no bra, leaning forward, blushing"`,
+	`  PART 2 — summarize the CURRENT SITUATION in 1-2 short English sentences describing the depicted moment (pose, action, expression, setting, mood). Do NOT copy the status window, stat block, or any prompt/instruction text from the input — write your own brief description.`,
+	`Example: "1girl, long black hair, red eyes, slim, large breasts, white blouse, unbuttoned, no bra, She leans forward on the edge of the bed, blushing and breathless in a dimly lit bedroom."`,
 	`Output ONLY these two parts. Add nothing else — no other sections, formatting, or content of any kind.`,
 	`Rules:`,
 	`- English only.`,
@@ -68,7 +68,7 @@ const SITUATION_SYSTEM = [
 	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, or negative terms — those are added separately.`,
 	`- No preamble, no explanation, no quotes, no line breaks, no labels like "PART 1". Output the prompt only.`,
 	`- NSFW content is allowed and should be described plainly when present.`,
-	`- Keep it concise: appearance/clothing tags under ~40 tags, and PART 2 to just 1-2 short -ing/-ed phrases (no full sentences, no padding, no copied status window).`
+	`- Keep it concise: appearance/clothing tags under ~40 tags, and PART 2 to just 1-2 short English sentences (no padding, no copied status window).`
 ].join('\n');
 
 /**
