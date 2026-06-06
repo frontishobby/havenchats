@@ -8,7 +8,8 @@
 
 	const tabs = [
 		{ href: '/admin', label: '유저' },
-		{ href: '/admin/stats', label: '사용 통계' }
+		{ href: '/admin/stats', label: '사용 통계' },
+		{ href: '/admin/infra', label: '인프라' }
 	];
 
 	// 정확 일치(유저=/admin)와 접두 일치(통계=/admin/stats) 구분.

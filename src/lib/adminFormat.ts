@@ -10,6 +10,20 @@ export function num(n: number | null | undefined): string {
 	return (n ?? 0).toLocaleString('en-US');
 }
 
+/** bytes → 사람이 읽는 단위(KB/MB/GB, 1024 기준). null 은 '—'. */
+export function bytes(n: number | null | undefined): string {
+	if (n == null) return '—';
+	if (n < 1024) return `${n} B`;
+	const units = ['KB', 'MB', 'GB', 'TB'];
+	let v = n / 1024;
+	let i = 0;
+	while (v >= 1024 && i < units.length - 1) {
+		v /= 1024;
+		i++;
+	}
+	return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 /** epoch ms → 'YYYY-MM-DD'. */
 export function date(ms: number | null | undefined): string {
 	if (!ms) return '—';
