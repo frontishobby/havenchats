@@ -119,9 +119,14 @@
 						{#if c.contentRating === 'nsfw'}<span class="badge nsfw">NSFW</span>{/if}
 						{#if c.imported}<span class="badge imp">charx</span>{/if}
 						<span class="char-meta">💬 {num(c.chats)} · {dateTime(c.createdAt)}</span>
-						<button class="read-btn" type="button" onclick={() => toggle(c.id)}>
-							{openIds.has(c.id) ? '프롬프트 접기' : '프롬프트 보기'}
-						</button>
+						<div class="char-actions">
+							<button class="read-btn" type="button" onclick={() => toggle(c.id)}>
+								{openIds.has(c.id) ? '프롬프트 접기' : '프롬프트 보기'}
+							</button>
+							<a class="read-btn asset" href={`/characters/${c.id}/assets`} target="_blank" rel="noopener">
+								에셋 보기 ↗
+							</a>
+						</div>
 					</div>
 					{#if c.tagline}<p class="char-tagline">{c.tagline}</p>{/if}
 
@@ -380,8 +385,14 @@
 		color: var(--text-faint);
 		margin-left: 2px;
 	}
-	.read-btn {
+	.char-actions {
 		margin-left: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 5px;
+		flex-shrink: 0;
+	}
+	.read-btn {
 		padding: 4px 12px;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-sm);
@@ -389,10 +400,19 @@
 		color: var(--accent);
 		font-size: 0.78rem;
 		font-weight: 600;
+		text-align: center;
+		white-space: nowrap;
 		transition: background 0.15s ease;
 	}
 	.read-btn:hover {
 		background: var(--accent-soft);
+	}
+	.read-btn.asset {
+		color: var(--text-dim);
+	}
+	.read-btn.asset:hover {
+		background: var(--bg-elev);
+		color: var(--text);
 	}
 	.char-tagline {
 		margin: 6px 0 0;

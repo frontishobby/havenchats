@@ -1,6 +1,7 @@
 import { error, redirect } from '@sveltejs/kit';
 import { findCharacter } from '$lib/server/characters';
 import { getCharacterOwnership } from '$lib/server/db/characters';
+import { isAdmin } from '$lib/server/auth';
 import type { PageServerLoad } from './$types';
 
 /**
@@ -18,8 +19,8 @@ export const load: PageServerLoad = async ({ params, locals, platform, depends }
 		throw error(404, '캐릭터를 찾을 수 없어요.');
 	}
 
-	// 비공개 캐릭터는 제작자 본인만 접근 가능.
-	if (character.visibility === 'private') {
+	// 비공개 캐릭터는 제작자 본인만 접근 가능. (관리자는 공개/비공개 무관 접근 — 어드민 미리보기용)
+	if (character.visibility === 'private' && !isAdmin(locals.user?.email)) {
 		const owner = db ? await getCharacterOwnership(db, params.id) : null;
 		if (owner && owner.creatorId !== locals.user?.id) {
 			throw error(404, '캐릭터를 찾을 수 없어요.');

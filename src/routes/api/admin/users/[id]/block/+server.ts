@@ -1,5 +1,5 @@
 import { json, error } from '@sveltejs/kit';
-import { isAdmin } from '$lib/server/auth';
+import { requireAdmin } from '$lib/server/auth';
 import { setBlockedReason } from '$lib/server/db/users';
 import type { RequestHandler } from './$types';
 
@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  * 비관리자/비로그인은 404(존재 은폐). 관리자 자기 자신은 차단 불가(자물쇠 방지).
  */
 export const POST: RequestHandler = async ({ params, locals, platform, request }) => {
-	if (!isAdmin(locals.user?.email)) error(404, 'Not Found');
+	requireAdmin(locals.user?.email);
 
 	const db = platform?.env?.DB;
 	if (!db) error(500, '저장소를 사용할 수 없어요.');

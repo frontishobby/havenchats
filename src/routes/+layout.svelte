@@ -7,6 +7,7 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { loginModal } from '$lib/state/loginModal.svelte';
 	import { profileModal } from '$lib/state/profileModal.svelte';
+	import { isAdmin } from '$lib/admin';
 	import type { LayoutData } from './$types';
 	let { children, data }: { children: import('svelte').Snippet; data: LayoutData } = $props();
 
@@ -29,10 +30,8 @@
 	// 좌측 사이드바(최근 채팅)
 	let sidebarOpen = $state(false);
 
-	// 관리자 여부(메뉴에 /admin 노출용). 서버 auth 모듈을 클라에 import하지 않고 이메일만 비교.
-	const isAdminUser = $derived(
-		data.user?.email?.trim().toLowerCase() === 'owner@example.com'
-	);
+	// 관리자 여부(메뉴에 /admin 노출용). 공용 isAdmin(클라/서버 공유)로 판별 — 하드코딩 제거.
+	const isAdminUser = $derived(isAdmin(data.user?.email));
 
 	// 우상단 유저 메뉴(드롭다운)
 	let menuOpen = $state(false);

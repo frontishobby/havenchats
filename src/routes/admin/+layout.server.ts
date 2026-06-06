@@ -1,7 +1,6 @@
-import { error } from '@sveltejs/kit';
 import { createGateway } from '@ai-sdk/gateway';
 import { env } from '$env/dynamic/private';
-import { isAdmin } from '$lib/server/auth';
+import { requireAdmin } from '$lib/server/auth';
 import type { LayoutServerLoad } from './$types';
 
 /** Vercel AI Gateway 크레딧 잔량(USD). 키 없음·조회 실패 시 null(헤더에 미표시). */
@@ -21,8 +20,6 @@ async function fetchCredits(): Promise<{ balance: number; totalUsed: number } | 
  * 모두 404 로 처리(존재 자체를 숨김). 하위 모든 라우트가 이 게이트를 상속한다.
  */
 export const load: LayoutServerLoad = async ({ locals }) => {
-	if (!isAdmin(locals.user?.email)) {
-		error(404, 'Not Found');
-	}
+	requireAdmin(locals.user?.email);
 	return { user: locals.user, credits: await fetchCredits() };
 };

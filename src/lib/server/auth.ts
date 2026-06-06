@@ -1,5 +1,10 @@
 import { Google } from 'arctic';
+import { error } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { ADMIN_EMAIL, isAdmin } from '$lib/admin';
+
+// 관리자 판별은 클라/서버 공용 모듈에 정의. 서버 코드는 기존처럼 '$lib/server/auth' 에서 가져다 쓴다.
+export { ADMIN_EMAIL, isAdmin };
 
 export const SESSION_COOKIE = 'haven_session';
 export const STATE_COOKIE = 'google_oauth_state';
@@ -20,7 +25,7 @@ export interface SessionIdentity {
  * 빈 문자열로 두면 전체 허용(=화이트리스트 해제).
  */
 export function isEmailAllowed(email: string): boolean {
-	const raw = env.ALLOWED_EMAILS ?? 'owner@example.com';
+	const raw = env.ALLOWED_EMAILS ?? ADMIN_EMAIL;
 	const list = raw
 		.split(',')
 		.map((s) => s.trim().toLowerCase())
@@ -29,12 +34,12 @@ export function isEmailAllowed(email: string): boolean {
 	return list.includes(email.trim().toLowerCase());
 }
 
-/** 관리자 이메일. import 캐릭터 프롬프트 편집 등 일부 제한을 우회한다. */
-export const ADMIN_EMAIL = 'owner@example.com';
-
-/** 관리자 여부. (대소문자·공백 무시) */
-export function isAdmin(email: string | null | undefined): boolean {
-	return !!email && email.trim().toLowerCase() === ADMIN_EMAIL;
+/**
+ * 관리자 게이트 — 비관리자면 404 throw(존재 은폐).
+ * layout 게이트를 상속받지 못하는 /api 라우트 등에서 한 줄로 막을 때 사용.
+ */
+export function requireAdmin(email: string | null | undefined): void {
+	if (!isAdmin(email)) error(404, 'Not Found');
 }
 
 /** 요청 origin 기준으로 Google OAuth 클라이언트 생성. (GOOGLE_REDIRECT_URI 로 override 가능) */
