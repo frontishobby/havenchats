@@ -206,6 +206,36 @@ export async function deleteMessage(
 	return true;
 }
 
+/** 소유자 검증 후 메시지 1건 조회(없거나 남의 것이면 null). 이미지 재생성 등 in-place 갱신용. */
+export async function getOwnedMessage(
+	db: D1Database,
+	messageId: string,
+	userId: string
+): Promise<{ id: string; sessionId: string; role: Role; content: string } | null> {
+	const row = await db
+		.prepare(
+			`SELECT m.id, m.session_id AS sessionId, m.role, m.content FROM chat_messages m
+			 JOIN chat_sessions s ON s.id = m.session_id
+			 WHERE m.id = ? AND s.user_id = ?`
+		)
+		.bind(messageId, userId)
+		.first<{ id: string; sessionId: string; role: Role; content: string }>();
+	return row ?? null;
+}
+
+/** 메시지 content/cost 제자리 갱신(seq·순서 보존). 이미지 재생성 시 같은 행을 덮어쓴다. */
+export async function updateMessageContentCost(
+	db: D1Database,
+	messageId: string,
+	content: string,
+	cost?: number
+): Promise<void> {
+	await db
+		.prepare('UPDATE chat_messages SET content = ?, token_est = ?, cost = ? WHERE id = ?')
+		.bind(content, estimateTokens(content), cost ?? null, messageId)
+		.run();
+}
+
 interface MessageRow {
 	id: string;
 	seq: number;

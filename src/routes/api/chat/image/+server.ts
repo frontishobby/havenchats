@@ -2,7 +2,12 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { generateText } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
-import { getSession, appendMessage } from '$lib/server/db/chats';
+import {
+	getSession,
+	appendMessage,
+	getOwnedMessage,
+	updateMessageContentCost
+} from '$lib/server/db/chats';
 import { findCharacter } from '$lib/server/characters';
 import { getCharacterPrompt } from '$lib/server/db/characters';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
@@ -70,6 +75,8 @@ interface ImageRequestBody {
 	stylePrompt?: string;
 	/** 상황 프롬프트를 생성할 LLM 모델 id(허용목록 검증). 없으면 기본 모델. */
 	promptModel?: string;
+	/** 재생성: 이 image_generation 메시지를 제자리(같은 행/순서)에서 덮어쓴다. */
+	replaceId?: string;
 	/** 디버그 모드: 응답에 사용한 프롬프트/파라미터를 동봉. */
 	debug?: boolean;
 }
@@ -132,6 +139,19 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	const session = await getSession(db, sessionId, locals.user.id);
 	if (!session) return json({ error: 'session not found' }, { status: 404 });
+
+	// 재생성 대상(있으면): 소유·세션·역할 검증. 통과 시 같은 행/R2 키를 덮어쓴다.
+	let replaceMsgId: string | null = null;
+	let oldImageKey: string | null = null;
+	const replaceId = typeof body?.replaceId === 'string' ? body.replaceId : '';
+	if (replaceId) {
+		const target = await getOwnedMessage(db, replaceId, locals.user.id);
+		if (!target || target.sessionId !== sessionId || target.role !== 'image_generation') {
+			return json({ error: 'message not found' }, { status: 404 });
+		}
+		replaceMsgId = target.id;
+		oldImageKey = target.content || null;
+	}
 
 	// 캐릭터가 NSFW 면 positive 프롬프트 맨 앞에 rating:nsfw 를 붙인다(서버에서 판별 — 클라 위조 방지).
 	const character = await findCharacter(db, session.characterId);
@@ -306,7 +326,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			}
 
 			// 2-3) R2 저장 + 메시지 영속.
-			const msgId = crypto.randomUUID();
+			// 재생성이면 같은 msgId 로 키를 만들어 같은 행을 덮어쓴다(순서 유지). 신규면 새 msgId.
+			const msgId = replaceMsgId ?? crypto.randomUUID();
 			const key = `chatimg/${sid}/${msgId}.${image.ext}`;
 			try {
 				await bucket.put(key, image.bytes, { httpMetadata: { contentType: image.contentType } });
@@ -316,7 +337,19 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 				controller.close();
 				return;
 			}
-			await appendMessage(db, sid, 'image_generation', key, undefined, undefined, cost, msgId);
+			if (replaceMsgId) {
+				await updateMessageContentCost(db, replaceMsgId, key, cost);
+				// 확장자가 바뀌어 키가 달라졌으면 이전 오브젝트 정리(orphan 방지).
+				if (oldImageKey && oldImageKey !== key) {
+					try {
+						await bucket.delete(oldImageKey);
+					} catch {
+						/* 무시 — 정리 실패는 무해 */
+					}
+				}
+			} else {
+				await appendMessage(db, sid, 'image_generation', key, undefined, undefined, cost, msgId);
+			}
 			controller.enqueue(line({ t: 'done', id: msgId, key, cost: cost ?? null, debug: makeDebug(positive) }));
 			controller.close();
 		}

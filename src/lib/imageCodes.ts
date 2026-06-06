@@ -212,6 +212,23 @@ const POSITIONAL_GLOBAL = /\{([A-Z]{1,8})\}/g;
 // 이미지 토큰: <img="name"> (속성 사이 공백·self-closing 허용). name 캡처.
 const IMG_LINE = /^<img\s*=\s*"([^"]+)"\s*\/?>$/i;
 const IMG_GLOBAL = /<img\s*=\s*"([^"]+)"\s*\/?>/gi;
+// 고정 토큰(본문 내, 전역).
+const PINNED_GLOBAL = /\{#[A-Za-z0-9_-]+\}/g;
+
+/**
+ * 본문 내 장면 토큰을 제거한다 — 한 줄 단독이 아니라 문장 안에 박힌 토큰
+ * ({#id}/{ABC}/`<img="name">`)이 산문으로 그대로 노출되는 것 방지.
+ * (pinSceneCodes 가 전역 치환이라 인라인 토큰도 {#id} 로 굳어질 수 있음.)
+ * 토큰만 지우고 주변 공백은 정리한다.
+ */
+export function stripSceneTokens(line: string): string {
+	return line
+		.replace(PINNED_GLOBAL, '')
+		.replace(POSITIONAL_GLOBAL, '')
+		.replace(IMG_GLOBAL, '')
+		.replace(/[ \t]{2,}/g, ' ')
+		.trim();
+}
 
 /**
  * 메시지 저장 직전: 본문의 가변 토큰을 불변 토큰 {#<id>} 로 굳힌다.

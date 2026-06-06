@@ -6,7 +6,14 @@
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { base64ToBlob } from '$lib/imagePreview';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
-	import { resolveSceneLine, looksLikeSceneToken, isLocalSet, isGrid, isNamed } from '$lib/imageCodes';
+	import {
+		resolveSceneLine,
+		looksLikeSceneToken,
+		stripSceneTokens,
+		isLocalSet,
+		isGrid,
+		isNamed
+	} from '$lib/imageCodes';
 	import { localSceneURL, getLocalSceneBlob, localSceneKey } from '$lib/import/localImages';
 	import { compileScripts, makeAssetResolver, evalDisplayLine } from '$lib/import/displayScripts';
 	import { renderCardHtml } from '$lib/htmlRender';
@@ -496,30 +503,31 @@
 	}
 
 	/**
-	 * 방금 완료된 assistant 응답을 바탕으로 NovelAI 장면 이미지를 생성해 메시지로 추가한다.
-	 * 매 assistant 턴 직후(send 의 finally) 호출. 세션이 확정된 상태에서만 동작.
+	 * NovelAI 장면 이미지 생성 코어. NDJSON 스트림(중간 프리뷰→done/error)을 받아 대상
+	 * image_generation 메시지를 갱신한다. replaceId 가 있으면 서버가 같은 행/R2 키를 덮어쓴다.
+	 * 대상 메시지는 id 로 매번 동적 조회($state 프록시로 수정해야 반응성 유지).
 	 */
-	async function generateSceneImage(assistantText: string) {
-		const sid = sessionId;
-		const text = assistantText.trim();
-		if (!sid || !imageEnabled || !text) return;
-
-		// 생성 중 플레이스홀더(프록시로 감싸지므로 messages[idx] 로 수정).
-		const tempId = crypto.randomUUID();
-		messages.push({ id: tempId, role: 'image_generation', content: '', pending: true });
-		const idx = messages.length - 1;
+	async function runSceneImage(opts: {
+		sid: string;
+		text: string;
+		msgId: string;
+		replaceId?: string;
+	}) {
+		const { sid, text, replaceId } = opts;
+		let currentId = opts.msgId; // 신규 생성은 done 에서 서버 id 로 교체됨
+		const at = () => messages.findIndex((x) => x.id === currentId);
 		let lastPreview: string | null = null;
 		const setPreview = (b64: string) => {
 			try {
 				const url = URL.createObjectURL(base64ToBlob(b64));
 				if (lastPreview) URL.revokeObjectURL(lastPreview);
 				lastPreview = url;
-				messages[idx].previewUrl = url;
+				const i = at();
+				if (i >= 0) messages[i].previewUrl = url;
 			} catch {
 				/* 무시 — 프리뷰 디코드 실패는 무해 */
 			}
 		};
-		await scrollToBottom();
 		try {
 			const res = await fetch('/api/chat/image', {
 				method: 'POST',
@@ -530,6 +538,7 @@
 					resolution: imageResolution,
 					stylePrompt: selectedStylePrompt,
 					promptModel: imagePromptModel,
+					replaceId: replaceId || undefined,
 					debug: debug || undefined
 				})
 			});
@@ -543,8 +552,11 @@
 					debug?: ImageDebug;
 				};
 				if (debug && d.debug) imageDebug = d.debug;
-				messages[idx].pending = false;
-				messages[idx].errorReason = d.message ?? '이미지 생성에 실패했습니다.';
+				const i = at();
+				if (i >= 0) {
+					messages[i].pending = false;
+					messages[i].errorReason = d.message ?? '이미지 생성에 실패했습니다.';
+				}
 				if (d.error === 'no_key') naiKeyRegistered = false;
 				return;
 			}
@@ -553,21 +565,30 @@
 			const handle = (obj: Record<string, unknown>) => {
 				if (obj.t === 'frame' && typeof obj.img === 'string') {
 					setPreview(obj.img);
-					scrollToBottom();
 				} else if (obj.t === 'done') {
-					messages[idx].content = String(obj.key ?? '');
-					if (obj.id) messages[idx].id = String(obj.id);
-					if (obj.cost != null) messages[idx].cost = Number(obj.cost);
-					messages[idx].previewUrl = undefined;
-					messages[idx].pending = false;
+					const i = at();
+					if (i >= 0) {
+						messages[i].content = String(obj.key ?? '');
+						if (obj.id) {
+							messages[i].id = String(obj.id);
+							currentId = String(obj.id);
+						}
+						if (obj.cost != null) messages[i].cost = Number(obj.cost);
+						messages[i].previewUrl = undefined;
+						messages[i].pending = false;
+						messages[i].errorReason = undefined; // 재생성 성공 시 이전 에러 사유 제거
+					}
 					if (lastPreview) {
 						URL.revokeObjectURL(lastPreview);
 						lastPreview = null;
 					}
 					if (debug && obj.debug) imageDebug = obj.debug as ImageDebug;
 				} else if (obj.t === 'error') {
-					messages[idx].pending = false;
-					messages[idx].errorReason = (obj.message as string) ?? '이미지 생성에 실패했습니다.';
+					const i = at();
+					if (i >= 0) {
+						messages[i].pending = false;
+						messages[i].errorReason = (obj.message as string) ?? '이미지 생성에 실패했습니다.';
+					}
 					if (debug && obj.debug) imageDebug = obj.debug as ImageDebug;
 					if (obj.error === 'no_key') naiKeyRegistered = false;
 				}
@@ -605,13 +626,65 @@
 			}
 			drain(true);
 		} catch (e) {
-			messages[idx].pending = false;
-			messages[idx].errorReason = e instanceof Error ? e.message : '이미지 생성에 실패했습니다.';
+			const i = at();
+			if (i >= 0) {
+				messages[i].pending = false;
+				messages[i].errorReason = e instanceof Error ? e.message : '이미지 생성에 실패했습니다.';
+			}
 		} finally {
 			// 최종 이미지가 들어왔으면 남은 프리뷰 URL 정리.
-			if (lastPreview && messages[idx]?.content) URL.revokeObjectURL(lastPreview);
-			await scrollToBottom();
+			const i = at();
+			if (lastPreview && i >= 0 && messages[i]?.content) URL.revokeObjectURL(lastPreview);
 			invalidate('app:recentChats');
+		}
+	}
+
+	/**
+	 * 방금 완료된 assistant 응답을 바탕으로 NovelAI 장면 이미지를 생성해 메시지로 추가한다.
+	 * 매 assistant 턴 직후(send 의 finally) 호출. 세션이 확정된 상태에서만 동작.
+	 */
+	async function generateSceneImage(assistantText: string) {
+		const sid = sessionId;
+		const text = assistantText.trim();
+		if (!sid || !imageEnabled || !text) return;
+
+		// 생성 중 플레이스홀더(프록시로 감싸지므로 messages[idx] 로 수정).
+		const tempId = crypto.randomUUID();
+		messages.push({ id: tempId, role: 'image_generation', content: '', pending: true });
+		await scrollToBottom();
+		await runSceneImage({ sid, text, msgId: tempId });
+		await scrollToBottom();
+	}
+
+	/** 재생성 중인 이미지 메시지 id(버튼 비활성·스피너 표시용). */
+	let regenerating = $state<string | null>(null);
+
+	/**
+	 * 기존 생성 이미지를 같은 자리에서 다시 생성한다(🔄 버튼). 직전 assistant 응답을 소스로
+	 * /api/chat/image 에 replaceId 와 함께 보내 같은 행/R2 키를 덮어쓴다(순서·DB 행 유지).
+	 */
+	async function regenerateSceneImage(m: ChatMessage) {
+		if (streaming || regenerating || deleting) return;
+		const sid = sessionId;
+		if (!sid) return;
+		const idx = messages.findIndex((x) => x.id === m.id);
+		if (idx < 0) return;
+		// 이 이미지를 만든 소스 = 바로 앞의 assistant 메시지 본문.
+		let srcText = '';
+		for (let i = idx - 1; i >= 0; i--) {
+			if (messages[i].role === 'assistant' && messages[i].content.trim()) {
+				srcText = messages[i].content.trim();
+				break;
+			}
+		}
+		if (!srcText) return;
+		regenerating = m.id;
+		messages[idx].pending = true;
+		messages[idx].errorReason = undefined;
+		try {
+			await runSceneImage({ sid, text: srcText, msgId: m.id, replaceId: m.id });
+		} finally {
+			regenerating = null;
 		}
 	}
 
@@ -1565,15 +1638,20 @@
 				{:else if looksLikeSceneToken(line)}
 					<!-- 알 수 없거나 스트리밍 중 미완성 토큰 → 숨김(원문 노출 방지) -->
 				{:else}
-					{@const sp = parseSpeaker(line)}
-					<span class="line" class:dialogue={!!sp} class:narration={!sp}>
-						{#if sp}<b class="speaker">{sp.speaker}</b>{' '}{/if}
-						<!-- 유저 입력은 친 그대로(정자체) 두고, 명시한 ( )/*..* 만 기울임.
-						     캐릭터 서술은 줄 전체를 소설체(기울임)로. -->
-						{#each sp || isUser ? parseInline(sp ? sp.rest : line) : parseNarration(line) as seg, j (j)}
-							{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
-						{/each}
-					</span>
+					<!-- 산문 줄: 문장 안에 박힌 장면 토큰({#id}/{ABC}/<img>)은 제거(원문 노출 방지).
+					     유저 입력은 친 그대로 둔다. -->
+					{@const clean = isUser ? line : stripSceneTokens(line)}
+					{#if clean}
+						{@const sp = parseSpeaker(clean)}
+						<span class="line" class:dialogue={!!sp} class:narration={!sp}>
+							{#if sp}<b class="speaker">{sp.speaker}</b>{' '}{/if}
+							<!-- 유저 입력은 친 그대로(정자체) 두고, 명시한 ( )/*..* 만 기울임.
+							     캐릭터 서술은 줄 전체를 소설체(기울임)로. -->
+							{#each sp || isUser ? parseInline(sp ? sp.rest : clean) : parseNarration(clean) as seg, j (j)}
+								{#if seg.italic}<em>{seg.text}</em>{:else}{seg.text}{/if}
+							{/each}
+						</span>
+					{/if}
 				{/if}
 			{/if}
 		{/each}
@@ -1590,6 +1668,31 @@
 						{#if !(streaming && m === lastMessage) && !m.pending}
 							{#if (m.role === 'assistant' || m.role === 'image_generation') && m.cost != null && Number.isFinite(m.cost) && m.cost > 0}
 								<span class="msg-cost" title="이 응답 생성 비용(USD)">{formatCost(m.cost)}</span>
+							{/if}
+							{#if m.role === 'image_generation'}
+								<button
+									class="msg-regen"
+									class:spinning={regenerating === m.id}
+									onclick={() => regenerateSceneImage(m)}
+									disabled={!!regenerating || streaming || deleting === m.id}
+									aria-label="이미지 재생성"
+									title="재생성"
+								>
+									<svg
+										viewBox="0 0 24 24"
+										width="14"
+										height="14"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path d="M21 12a9 9 0 1 1-2.64-6.36" />
+										<path d="M21 3v5h-5" />
+									</svg>
+								</button>
 							{/if}
 							<button
 								class="msg-del"
@@ -1661,7 +1764,7 @@
 		{#if sendError}
 			<p class="send-error">{sendError}</p>
 		{/if}
-		<p class="disclaimer">AI가 생성한 이야기이며 실제 인물과 무관합니다.</p>
+		<p class="disclaimer">AI가 생성한 이야기/이미지이며 실제 인물과 무관합니다.</p>
 	</div>
 </div>
 	{#if debug}
@@ -2393,6 +2496,59 @@
 	/* 터치 기기(hover 없음)에선 항상 옅게 노출해 접근 가능하게. */
 	@media (hover: none) {
 		.msg-del {
+			opacity: 0.55;
+		}
+	}
+	/* 이미지 재생성(🔄) 버튼 — 삭제 버튼 좌측. msg-del 과 동일한 노출 규칙. */
+	.msg-regen {
+		position: absolute;
+		bottom: -6px;
+		right: 26px;
+		width: 28px;
+		height: 28px;
+		display: grid;
+		place-items: center;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--bg-card);
+		color: var(--text-dim);
+		line-height: 1;
+		opacity: 0;
+		transition:
+			opacity 0.12s ease,
+			color 0.12s ease,
+			border-color 0.12s ease;
+		z-index: 2;
+	}
+	.para:hover .msg-regen,
+	.msg-regen:focus-visible {
+		opacity: 1;
+	}
+	.msg-regen:hover {
+		color: var(--accent, #8b5cf6);
+		border-color: var(--accent, #8b5cf6);
+	}
+	.msg-regen:disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
+	.msg-regen.spinning {
+		opacity: 1;
+	}
+	.msg-regen.spinning svg {
+		animation: msg-regen-spin 0.8s linear infinite;
+	}
+	@keyframes msg-regen-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	/* 이미지 메시지는 재생성 버튼이 끼므로 비용 표시를 더 왼쪽으로. */
+	.para.image_generation .msg-cost {
+		right: 60px;
+	}
+	@media (hover: none) {
+		.msg-regen {
 			opacity: 0.55;
 		}
 	}
