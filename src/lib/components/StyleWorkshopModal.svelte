@@ -10,7 +10,7 @@
 	const RESOLUTIONS = ['832x1216', '1024x1024'] as const;
 	type Res = (typeof RESOLUTIONS)[number];
 
-	// 화풍(저장될 그림체) · 상황(테스트용)
+	// 그림체(저장될 스타일 프롬프트) · 상황(테스트용)
 	let style = $state('');
 	let situation = $state('');
 	let resolution = $state<Res>('832x1216');
@@ -212,19 +212,19 @@
 				</div>
 			{/if}
 
-			<!-- 1) 화풍 깎기(자유 장면 미리보기) -->
+			<!-- 1) 그림체 깎기(자유 장면 미리보기) -->
 			<div class="body">
 				<div class="preview">
 					{#if previewUrl}
 						<img src={previewUrl} alt="미리보기" />
 					{:else}
-						<div class="ph">화풍·상황을 적고 <b>장면 생성</b>을 눌러보세요</div>
+						<div class="ph">그림체·상황을 적고 <b>장면 생성</b>을 눌러보세요</div>
 					{/if}
 					{#if generating}<div class="overlay">생성 중…</div>{/if}
 				</div>
 
 				<div class="controls">
-					<label class="fl" for="ws-style">화풍 프롬프트</label>
+					<label class="fl" for="ws-style">그림체 프롬프트</label>
 					<textarea id="ws-style" rows="4" bind:value={style} placeholder="예: artist:xxx, watercolor, soft lighting …"></textarea>
 					<label class="fl" for="ws-situ">상황 (테스트용 · 저장 안 됨)</label>
 					<textarea id="ws-situ" rows="2" bind:value={situation} placeholder="예: 1girl, smile, outdoors"></textarea>
@@ -238,7 +238,7 @@
 							{previewUrl ? '다시 생성' : '장면 생성'}
 						</button>
 					</div>
-					<p class="hint">화풍은 모든 이미지에 적용될 스타일 태그예요. 퀄리티·네거티브는 자동 적용됩니다.</p>
+					<p class="hint">그림체는 모든 이미지에 적용될 스타일 태그예요. 퀄리티·네거티브는 자동 적용됩니다.</p>
 				</div>
 			</div>
 

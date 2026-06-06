@@ -348,7 +348,7 @@
 			null
 		);
 	});
-	// 선택된 그림체의 화풍 프롬프트. 기본('')일 때: Hub 최초 공유 그림체(fallback), 그것도 없으면 빈 문자열.
+	// 선택된 그림체의 프롬프트. 기본('')일 때: Hub 최초 공유 그림체(fallback), 그것도 없으면 빈 문자열.
 	const selectedStylePrompt = $derived.by(() => {
 		if (imageStyleId) return selectedStyle?.prompt ?? '';
 		return fallbackStyle?.prompt ?? '';

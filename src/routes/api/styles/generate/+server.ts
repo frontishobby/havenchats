@@ -11,7 +11,7 @@ import {
 
 /**
  * 그림체 워크숍/썸네일 미리보기 생성(로그인 필수, 유저 본인 NovelAI 키·Anlas 사용).
- *  - body { style, situation, resolution? } → 화풍+상황+고정 퀄리티/네거티브로 NovelAI 생성.
+ *  - body { style, situation, resolution? } → 그림체+상황+고정 퀄리티/네거티브로 NovelAI 생성.
  *  - thumbnail=true 면 상황을 고정 표준 장면(THUMBNAIL_SITUATION)·세로 해상도로 강제(일관 썸네일).
  * 응답은 생성 이미지 바이트(image/<ext>). 영속화는 하지 않는다(공유 시 클라가 업로드).
  */

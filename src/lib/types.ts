@@ -205,8 +205,8 @@ export type CharacterImageSet = GridImageSet | NamedImageSet;
  *    이후 LLM 프롬프트(window/요약)에서는 제외된다.
  */
 /**
- * 그림체(아트 스타일) — 유저가 만들어 Hub 에 공유하는 화풍 프롬프트.
- * prompt 는 화풍(아티스트/스타일) 태그. 채팅 이미지 생성 시 자동 상황 프롬프트와 합쳐진다.
+ * 그림체(아트 스타일) — 유저가 만들어 Hub 에 공유하는 그림체 프롬프트.
+ * prompt 는 그림체(아티스트/스타일) 태그. 채팅 이미지 생성 시 자동 상황 프롬프트와 합쳐진다.
  * thumbnailUrl 은 고정 표준 장면으로 생성한 일관 썸네일(servable URL, 없으면 null).
  */
 export interface ArtStyle {
@@ -215,7 +215,7 @@ export interface ArtStyle {
 	creatorName: string | null;
 	title: string;
 	memo: string | null;
-	/** 화풍(스타일) 프롬프트 본문. */
+	/** 그림체(스타일) 프롬프트 본문. */
 	prompt: string;
 	/** 썸네일 servable URL(`/img/<key>?v=updatedAt`). 없으면 null. */
 	thumbnailUrl: string | null;

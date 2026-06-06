@@ -110,7 +110,7 @@
 	<header class="hub-head">
 		<div>
 			<h1>그림체 Hub</h1>
-			<p>공유된 화풍을 즐겨찾기·저장해 채팅 이미지 생성에 사용하세요.</p>
+			<p>공유된 그림체를 즐겨찾기·저장해 채팅 이미지 생성에 사용하세요.</p>
 		</div>
 		<button class="craft-btn" onclick={openWorkshop}>✦ 그림체 깎기</button>
 	</header>
@@ -189,7 +189,7 @@
 					onclick={() => (promptOpen = !promptOpen)}
 					aria-expanded={promptOpen}
 				>
-					<span>화풍 프롬프트</span>
+					<span>그림체 프롬프트</span>
 					<span class="chev" class:open={promptOpen}>›</span>
 				</button>
 				{#if promptOpen}<pre class="prompt">{s.prompt}</pre>{/if}
@@ -423,6 +423,7 @@
 	}
 	.detail-thumb {
 		flex: 0 0 240px;
+		align-self: flex-start;
 		aspect-ratio: 832 / 1216;
 		border-radius: var(--radius-sm);
 		overflow: hidden;

@@ -4,7 +4,7 @@ import { listStyles, createStyle } from '$lib/server/db/styles';
 /**
  * 그림체 Hub 목록(GET) · 공유=생성(POST, multipart).
  *  - GET  : 전체 목록(최신순) + (로그인 시) 즐겨찾기 여부.
- *  - POST : FormData { title, memo?, prompt(화풍), thumbnail(Blob) } → R2 저장 + 행 생성.
+ *  - POST : FormData { title, memo?, prompt(그림체), thumbnail(Blob) } → R2 저장 + 행 생성.
  */
 
 const MAX_TITLE = 60;

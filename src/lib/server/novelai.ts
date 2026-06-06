@@ -69,7 +69,7 @@ export const MODEL = 'nai-diffusion-4-5-full';
 
 /**
  * 그림체 Hub 썸네일용 고정 표준 장면(SFW). 모든 그림체를 같은 장면으로 렌더해 카드 비교가 일관되게.
- * 채팅의 자동 상황 프롬프트 대신 이 값을 상황으로 써서 화풍만 비교되도록 한다.
+ * 채팅의 자동 상황 프롬프트 대신 이 값을 상황으로 써서 그림체만 비교되도록 한다.
  */
 export const THUMBNAIL_SITUATION =
 	'1girl, white_background, black_hair, red_eyes, white_shirt, black_skirt, standing, upper_body, slight_smile, braided_bangs, straight_hair';
@@ -98,7 +98,7 @@ export function isResolutionKey(v: unknown): v is ResolutionKey {
 /**
  * 최종 positive 프롬프트 조립: (NSFW면) rating:nsfw + 그림체 + 상황 + 퀄리티 꼬리.
  * 그림체/상황의 끝 콤마를 정리한 뒤 ', ' 로 잇고, 퀄리티 꼬리(앞 콤마 포함)를 붙인다.
- * 그림체가 비면 화풍 태그 없이 상황+퀄리티만(하드코딩 기본값 없음). nsfw=true 면 맨 앞에 rating:nsfw.
+ * 그림체가 비면 스타일 태그 없이 상황+퀄리티만(하드코딩 기본값 없음). nsfw=true 면 맨 앞에 rating:nsfw.
  */
 export function buildPositivePrompt(
 	stylePrompt: string,
