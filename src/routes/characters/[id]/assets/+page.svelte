@@ -305,15 +305,8 @@
 		place-items: center;
 		padding: 32px;
 		background: rgba(0, 0, 0, 0.82);
-		cursor: zoom-out;
-	}
-	/* 블러를 가상요소로 분리 — 확대 이미지가 합성 레이어에 묶여 저품질 축소되는 것 방지 */
-	.lightbox::before {
-		content: '';
-		position: fixed;
-		inset: 0;
 		backdrop-filter: blur(4px);
-		pointer-events: none;
+		cursor: zoom-out;
 	}
 	.lb-img {
 		max-width: 100%;
