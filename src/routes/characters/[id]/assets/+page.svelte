@@ -266,10 +266,20 @@
 		height: 100%;
 		object-fit: cover;
 		display: block;
-		transition: opacity 0.15s ease;
 	}
-	.img:hover img {
-		opacity: 0.85;
+	/* 호버 디밍은 솔리드 오버레이로 — 이미지 자체 opacity 를 애니메이션하면
+	   부모(border-radius+overflow)의 클립 재적용으로 모서리가 떨린다. */
+	.img::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		background: #000;
+		opacity: 0;
+		transition: opacity 0.15s ease;
+		pointer-events: none;
+	}
+	.img:hover::after {
+		opacity: 0.15;
 	}
 	.code {
 		position: absolute;
