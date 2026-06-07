@@ -62,7 +62,7 @@ export async function findOrCreateOAuthUser(
 	await db.batch([
 		db
 			.prepare(
-				'INSERT INTO users (id, email, display_name, avatar_url, age_verified, created_at, updated_at) VALUES (?, ?, NULL, NULL, 0, ?, ?)'
+				"INSERT INTO users (id, email, display_name, avatar_url, country, age_verified, created_at, updated_at) VALUES (?, ?, NULL, NULL, 'KR', 0, ?, ?)"
 			)
 			.bind(userId, profile.email, now, now),
 		db
@@ -128,14 +128,6 @@ export async function setBlockedReason(
 		.bind(text, Date.now(), id)
 		.run();
 	return text;
-}
-
-/** 프로필 국가만 갱신(드롭다운 NSFW 토글용). PY 전환의 코드 검증은 호출부(엔드포인트) 책임. */
-export async function updateCountry(db: D1Database, id: string, country: Country): Promise<void> {
-	await db
-		.prepare('UPDATE users SET country = ?, updated_at = ? WHERE id = ?')
-		.bind(country, Date.now(), id)
-		.run();
 }
 
 /** 유저 페이지 헤더용 공개 프로필. 없으면 null. */

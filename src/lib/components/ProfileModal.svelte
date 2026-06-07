@@ -62,7 +62,7 @@
 			personaName = user?.personaName ?? '';
 			persona = user?.persona ?? '';
 			preference = user?.preference ?? null;
-			country = user?.country ?? null;
+			country = user?.country ?? 'KR'; // 모든 계정 기본 대한민국(SFW)
 			countryCode = '';
 			error = '';
 			resetAvatar();
