@@ -208,7 +208,6 @@
 						onclick={() => (country = 'KR')}
 					>
 						<strong>🇰🇷 대한민국</strong>
-						<span>전체 이용가 (SFW)</span>
 					</button>
 					<button
 						type="button"
@@ -217,18 +216,16 @@
 						onclick={() => (country = 'PY')}
 					>
 						<strong>🇵🇾 파라과이</strong>
-						<span>성인 콘텐츠 포함 (NSFW)</span>
 					</button>
 				</div>
 				{#if needsCode}
 					<input
 						class="code-input"
 						type="text"
-						placeholder="파라과이 전환 승인 코드"
+						placeholder="코드"
 						autocomplete="off"
 						bind:value={countryCode}
 					/>
-					<span class="code-hint">NSFW 를 보려면 승인 코드가 필요해요.</span>
 				{/if}
 			</div>
 
@@ -426,12 +423,6 @@
 	}
 	.code-input {
 		margin-top: 10px;
-	}
-	.code-hint {
-		display: block;
-		margin-top: 6px;
-		font-size: 0.74rem;
-		color: var(--text-faint);
 	}
 	.pref-btn {
 		flex: 1;
