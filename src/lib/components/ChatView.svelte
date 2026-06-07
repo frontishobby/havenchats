@@ -1807,9 +1807,19 @@
 							</button>
 						{/if}
 						{#if m.role === 'image_generation'}
-							{#if m.content}
+							{#if m.pending && m.previewUrl}
+								<!-- 스트리밍 중간 프레임 프리뷰(점점 또렷해짐) + 진행 표시. content 보다 우선 →
+								     재생성도 첫 프레임이 오는 순간 기존 이미지를 프리뷰로 덮고, done 에서 최종 교체. -->
+								<div class="scene-streaming">
+									<img class="scene-img" src={m.previewUrl} alt="생성 중" />
+									<span class="scene-streaming-tag">
+										<span class="typing"><i></i><i></i><i></i></span> 생성 중…
+									</span>
+								</div>
+							{:else if m.content}
 								<!-- 최종 이미지. 스트리밍 직후엔 프리뷰 blob 을 placeholder 로 깔아 높이를 유지하고,
-								     실제 /img 이미지가 load 되면 그 자리에서 교체 → 레이아웃 붕괴·스크롤 점프 방지. -->
+								     실제 /img 이미지가 load 되면 그 자리에서 교체 → 레이아웃 붕괴·스크롤 점프 방지.
+								     (재생성 첫 프레임 전엔 previewUrl 이 없어 기존 이미지가 그대로 보임 → 빈 깜빡임 없음) -->
 								<div class="scene-final">
 									{#if m.previewUrl}
 										<img
@@ -1828,14 +1838,6 @@
 										onload={() => clearScenePreview(m)}
 										onerror={() => clearScenePreview(m)}
 									/>
-								</div>
-							{:else if m.pending && m.previewUrl}
-								<!-- 스트리밍 중간 프레임 프리뷰(점점 또렷해짐) + 진행 표시 -->
-								<div class="scene-streaming">
-									<img class="scene-img" src={m.previewUrl} alt="생성 중" />
-									<span class="scene-streaming-tag">
-										<span class="typing"><i></i><i></i><i></i></span> 생성 중…
-									</span>
 								</div>
 							{:else if m.pending}
 								<div class="scene-loading">
