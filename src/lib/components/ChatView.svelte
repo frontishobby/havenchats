@@ -922,6 +922,11 @@
 				messages[idx].content = `⚠️ 메시지가 너무 길어요. ${MAX_USER_MSG_CHARS.toLocaleString()}자 이내로 줄여주세요.`;
 				return;
 			}
+			if (res.status === 429) {
+				messages[idx].content =
+					'⚠️ 오늘 사용량 한도에 도달했어요. 내일 다시 이어가 주세요. (베타 기간 한도)';
+				return;
+			}
 			if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
 			// 서버가 lazy 생성한 세션 id 회수 (이후 전송부터 이어가기)

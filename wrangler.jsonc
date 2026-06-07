@@ -18,7 +18,7 @@
 			"binding": "IMAGES",
 			"bucket_name": "haven-images"
 		}
-	]
-	// KV (세션을 KV로 옮길 경우):
-	// "kv_namespaces": [{ "binding": "SESSIONS", "id": "<id>" }]
+	],
+	// 유저별 일일 비용 카운터(daily spend cap). 키: spend:<userId>:<YYYY-MM-DD KST>
+	"kv_namespaces": [{ "binding": "SESSIONS", "id": "953439927d66411fb45f7e4c744d4334" }]
 }

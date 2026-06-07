@@ -12,6 +12,7 @@ import {
 import { findCharacter } from '$lib/server/characters';
 import { getCharacterPrompt } from '$lib/server/db/characters';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
+import { isAdmin } from '$lib/server/auth';
 import {
 	buildPositivePrompt,
 	generateImage,
@@ -27,6 +28,7 @@ import {
 import { buildProviderOptions, reasoningHeadroom } from '$lib/server/chatAssembly';
 import { notifyServerError } from '$lib/server/notify';
 import { MODEL_IDS } from '$lib/data/models';
+import { isOverDailyBudget, addDailySpend, DAILY_BUDGET_USD } from '$lib/server/budget';
 import type { ImageDebug } from '$lib/chatDebug';
 
 /**
@@ -161,6 +163,12 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const bucket = platform?.env?.IMAGES;
 	if (!db || !bucket) return json({ error: 'storage unavailable' }, { status: 500 });
 
+	// 일일 비용 상한 게이트 — 채팅과 같은 카운터(상황프롬프트 Gemini 비용도 서버 부담).
+	const kv = platform?.env?.SESSIONS;
+	if (!isAdmin(locals.user.email) && (await isOverDailyBudget(kv, locals.user.id, Date.now()))) {
+		return json({ error: 'daily_limit', limit: DAILY_BUDGET_USD }, { status: 429 });
+	}
+
 	const body = (await request.json().catch(() => null)) as ImageRequestBody | null;
 	const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : '';
 	if (!sessionId) return json({ error: 'session required' }, { status: 400 });
@@ -278,6 +286,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		finishReason = (result.finishReason as string | undefined) ?? null;
 		warnings = result.warnings ?? [];
 		cost = parseGatewayCost(result.providerMetadata);
+		// 상황프롬프트 비용을 유저 일일 카운터에 가산(NovelAI 실패해도 Gemini 비용은 발생).
+		platform?.context?.waitUntil?.(addDailySpend(kv, locals.user.id, cost, Date.now()));
 	} catch (e) {
 		console.error('[chat/image] situation prompt error:', e);
 		llmError = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
