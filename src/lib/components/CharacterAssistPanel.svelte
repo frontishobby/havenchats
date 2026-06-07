@@ -112,13 +112,6 @@
 		}
 	}
 
-	function onKey(e: KeyboardEvent) {
-		// Ctrl/Cmd+Enter 로 생성.
-		if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-			e.preventDefault();
-			generate();
-		}
-	}
 </script>
 
 <svelte:window onclick={() => (modelOpen = false)} />
@@ -201,12 +194,10 @@
 			: '만들고 싶은 캐릭터를 자유롭게 적어보세요.\n\n예) 무뚝뚝하지만 속정 깊은 검술 도장 사범. 나는 도장에 새로 들어온 제자. 엄격한 말투, 가끔 츤데레. 무협 세계관.'}
 		maxlength={ROUGH_MAX}
 		bind:value={rough}
-		onkeydown={onKey}
 		disabled={loading}
 	></textarea>
 	<div class="a-meta">
 		<span class="a-count">{rough.length}/{ROUGH_MAX}</span>
-		<span class="a-hint">⌘/Ctrl + Enter</span>
 	</div>
 
 	{#if error}<p class="a-error">{error}</p>{/if}
@@ -376,8 +367,7 @@
 		justify-content: space-between;
 		margin-top: 6px;
 	}
-	.a-count,
-	.a-hint {
+	.a-count {
 		font-size: 0.72rem;
 		color: var(--text-faint);
 		font-variant-numeric: tabular-nums;
