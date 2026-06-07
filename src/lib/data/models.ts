@@ -30,6 +30,17 @@ export const MODELS: ModelOption[] = [
 
 export const DEFAULT_MODEL_ID = MODELS[0].id;
 
+/**
+ * 캐릭터 제작 보조(assist)에 허용하는 모델 — 구조화 출력(generateObject)이 안정적인
+ * Gemini 계열 + Claude Opus 만. (다른 모델은 JSON 출력이 불안정해 제외)
+ */
+export const ASSIST_MODELS: ModelOption[] = MODELS.filter(
+	(m) => m.id.startsWith('google/gemini') || m.id === 'anthropic/claude-opus-4.8'
+);
+export const ASSIST_MODEL_IDS: Set<string> = new Set(ASSIST_MODELS.map((m) => m.id));
+/** assist 기본 모델(허용목록에 있어야 함). */
+export const DEFAULT_ASSIST_MODEL_ID = 'google/gemini-3.1-pro-preview';
+
 /** 알 수 없는 모델의 보수적 기본 컨텍스트 상한. */
 const FALLBACK_CONTEXT_LIMIT = 128_000;
 

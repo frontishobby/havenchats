@@ -1,12 +1,12 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { generateText } from 'ai';
+import { generateObject, jsonSchema } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
 import { isAdmin } from '$lib/server/auth';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
 import { notifyServerError } from '$lib/server/notify';
 import { buildProviderOptions, reasoningHeadroom } from '$lib/server/chatAssembly';
 import { isOverDailyBudget, addDailySpend, DAILY_BUDGET_USD } from '$lib/server/budget';
-import { MODEL_IDS } from '$lib/data/models';
+import { ASSIST_MODEL_IDS, DEFAULT_ASSIST_MODEL_ID } from '$lib/data/models';
 import type { Audience } from '$lib/types';
 
 /**
@@ -20,13 +20,44 @@ import type { Audience } from '$lib/types';
  *  3) 게이트웨이 추론 비용을 유저 일일 카운터에 가산.
  */
 
-/** 보조 생성 기본 모델(요청에 모델이 없거나 미허용이면 사용). 한국어 창작 품질·가용성 기준. */
-const DEFAULT_ASSIST_MODEL = 'google/gemini-3.1-pro-preview';
-
-/** 요청의 모델을 허용목록으로 검증(임의 모델 주입 방지). 없거나 미허용이면 기본 모델. */
+/** 요청의 모델을 assist 허용목록(Gemini 계열+Opus)으로 검증. 없거나 미허용이면 기본 모델. */
 function pickAssistModel(requested?: string): string {
-	return requested && MODEL_IDS.has(requested) ? requested : DEFAULT_ASSIST_MODEL;
+	return requested && ASSIST_MODEL_IDS.has(requested) ? requested : DEFAULT_ASSIST_MODEL_ID;
 }
+
+/** generateObject 구조화 출력 스키마(따옴표·개행 escape 를 공급자가 처리 → 수기 JSON 파싱 불필요). */
+const ASSIST_SCHEMA = jsonSchema<{
+	name: string;
+	tagline: string;
+	intro: string;
+	description: string;
+	tags: string[];
+	greetings: { name: string; content: string }[];
+	nsfw: boolean;
+	audience: Audience;
+}>({
+	type: 'object',
+	additionalProperties: false,
+	properties: {
+		name: { type: 'string' },
+		tagline: { type: 'string' },
+		intro: { type: 'string' },
+		description: { type: 'string' },
+		tags: { type: 'array', items: { type: 'string' } },
+		greetings: {
+			type: 'array',
+			items: {
+				type: 'object',
+				additionalProperties: false,
+				properties: { name: { type: 'string' }, content: { type: 'string' } },
+				required: ['name', 'content']
+			}
+		},
+		nsfw: { type: 'boolean' },
+		audience: { type: 'string', enum: ['all', 'male', 'female'] }
+	},
+	required: ['name', 'tagline', 'intro', 'description', 'tags', 'greetings', 'nsfw', 'audience']
+});
 
 const ROUGH_MAX = 4000;
 
@@ -137,67 +168,6 @@ function serializeCurrent(c: CurrentDraft | undefined): string | null {
 	return lines.join('\n');
 }
 
-/**
- * 문자열 리터럴 안의 escape 안 된 raw 제어문자(개행·탭·캐리지리턴)를 \n/\t/\r 로 보정해 유효 JSON 으로.
- * LLM 이 description 같은 멀티라인 값을 escape 없이 실제 개행으로 내보내 JSON.parse 가 깨지는 흔한 케이스 복구.
- * 문자열 밖의 개행(보기 좋게 들여쓴 JSON)은 정상 공백이므로 건드리지 않는다.
- */
-function escapeControlCharsInStrings(s: string): string {
-	let out = '';
-	let inStr = false;
-	let escaped = false;
-	for (let i = 0; i < s.length; i++) {
-		const ch = s[i];
-		if (inStr) {
-			if (escaped) {
-				out += ch;
-				escaped = false;
-			} else if (ch === '\\') {
-				out += ch;
-				escaped = true;
-			} else if (ch === '"') {
-				out += ch;
-				inStr = false;
-			} else if (ch === '\n') {
-				out += '\\n';
-			} else if (ch === '\r') {
-				out += '\\r';
-			} else if (ch === '\t') {
-				out += '\\t';
-			} else {
-				out += ch;
-			}
-		} else {
-			if (ch === '"') inStr = true;
-			out += ch;
-		}
-	}
-	return out;
-}
-
-/** 모델 출력에서 JSON 객체만 추출(코드펜스·머리말 제거 후 첫 {…} 파싱). 실패 시 제어문자 보정 재시도. */
-function extractJson(raw: string): unknown | null {
-	let s = raw.trim();
-	// ```json … ``` / ``` … ``` 코드펜스 제거.
-	const fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-	if (fence) s = fence[1].trim();
-	// 첫 '{' ~ 마지막 '}' 구간만.
-	const start = s.indexOf('{');
-	const end = s.lastIndexOf('}');
-	if (start === -1 || end === -1 || end <= start) return null;
-	const body = s.slice(start, end + 1);
-	try {
-		return JSON.parse(body);
-	} catch {
-		// 문자열 안에 escape 안 된 개행/탭이 들어가 깨진 경우 보정 후 재시도.
-		try {
-			return JSON.parse(escapeControlCharsInStrings(body));
-		} catch {
-			return null;
-		}
-	}
-}
-
 function str(v: unknown): string {
 	return typeof v === 'string' ? v.trim() : '';
 }
@@ -253,33 +223,28 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			: `[참고] 제작자는 일반(SFW) 캐릭터로 두었다. 입력 내용이 명백히 성인용이 아니면 nsfw 는 false 로.`
 	].join('\n');
 
-	let cost: number | undefined;
-	let text = '';
-	let finishReason: string | null = null;
-	let warnings: unknown[] = [];
+	// 구조화 출력(generateObject) — 공급자가 따옴표·개행 escape 를 보장해 수기 JSON 파싱 깨짐을 없앤다.
+	let parsed: Record<string, unknown>;
 	try {
 		const gateway = createGateway({ apiKey });
-		const result = await generateText({
+		const result = await generateObject({
 			model: gateway(model),
+			schema: ASSIST_SCHEMA,
 			system: SYSTEM,
 			prompt: userPrompt,
 			temperature: 0.9,
-			// JSON 한 덩이를 끝까지 받아야 하므로 넉넉히. reasoning 모델은 추론이 예산을 먹으니 headroom 추가.
+			// 한 덩이를 끝까지 받아야 하므로 넉넉히. reasoning 모델은 추론이 예산을 먹으니 headroom 추가.
 			maxOutputTokens: 12000 + reasoningHeadroom(model),
 			providerOptions: buildProviderOptions(model)
 		});
-		text = result.text ?? '';
-		finishReason = (result.finishReason as string | undefined) ?? null;
-		warnings = result.warnings ?? [];
-		cost = parseGatewayCost(result.providerMetadata);
+		parsed = result.object as Record<string, unknown>;
+		const cost = parseGatewayCost(result.providerMetadata);
 		platform?.context?.waitUntil?.(addDailySpend(kv, locals.user.id, cost, Date.now()));
-		console.log(
-			`[characters/assist] model=${model} finishReason=${finishReason} textLen=${text.length} warnings=${JSON.stringify(warnings)}`
-		);
+		console.log(`[characters/assist] model=${model} finishReason=${result.finishReason}`);
 	} catch (e) {
-		console.error('[characters/assist] generateText error:', e);
+		console.error('[characters/assist] generateObject error:', e);
 		notifyServerError({
-			context: 'generateText /api/characters/assist',
+			context: 'generateObject /api/characters/assist',
 			error: e,
 			extra: { user: locals.user.id, model },
 			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
@@ -287,29 +252,6 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
 		return json(
 			{ error: 'llm', message: '캐릭터 생성에 실패했어요. 잠시 후 다시 시도해 주세요.', detail },
-			{ status: 502 }
-		);
-	}
-
-	const parsed = extractJson(text) as Record<string, unknown> | null;
-	if (!parsed || typeof parsed !== 'object') {
-		const diag = `finishReason=${finishReason} textLen=${text.length} warnings=${JSON.stringify(warnings)}`;
-		console.warn(`[characters/assist] JSON 파싱 실패 model=${model} ${diag} preview=`, text.slice(0, 800));
-		notifyServerError({
-			context: 'parse-fail /api/characters/assist',
-			error: new Error(`JSON 파싱 실패 — ${diag}\npreview: ${text.slice(0, 600)}`),
-			extra: { user: locals.user.id, model },
-			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
-		});
-		return json(
-			{
-				error: 'parse',
-				message:
-					finishReason === 'length'
-						? '생성 결과가 너무 길어 잘렸어요. 입력을 조금 줄이거나 다시 시도해 주세요.'
-						: '생성 결과를 해석하지 못했어요. 다시 시도해 주세요.',
-				detail: `${diag} preview=${text.slice(0, 200)}`
-			},
 			{ status: 502 }
 		);
 	}
@@ -342,11 +284,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const nsfw = parsed.nsfw === true;
 
 	if (!name || !description) {
-		const diag = `finishReason=${finishReason} keys=${Object.keys(parsed).join(',')} nameLen=${name.length} descLen=${description.length}`;
-		console.warn(`[characters/assist] 불완전 결과 model=${model} ${diag} preview=`, text.slice(0, 800));
+		const diag = `keys=${Object.keys(parsed).join(',')} nameLen=${name.length} descLen=${description.length}`;
+		console.warn(`[characters/assist] 불완전 결과 model=${model} ${diag}`);
 		notifyServerError({
 			context: 'incomplete /api/characters/assist',
-			error: new Error(`불완전 결과 — ${diag}\npreview: ${text.slice(0, 600)}`),
+			error: new Error(`불완전 결과 — ${diag}\n${JSON.stringify(parsed).slice(0, 600)}`),
 			extra: { user: locals.user.id, model },
 			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
 		});
@@ -362,7 +304,6 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	return json({
 		ok: true,
-		character: { name, tagline, intro, description, tags, greetings, audience, nsfw },
-		cost: cost ?? null
+		character: { name, tagline, intro, description, tags, greetings, audience, nsfw }
 	});
 };

@@ -16,7 +16,7 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { MODELS, getModel } from '$lib/data/models';
+	import { ASSIST_MODELS, ASSIST_MODEL_IDS, DEFAULT_ASSIST_MODEL_ID, getModel } from '$lib/data/models';
 
 	let {
 		nsfw = false,
@@ -46,23 +46,21 @@
 
 	const ROUGH_MAX = 4000;
 	const MODEL_KEY = 'haven:assist-model';
-	/** 보조 생성 기본 모델(API 기본과 동일 — 한국어 창작 품질). */
-	const DEFAULT_ASSIST_MODEL = 'google/gemini-3.1-pro-preview';
 
 	let rough = $state('');
 	let loading = $state(false);
 	let error = $state('');
 	let done = $state(false);
 
-	// 모델 선택(localStorage 저장). 아이콘 로드 실패 시 글자 폴백.
-	let model = $state(DEFAULT_ASSIST_MODEL);
+	// 모델 선택(localStorage 저장) — assist 는 구조화 출력 안정적인 Gemini 계열+Opus 만.
+	let model = $state(DEFAULT_ASSIST_MODEL_ID);
 	let modelOpen = $state(false);
 	let iconFailed = $state<Record<string, boolean>>({});
-	const currentModel = $derived(getModel(model) ?? MODELS[0]);
+	const currentModel = $derived(getModel(model) ?? ASSIST_MODELS[0]);
 
 	onMount(() => {
 		const saved = localStorage.getItem(MODEL_KEY);
-		if (saved && getModel(saved)) model = saved;
+		if (saved && ASSIST_MODEL_IDS.has(saved)) model = saved;
 	});
 
 	function selectModel(id: string) {
@@ -158,7 +156,7 @@
 		</button>
 		{#if modelOpen}
 			<ul class="model-list" role="listbox" aria-labelledby="assist-model-label">
-				{#each MODELS as m (m.id)}
+				{#each ASSIST_MODELS as m (m.id)}
 					<li>
 						<button
 							class="model-option"
