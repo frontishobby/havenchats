@@ -211,6 +211,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	let cost: number | undefined;
 	let text = '';
+	let finishReason: string | null = null;
+	let warnings: unknown[] = [];
 	try {
 		const gateway = createGateway({ apiKey });
 		const result = await generateText({
@@ -218,12 +220,18 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			system: SYSTEM,
 			prompt: userPrompt,
 			temperature: 0.9,
-			maxOutputTokens: 6000 + reasoningHeadroom(model),
+			// JSON 한 덩이를 끝까지 받아야 하므로 넉넉히. reasoning 모델은 추론이 예산을 먹으니 headroom 추가.
+			maxOutputTokens: 12000 + reasoningHeadroom(model),
 			providerOptions: buildProviderOptions(model)
 		});
 		text = result.text ?? '';
+		finishReason = (result.finishReason as string | undefined) ?? null;
+		warnings = result.warnings ?? [];
 		cost = parseGatewayCost(result.providerMetadata);
 		platform?.context?.waitUntil?.(addDailySpend(kv, locals.user.id, cost, Date.now()));
+		console.log(
+			`[characters/assist] model=${model} finishReason=${finishReason} textLen=${text.length} warnings=${JSON.stringify(warnings)}`
+		);
 	} catch (e) {
 		console.error('[characters/assist] generateText error:', e);
 		notifyServerError({
@@ -232,17 +240,32 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			extra: { user: locals.user.id, model },
 			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
 		});
+		const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
 		return json(
-			{ error: 'llm', message: '캐릭터 생성에 실패했어요. 잠시 후 다시 시도해 주세요.' },
+			{ error: 'llm', message: '캐릭터 생성에 실패했어요. 잠시 후 다시 시도해 주세요.', detail },
 			{ status: 502 }
 		);
 	}
 
 	const parsed = extractJson(text) as Record<string, unknown> | null;
 	if (!parsed || typeof parsed !== 'object') {
-		console.warn('[characters/assist] JSON 파싱 실패:', text.slice(0, 300));
+		const diag = `finishReason=${finishReason} textLen=${text.length} warnings=${JSON.stringify(warnings)}`;
+		console.warn(`[characters/assist] JSON 파싱 실패 model=${model} ${diag} preview=`, text.slice(0, 800));
+		notifyServerError({
+			context: 'parse-fail /api/characters/assist',
+			error: new Error(`JSON 파싱 실패 — ${diag}\npreview: ${text.slice(0, 600)}`),
+			extra: { user: locals.user.id, model },
+			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+		});
 		return json(
-			{ error: 'parse', message: '생성 결과를 해석하지 못했어요. 다시 시도해 주세요.' },
+			{
+				error: 'parse',
+				message:
+					finishReason === 'length'
+						? '생성 결과가 너무 길어 잘렸어요. 입력을 조금 줄이거나 다시 시도해 주세요.'
+						: '생성 결과를 해석하지 못했어요. 다시 시도해 주세요.',
+				detail: `${diag} preview=${text.slice(0, 200)}`
+			},
 			{ status: 502 }
 		);
 	}
@@ -275,8 +298,20 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const nsfw = parsed.nsfw === true;
 
 	if (!name || !description) {
+		const diag = `finishReason=${finishReason} keys=${Object.keys(parsed).join(',')} nameLen=${name.length} descLen=${description.length}`;
+		console.warn(`[characters/assist] 불완전 결과 model=${model} ${diag} preview=`, text.slice(0, 800));
+		notifyServerError({
+			context: 'incomplete /api/characters/assist',
+			error: new Error(`불완전 결과 — ${diag}\npreview: ${text.slice(0, 600)}`),
+			extra: { user: locals.user.id, model },
+			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+		});
 		return json(
-			{ error: 'incomplete', message: '생성 결과가 불완전해요. 입력을 조금 더 구체적으로 적고 다시 시도해 주세요.' },
+			{
+				error: 'incomplete',
+				message: '생성 결과가 불완전해요. 입력을 조금 더 구체적으로 적고 다시 시도해 주세요.',
+				detail: diag
+			},
 			{ status: 502 }
 		);
 	}
