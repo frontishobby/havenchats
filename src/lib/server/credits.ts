@@ -1,12 +1,12 @@
 import { createGateway } from '@ai-sdk/gateway';
-import { env } from '$env/dynamic/private';
 
-/** Vercel AI Gateway 크레딧 잔량(USD). 키 없음·조회 실패 시 null(미표시). */
-export async function fetchGatewayCredits(): Promise<{
-	balance: number;
-	totalUsed: number;
-} | null> {
-	const apiKey = env.AI_GATEWAY_API_KEY;
+/**
+ * Vercel AI Gateway 크레딧 잔량(USD) — 유저 **본인 키** 기준. 키 없음·조회 실패 시 null(미표시).
+ * 네비 상단 뱃지에서 자기 키 잔량을 보여줄 때 쓴다.
+ */
+export async function fetchGatewayCredits(
+	apiKey: string | null | undefined
+): Promise<{ balance: number; totalUsed: number } | null> {
 	if (!apiKey) return null;
 	try {
 		const c = await createGateway({ apiKey }).getCredits();

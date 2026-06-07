@@ -1,5 +1,4 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { generateText } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
 import {
@@ -224,9 +223,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	// ── 1) Gemini 상황 프롬프트 (필수) ──
 	// 상황 프롬프트 생성이 실패/빈값이면 NovelAI 요청을 보내지 않는다(Anlas·비용 낭비 방지).
-	// 상황 프롬프트 LLM 도 유저 본인 Gateway 키로(BYO). 없으면 거부(admin 은 서버 키 폴백).
-	let apiKey = await getDecryptedKey(db, locals.user.id, 'gateway');
-	if (!apiKey && isAdmin(locals.user.email)) apiKey = env.AI_GATEWAY_API_KEY ?? null;
+	// 상황 프롬프트 LLM 도 유저 본인 Gateway 키로(BYO). 없으면 거부(예외 없음).
+	const apiKey = await getDecryptedKey(db, locals.user.id, 'gateway');
 	if (!apiKey) {
 		return json(
 			{ error: 'no_gateway_key', message: 'API 키 관리에서 Vercel AI Gateway 키를 먼저 등록해 주세요.' },

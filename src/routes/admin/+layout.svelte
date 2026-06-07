@@ -1,10 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import type { LayoutData } from './$types';
 
-	let { children, data }: { children: import('svelte').Snippet; data: LayoutData } = $props();
-
-	const credits = $derived(data.credits);
+	let { children }: { children: import('svelte').Snippet } = $props();
 
 	const tabs = [
 		{ href: '/admin', label: '유저' },
@@ -26,14 +23,6 @@
 	<header class="admin-head">
 		<div class="title-row">
 			<h1>관리자</h1>
-			{#if credits}
-				<span class="credits" title={`총 사용 $${credits.totalUsed.toFixed(2)}`}>
-					<span class="credits-k">Vercel 크레딧</span>
-					<span class="credits-v" class:low={credits.balance < 5}>
-						${credits.balance.toFixed(2)}
-					</span>
-				</span>
-			{/if}
 		</div>
 		<nav class="tabs">
 			{#each tabs as t (t.href)}
@@ -65,29 +54,6 @@
 		font-size: 1.5rem;
 		font-weight: 800;
 		letter-spacing: -0.01em;
-	}
-	.credits {
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-		padding: 5px 12px;
-		background: var(--bg-card);
-		border: 1px solid var(--border);
-		border-radius: 999px;
-		font-size: 0.84rem;
-	}
-	.credits-k {
-		color: var(--text-dim);
-		font-weight: 600;
-		font-size: 0.76rem;
-	}
-	.credits-v {
-		font-weight: 800;
-		color: var(--text);
-		font-variant-numeric: tabular-nums;
-	}
-	.credits-v.low {
-		color: var(--nsfw);
 	}
 	.tabs {
 		display: flex;

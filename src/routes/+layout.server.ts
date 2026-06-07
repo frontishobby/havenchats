@@ -1,6 +1,7 @@
 import { listRecentSessions } from '$lib/server/db/chats';
 import { findCharacter } from '$lib/server/characters';
 import { fetchGatewayCredits } from '$lib/server/credits';
+import { getDecryptedKey } from '$lib/server/db/userKeys';
 import type { Character, RecentChat } from '$lib/types';
 import type { LayoutServerLoad } from './$types';
 
@@ -44,6 +45,7 @@ export const load: LayoutServerLoad = async ({ locals, platform, depends }) => {
 		}
 	}
 
-	// Vercel 크레딧 잔량은 전체 공개(네비 중앙 뱃지).
-	return { user: locals.user, recentChats, credits: await fetchGatewayCredits() };
+	// 네비 중앙 뱃지 — 유저 본인 Gateway 키의 크레딧 잔량(키 없으면 null → 미표시).
+	const gatewayKey = locals.user && db ? await getDecryptedKey(db, locals.user.id, 'gateway') : null;
+	return { user: locals.user, recentChats, credits: await fetchGatewayCredits(gatewayKey) };
 };

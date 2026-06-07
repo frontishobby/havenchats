@@ -1,5 +1,4 @@
 import { requireAdmin } from '$lib/server/auth';
-import { fetchGatewayCredits } from '$lib/server/credits';
 import type { LayoutServerLoad } from './$types';
 
 /**
@@ -8,5 +7,5 @@ import type { LayoutServerLoad } from './$types';
  */
 export const load: LayoutServerLoad = async ({ locals }) => {
 	requireAdmin(locals.user?.email);
-	return { user: locals.user, credits: await fetchGatewayCredits() };
+	return { user: locals.user };
 };

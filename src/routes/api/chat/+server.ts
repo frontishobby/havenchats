@@ -1,5 +1,4 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { streamText, generateText } from 'ai';
 import { createGateway, type GatewayProvider } from '@ai-sdk/gateway';
 import { findCharacter } from '$lib/server/characters';
@@ -90,9 +89,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		return json({ error: 'daily_limit', limit: DAILY_BUDGET_USD }, { status: 429 });
 	}
 
-	// 챗은 유저 본인 Vercel AI Gateway 키로 호출(BYO). 키 없으면 차단(admin 은 서버 키로 폴백).
-	let gatewayKey = await getDecryptedKey(db, locals.user.id, 'gateway');
-	if (!gatewayKey && budgetExempt) gatewayKey = env.AI_GATEWAY_API_KEY ?? null;
+	// 챗은 유저 본인 Vercel AI Gateway 키로 호출(BYO). 키 없으면 차단(예외 없음).
+	const gatewayKey = await getDecryptedKey(db, locals.user.id, 'gateway');
 	if (!gatewayKey) {
 		return json(
 			{ error: 'no_gateway_key', message: 'API 키 관리에서 Vercel AI Gateway 키를 먼저 등록해 주세요.' },
