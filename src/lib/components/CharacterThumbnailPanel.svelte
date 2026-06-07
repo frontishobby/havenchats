@@ -36,6 +36,7 @@
 	let error = $state<string | null>(null);
 	let noKey = $state(false);
 	let using = $state(false);
+	let zoomed = $state(false); // 미리보기 크게 보기(라이트박스)
 
 	onMount(async () => {
 		try {
@@ -193,6 +194,8 @@
 	}
 </script>
 
+<svelte:window onkeydown={(e) => e.key === 'Escape' && zoomed && (zoomed = false)} />
+
 <aside class="thumb">
 	<div class="t-head">
 		<span class="t-logo">🖼️</span>
@@ -208,7 +211,10 @@
 
 	<div class="t-preview">
 		{#if previewUrl}
-			<img src={previewUrl} alt="썸네일 미리보기" />
+			<button type="button" class="t-zoom-btn" onclick={() => (zoomed = true)} aria-label="크게 보기">
+				<img src={previewUrl} alt="썸네일 미리보기" />
+				<span class="t-zoom-hint">⤢ 크게</span>
+			</button>
 		{:else}
 			<div class="t-ph">그림체를 고르고<br /><b>썸네일 생성</b>을 눌러보세요</div>
 		{/if}
@@ -264,6 +270,14 @@
 		webp로 변환해 위 썸네일에 등록되고, 사용한 그림체가 <strong>추천 그림체</strong>로 자동 설정돼요.
 	</p>
 </aside>
+
+{#if zoomed && previewUrl}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div class="t-lightbox" role="presentation" onclick={() => (zoomed = false)}>
+		<img src={previewUrl} alt="썸네일 크게 보기" />
+		<button class="t-lightbox-close" onclick={() => (zoomed = false)} aria-label="닫기">✕</button>
+	</div>
+{/if}
 
 <style>
 	.thumb {
@@ -325,6 +339,68 @@
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
+	}
+	.t-zoom-btn {
+		display: block;
+		width: 100%;
+		height: 100%;
+		padding: 0;
+		border: none;
+		background: none;
+		cursor: zoom-in;
+		position: relative;
+	}
+	.t-zoom-hint {
+		position: absolute;
+		bottom: 6px;
+		right: 6px;
+		padding: 2px 7px;
+		border-radius: 999px;
+		background: rgba(0, 0, 0, 0.55);
+		color: #fff;
+		font-size: 0.68rem;
+		font-weight: 700;
+		opacity: 0;
+		transition: opacity 0.15s ease;
+	}
+	.t-zoom-btn:hover .t-zoom-hint {
+		opacity: 1;
+	}
+	.t-lightbox {
+		position: fixed;
+		inset: 0;
+		z-index: 200;
+		background: rgba(0, 0, 0, 0.85);
+		backdrop-filter: blur(3px);
+		display: grid;
+		place-items: center;
+		padding: 24px;
+		cursor: zoom-out;
+	}
+	.t-lightbox img {
+		max-width: 92vw;
+		max-height: 92vh;
+		object-fit: contain;
+		border-radius: var(--radius);
+		box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+	}
+	.t-lightbox-close {
+		position: fixed;
+		top: 18px;
+		right: 18px;
+		width: 38px;
+		height: 38px;
+		border: none;
+		border-radius: 50%;
+		background: rgba(0, 0, 0, 0.6);
+		color: #fff;
+		font-size: 1rem;
+		display: grid;
+		place-items: center;
+		cursor: pointer;
+	}
+	.t-lightbox-close:hover {
+		background: rgba(0, 0, 0, 0.85);
 	}
 	.t-ph {
 		padding: 0 18px;
