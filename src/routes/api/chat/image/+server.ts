@@ -47,6 +47,9 @@ const MAX_ASSISTANT_CHARS = 6000;
 const MAX_STYLE_CHARS = 1000;
 /** 외형 레퍼런스로 넣을 캐릭터 description 최대 길이(자). 토큰·지연 보호용. */
 const MAX_DESC_CHARS = 6000;
+/** 최근 대화 블록: 메시지 개수·메시지당 길이 상한(토큰·지연 보호용). */
+const MAX_RECENT_MSGS = 6;
+const MAX_RECENT_MSG_CHARS = 2000;
 /** NAI V4.5 캐릭터 최대 인원(공식 상한 6). 초과분은 잘라낸다. */
 const MAX_CHARACTERS = 6;
 
@@ -86,7 +89,7 @@ const SITUATION_SCHEMA = jsonSchema<{
 
 const SITUATION_SYSTEM = [
 	`You convert the latest moment of a Korean roleplay scene into a structured image-generation prompt for NovelAI Diffusion V4.5 (anime illustration), using its MULTI-CHARACTER feature.`,
-	`You are given a [Character] reference sheet and the [Latest scene]. Depict ONLY the [Latest scene]'s current moment. Ignore the reference's non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
+	`You are given a [Character] reference sheet and the [Recent conversation] (the last few turns, oldest to newest, including the user's actions). Depict ONLY the LATEST moment — the final line of the conversation; use the earlier lines purely as context for what is happening right now. Ignore the reference's non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
 	``,
 	`Output a JSON object with two keys:`,
 	`  "base": string  — Danbooru-style tags for everything that is NOT an individual character's body/clothes: the SUBJECT COUNT tag (e.g. "1girl", "1boy, 1girl", "2girls"), framing/composition (e.g. "upper body", "cowboy shot", "full body", "from above", "pov"), setting/background, lighting and mood, and INTERACTION action tags between characters using the "source#"/"target#"/"mutual#" prefixes (e.g. "source#hug" on the initiator's intent, "target#hug", "mutual#kiss"). Lowercase, comma-separated.`,
@@ -131,8 +134,10 @@ function sanitizeSituation(raw: string): string {
 
 interface ImageRequestBody {
 	sessionId?: string;
-	/** 방금 완료된 assistant 응답 본문(상황 프롬프트 입력). */
+	/** 방금 완료된 assistant 응답 본문(상황 프롬프트 입력 — 그릴 대상). */
 	assistantText?: string;
+	/** 최근 대화(유저 입력 포함, 시간순). 그릴 순간의 맥락. 마지막 원소가 보통 assistantText 와 동일. */
+	recent?: { role?: string; content?: string }[];
 	/**
 	 * 이 이미지를 만든 assistant 메시지 행 id. 채팅의 assistant 영속(onFinish/waitUntil)은
 	 * 비동기라, '빠른 생성 우선'이면 이미지가 먼저 append 돼 seq 가 역전될 수 있다 →
@@ -244,6 +249,17 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!assistantText) return json({ error: 'empty assistant text' }, { status: 400 });
 	const assistantMsgId = typeof body?.assistantMsgId === 'string' ? body.assistantMsgId : '';
 
+	// 최근 대화 블록(유저 입력 포함) — 그릴 순간의 맥락. 화자 라벨은 유저=페르소나/이름, 캐릭터=이름.
+	const userLabel = locals.user.personaName?.trim() || locals.user.name?.trim() || '나';
+	const charLabel = character?.name?.trim() || '캐릭터';
+	const recentBlock = (Array.isArray(body?.recent) ? body.recent : [])
+		.filter((m): m is { role: string; content: string } =>
+			(m?.role === 'user' || m?.role === 'assistant') && typeof m?.content === 'string' && !!m.content.trim()
+		)
+		.slice(-MAX_RECENT_MSGS)
+		.map((m) => `${m.role === 'user' ? userLabel : charLabel}: ${m.content.trim().slice(0, MAX_RECENT_MSG_CHARS)}`)
+		.join('\n');
+
 	const resolution: ResolutionKey = isResolutionKey(body?.resolution)
 		? body.resolution
 		: DEFAULT_RESOLUTION;
@@ -311,9 +327,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	try {
 		const gateway = createGateway({ apiKey });
 		// 외형 일관성을 위해 캐릭터 description(통짜)을 레퍼런스로 함께 넣고, 그릴 대상은 최신 장면.
-		const userPrompt = characterRef
-			? `[Character]\n${characterRef}\n\n[Latest scene]\n${assistantText}`
-			: assistantText;
+		// 최근 대화(유저 입력 포함)가 있으면 맥락으로 함께 넣되, 그릴 순간은 마지막(=assistantText).
+		const sceneBlock = recentBlock
+			? `[Recent conversation]\n${recentBlock}`
+			: `[Latest scene]\n${assistantText}`;
+		const userPrompt = characterRef ? `[Character]\n${characterRef}\n\n${sceneBlock}` : sceneBlock;
 		// 게이트웨이가 일시적 503/500 을 자동 재시도하지 않으므로 직접 백오프 재시도한다.
 		const result = await generateObjectWithRetry({
 			model: gateway(promptModel),

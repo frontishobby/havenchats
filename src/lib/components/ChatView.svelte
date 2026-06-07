@@ -533,8 +533,10 @@
 		msgId: string;
 		replaceId?: string;
 		assistantMsgId?: string;
+		/** 최근 대화(유저 입력 포함) — 그릴 순간의 맥락. 마지막 원소가 그릴 대상(assistant). */
+		recent?: { role: 'user' | 'assistant'; content: string }[];
 	}) {
-		const { sid, text, replaceId, assistantMsgId } = opts;
+		const { sid, text, replaceId, assistantMsgId, recent } = opts;
 		let currentId = opts.msgId; // 신규 생성은 done 에서 서버 id 로 교체됨
 		const at = () => messages.findIndex((x) => x.id === currentId);
 		let lastPreview: string | null = null;
@@ -556,6 +558,7 @@
 				body: JSON.stringify({
 					sessionId: sid,
 					assistantText: text,
+					recent,
 					resolution: imageResolution,
 					stylePrompt: selectedStylePrompt,
 					promptModel: imagePromptModel,
@@ -678,6 +681,26 @@
 		m.previewUrl = undefined;
 	}
 
+	/** 이미지 상황 프롬프트에 함께 넣을 최근 대화 턴 수(유저 입력 포함). */
+	const IMG_CONTEXT_TURNS = 3;
+
+	/**
+	 * 이미지 상황 프롬프트용 최근 대화(유저 입력 포함) 수집. assistantIdx(포함)부터 거꾸로
+	 * user/assistant 메시지를 모아(image_generation·빈 메시지 제외) 시간순으로 돌려준다.
+	 * 직전 유저 행동까지 맥락에 넣어 그릴 순간(마지막 assistant)을 더 정확히 잡게 한다.
+	 */
+	function collectRecentTurns(assistantIdx: number): { role: 'user' | 'assistant'; content: string }[] {
+		const out: { role: 'user' | 'assistant'; content: string }[] = [];
+		for (let i = assistantIdx; i >= 0 && out.length < IMG_CONTEXT_TURNS * 2; i--) {
+			const m = messages[i];
+			if (m.role !== 'user' && m.role !== 'assistant') continue; // image_generation 제외
+			const c = m.content.trim();
+			if (!c) continue;
+			out.push({ role: m.role, content: c });
+		}
+		return out.reverse();
+	}
+
 	/**
 	 * 방금 완료된 assistant 응답을 바탕으로 NovelAI 장면 이미지를 생성해 메시지로 추가한다.
 	 * 매 assistant 턴 직후(send 의 finally) 호출. 세션이 확정된 상태에서만 동작.
@@ -687,10 +710,22 @@
 		const text = assistantText.trim();
 		if (!sid || !imageEnabled || !text) return;
 
+		// 최근 대화(유저 입력 포함) — 플레이스홀더 push 전에 수집(placeholder 는 어차피 제외됨).
+		let aIdx = assistantMsgId ? messages.findIndex((x) => x.id === assistantMsgId) : -1;
+		if (aIdx < 0) {
+			for (let i = messages.length - 1; i >= 0; i--) {
+				if (messages[i].role === 'assistant') {
+					aIdx = i;
+					break;
+				}
+			}
+		}
+		const recent = aIdx >= 0 ? collectRecentTurns(aIdx) : [{ role: 'assistant' as const, content: text }];
+
 		// 생성 중 플레이스홀더(프록시로 감싸지므로 messages[idx] 로 수정).
 		const tempId = crypto.randomUUID();
 		messages.push({ id: tempId, role: 'image_generation', content: '', pending: true });
-		await runSceneImage({ sid, text, msgId: tempId, assistantMsgId });
+		await runSceneImage({ sid, text, msgId: tempId, assistantMsgId, recent });
 	}
 
 	/** 재생성 중인 이미지 메시지 id(버튼 비활성·스피너 표시용). */
@@ -708,18 +743,22 @@
 		if (idx < 0) return;
 		// 이 이미지를 만든 소스 = 바로 앞의 assistant 메시지 본문.
 		let srcText = '';
+		let srcIdx = -1;
 		for (let i = idx - 1; i >= 0; i--) {
 			if (messages[i].role === 'assistant' && messages[i].content.trim()) {
 				srcText = messages[i].content.trim();
+				srcIdx = i;
 				break;
 			}
 		}
 		if (!srcText) return;
+		// 그 assistant 시점 기준 최근 대화(유저 입력 포함)도 함께 보낸다.
+		const recent = collectRecentTurns(srcIdx);
 		regenerating = m.id;
 		messages[idx].pending = true;
 		messages[idx].errorReason = undefined;
 		try {
-			await runSceneImage({ sid, text: srcText, msgId: m.id, replaceId: m.id });
+			await runSceneImage({ sid, text: srcText, msgId: m.id, replaceId: m.id, recent });
 		} finally {
 			regenerating = null;
 		}
