@@ -596,11 +596,12 @@
 							currentId = String(obj.id);
 						}
 						if (obj.cost != null) messages[i].cost = Number(obj.cost);
-						messages[i].previewUrl = undefined;
 						messages[i].pending = false;
 						messages[i].errorReason = undefined; // 재생성 성공 시 이전 에러 사유 제거
-					}
-					if (lastPreview) {
+						// previewUrl 은 일부러 유지 → 최종 /img 이미지가 load 될 때까지 placeholder 로 깔아
+						// 레이아웃 붕괴(높이 0)·스크롤 점프 방지. blob 소유권을 메시지로 이양(아래 onload 에서 revoke).
+						lastPreview = null;
+					} else if (lastPreview) {
 						URL.revokeObjectURL(lastPreview);
 						lastPreview = null;
 					}
@@ -654,11 +655,27 @@
 				messages[i].errorReason = e instanceof Error ? e.message : '이미지 생성에 실패했습니다.';
 			}
 		} finally {
-			// 최종 이미지가 들어왔으면 남은 프리뷰 URL 정리.
-			const i = at();
-			if (lastPreview && i >= 0 && messages[i]?.content) URL.revokeObjectURL(lastPreview);
+			// 성공 시엔 lastPreview=null(소유권 이양) → 최종 img onload 의 clearScenePreview 가 정리.
+			// 에러 등으로 최종 이미지가 안 들어온 경우엔 여기서 남은 프리뷰 blob 을 정리.
+			if (lastPreview) {
+				URL.revokeObjectURL(lastPreview);
+				lastPreview = null;
+				const i = at();
+				if (i >= 0) messages[i].previewUrl = undefined;
+			}
 			invalidate('app:recentChats');
 		}
+	}
+
+	/** 최종 /img 이미지가 로드된 뒤 placeholder 로 쓰던 프리뷰 blob URL 을 정리. */
+	function clearScenePreview(m: ChatMessage) {
+		if (!m.previewUrl) return;
+		try {
+			URL.revokeObjectURL(m.previewUrl);
+		} catch {
+			/* 무시 */
+		}
+		m.previewUrl = undefined;
 	}
 
 	/**
@@ -1751,7 +1768,29 @@
 							</button>
 						{/if}
 						{#if m.role === 'image_generation'}
-							{#if m.pending && m.previewUrl}
+							{#if m.content}
+								<!-- 최종 이미지. 스트리밍 직후엔 프리뷰 blob 을 placeholder 로 깔아 높이를 유지하고,
+								     실제 /img 이미지가 load 되면 그 자리에서 교체 → 레이아웃 붕괴·스크롤 점프 방지. -->
+								<div class="scene-final">
+									{#if m.previewUrl}
+										<img
+											class="scene-img scene-placeholder"
+											src={m.previewUrl}
+											alt=""
+											aria-hidden="true"
+										/>
+									{/if}
+									<img
+										class="scene-img"
+										class:scene-overlay={m.previewUrl}
+										src={`/img/${m.content}`}
+										alt="생성된 장면 이미지"
+										loading="lazy"
+										onload={() => clearScenePreview(m)}
+										onerror={() => clearScenePreview(m)}
+									/>
+								</div>
+							{:else if m.pending && m.previewUrl}
 								<!-- 스트리밍 중간 프레임 프리뷰(점점 또렷해짐) + 진행 표시 -->
 								<div class="scene-streaming">
 									<img class="scene-img" src={m.previewUrl} alt="생성 중" />
@@ -1764,13 +1803,6 @@
 									<span class="typing"><i></i><i></i><i></i></span>
 									<span>이미지 생성 중…</span>
 								</div>
-							{:else if m.content}
-								<img
-									class="scene-img"
-									src={`/img/${m.content}`}
-									alt="생성된 장면 이미지"
-									loading="lazy"
-								/>
 							{/if}
 						{:else}
 							{@render novelBody(m.content, m.role === 'user')}
@@ -2441,6 +2473,18 @@
 		margin: 0.8em 0;
 	}
 	.scene-streaming .scene-img {
+		margin: 0;
+	}
+	/* 최종 이미지 ↔ 프리뷰 placeholder 교차구간: placeholder 가 높이를 잡고, 실제 이미지는
+	   그 위에 겹쳐 로드 → load 완료 후 clearScenePreview 로 placeholder 제거(점프 없음). */
+	.scene-final {
+		position: relative;
+	}
+	.scene-final .scene-overlay {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
 		margin: 0;
 	}
 	.scene-streaming-tag {
