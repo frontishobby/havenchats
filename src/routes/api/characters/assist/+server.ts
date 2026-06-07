@@ -137,7 +137,45 @@ function serializeCurrent(c: CurrentDraft | undefined): string | null {
 	return lines.join('\n');
 }
 
-/** 모델 출력에서 JSON 객체만 추출(코드펜스·머리말 제거 후 첫 {…} 파싱). 실패 시 null. */
+/**
+ * 문자열 리터럴 안의 escape 안 된 raw 제어문자(개행·탭·캐리지리턴)를 \n/\t/\r 로 보정해 유효 JSON 으로.
+ * LLM 이 description 같은 멀티라인 값을 escape 없이 실제 개행으로 내보내 JSON.parse 가 깨지는 흔한 케이스 복구.
+ * 문자열 밖의 개행(보기 좋게 들여쓴 JSON)은 정상 공백이므로 건드리지 않는다.
+ */
+function escapeControlCharsInStrings(s: string): string {
+	let out = '';
+	let inStr = false;
+	let escaped = false;
+	for (let i = 0; i < s.length; i++) {
+		const ch = s[i];
+		if (inStr) {
+			if (escaped) {
+				out += ch;
+				escaped = false;
+			} else if (ch === '\\') {
+				out += ch;
+				escaped = true;
+			} else if (ch === '"') {
+				out += ch;
+				inStr = false;
+			} else if (ch === '\n') {
+				out += '\\n';
+			} else if (ch === '\r') {
+				out += '\\r';
+			} else if (ch === '\t') {
+				out += '\\t';
+			} else {
+				out += ch;
+			}
+		} else {
+			if (ch === '"') inStr = true;
+			out += ch;
+		}
+	}
+	return out;
+}
+
+/** 모델 출력에서 JSON 객체만 추출(코드펜스·머리말 제거 후 첫 {…} 파싱). 실패 시 제어문자 보정 재시도. */
 function extractJson(raw: string): unknown | null {
 	let s = raw.trim();
 	// ```json … ``` / ``` … ``` 코드펜스 제거.
@@ -147,10 +185,16 @@ function extractJson(raw: string): unknown | null {
 	const start = s.indexOf('{');
 	const end = s.lastIndexOf('}');
 	if (start === -1 || end === -1 || end <= start) return null;
+	const body = s.slice(start, end + 1);
 	try {
-		return JSON.parse(s.slice(start, end + 1));
+		return JSON.parse(body);
 	} catch {
-		return null;
+		// 문자열 안에 escape 안 된 개행/탭이 들어가 깨진 경우 보정 후 재시도.
+		try {
+			return JSON.parse(escapeControlCharsInStrings(body));
+		} catch {
+			return null;
+		}
 	}
 }
 
