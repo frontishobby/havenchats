@@ -396,7 +396,6 @@
 		const savedActs = localStorage.getItem(USER_ACTS_KEY);
 		if (savedActs !== null) userActs = Math.min(2, Math.max(0, Number(savedActs)));
 		// 실시간 이미지 설정 복원
-		imageEnabled = localStorage.getItem(IMG_ENABLED_KEY) === '1';
 		const savedRes = localStorage.getItem(IMG_RES_KEY);
 		if (savedRes === '832x1216' || savedRes === '1024x1024') imageResolution = savedRes;
 		imageStyleId = localStorage.getItem(IMG_STYLE_ID_KEY) ?? '';
@@ -404,7 +403,17 @@
 		if (savedPM && getModel(savedPM)) imagePromptModel = savedPM;
 		imageEarly = localStorage.getItem(IMG_EARLY_KEY) === '1';
 		ignoreCharacterAssets = localStorage.getItem(IMG_IGNORE_ASSETS_KEY) === '1';
-		// 켜진 상태로 복원됐으면 키 등록 여부를 검증(키 없으면 loadNaiStatus 가 끈다).
+		// 이미지 생성 ON 여부·그림체:
+		//  - 새 채팅(세션 없음): 캐릭터 추천 그림체가 있으면 그 그림체로 자동 ON, 없으면 OFF(디폴트).
+		//  - 이어가는 세션: 기존 전역 설정(localStorage) 복원.
+		if (!data.sessionId) {
+			const rec = data.recommendedStyle ?? null;
+			imageEnabled = !!rec;
+			if (rec) imageStyleId = rec.id;
+		} else {
+			imageEnabled = localStorage.getItem(IMG_ENABLED_KEY) === '1';
+		}
+		// 켜진 상태면 키 등록 여부를 검증(키 없으면 loadNaiStatus 가 끈다).
 		if (imageEnabled && data.user) loadNaiStatus();
 		// 터치 기반(소프트 키보드) 기기 감지 → Enter 는 개행으로
 		isTouch = window.matchMedia('(pointer: coarse)').matches;
