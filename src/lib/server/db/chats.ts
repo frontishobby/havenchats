@@ -1,4 +1,4 @@
-import type { ChatSession, StoredMessage, Role } from '$lib/types';
+import type { ChatSession, StoredMessage, Role, AppearanceLedger } from '$lib/types';
 
 /**
  * 대화 영속화(세션/메시지) + 토큰 전략 상태 접근.
@@ -25,6 +25,7 @@ interface SessionRow {
 	summary_upto_seq: number;
 	memory: string | null;
 	script_state: string | null;
+	appearances: string | null;
 	message_count: number;
 	created_at: number;
 	updated_at: number;
@@ -48,6 +49,31 @@ function parseScriptState(json: string | null): Record<string, string> | null {
 	}
 }
 
+/**
+ * 외형 원장 JSON 파싱. 손상/빈 값이면 null. appearance 문자열이 있는 항목만 채택하고
+ * lastSeen 은 숫자가 아니면 0 으로 보정한다.
+ */
+function parseAppearances(json: string | null): AppearanceLedger | null {
+	if (!json) return null;
+	try {
+		const parsed = JSON.parse(json) as unknown;
+		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+		const out: AppearanceLedger = {};
+		for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+			const e = v as { appearance?: unknown; lastSeen?: unknown };
+			if (e && typeof e.appearance === 'string' && e.appearance.trim()) {
+				out[k] = {
+					appearance: e.appearance,
+					lastSeen: typeof e.lastSeen === 'number' ? e.lastSeen : 0
+				};
+			}
+		}
+		return Object.keys(out).length > 0 ? out : null;
+	} catch {
+		return null;
+	}
+}
+
 function rowToSession(r: SessionRow): ChatSession {
 	return {
 		id: r.id,
@@ -58,6 +84,7 @@ function rowToSession(r: SessionRow): ChatSession {
 		summaryUptoSeq: r.summary_upto_seq,
 		memory: r.memory,
 		scriptState: parseScriptState(r.script_state),
+		appearances: parseAppearances(r.appearances),
 		messageCount: r.message_count,
 		createdAt: r.created_at,
 		updatedAt: r.updated_at,
@@ -66,7 +93,7 @@ function rowToSession(r: SessionRow): ChatSession {
 }
 
 const SESSION_COLS =
-	'id, user_id, character_id, model, summary, summary_upto_seq, memory, script_state, message_count, created_at, updated_at, last_message_at';
+	'id, user_id, character_id, model, summary, summary_upto_seq, memory, script_state, appearances, message_count, created_at, updated_at, last_message_at';
 
 /** 단일 세션 조회(소유권 확인 포함). */
 export async function getSession(
@@ -348,6 +375,7 @@ export async function createSession(
 		summaryUptoSeq: 0,
 		memory: memVal,
 		scriptState: seedVars && Object.keys(seedVars).length > 0 ? seedVars : null,
+		appearances: null,
 		messageCount: count,
 		createdAt: now,
 		updatedAt: now,
@@ -452,6 +480,22 @@ export async function updateScriptState(
 	const val = Object.keys(state).length > 0 ? JSON.stringify(state) : null;
 	await db
 		.prepare('UPDATE chat_sessions SET script_state = ?, updated_at = ? WHERE id = ?')
+		.bind(val, Date.now(), sessionId)
+		.run();
+}
+
+/**
+ * 외형 원장 갱신(실시간 이미지 생성 시). 빈 원장이면 NULL 로 저장.
+ * NovelAI 호출 전 inline 으로 저장 — 빠른 재요청 레이스를 피하고 다음 턴 일관성을 보장한다.
+ */
+export async function updateAppearances(
+	db: D1Database,
+	sessionId: string,
+	ledger: AppearanceLedger
+): Promise<void> {
+	const val = Object.keys(ledger).length > 0 ? JSON.stringify(ledger) : null;
+	await db
+		.prepare('UPDATE chat_sessions SET appearances = ?, updated_at = ? WHERE id = ?')
 		.bind(val, Date.now(), sessionId)
 		.run();
 }

@@ -251,6 +251,20 @@ export interface StoredMessage extends ChatMessage {
 	seq: number;
 }
 
+/**
+ * 외형 원장 한 항목 — 인물 첫 등장 시 고정한 외형 태그 + 마지막 등장 시점.
+ * 옷·표정·포즈(가변 상태)는 여기 넣지 않는다(매 턴 새로 그림).
+ */
+export interface AppearanceEntry {
+	/** 고정 외형 danbooru 태그(머리·눈·체형·고유특징). */
+	appearance: string;
+	/** 마지막 등장 턴 기준값(session.messageCount). 원장 상한 초과 시 오래된 것부터 evict. */
+	lastSeen: number;
+}
+
+/** 세션별 외형 원장 — 정규화된 인물 name → 고정 외형. 동적 NPC 외형 일관성용. */
+export type AppearanceLedger = Record<string, AppearanceEntry>;
+
 /** 대화 세션. summary/summary_upto_seq 가 토큰 전략(요약+window)의 상태. */
 export interface ChatSession {
 	id: string;
@@ -263,6 +277,8 @@ export interface ChatSession {
 	memory: string | null;
 	/** 세션 변수 상태(CBS getvar/setvar). 키=변수명(소문자), 값=문자열. 없으면 null. */
 	scriptState: Record<string, string> | null;
+	/** 외형 원장(실시간 이미지에서 동적 NPC 외형 고정). 없으면 null. */
+	appearances: AppearanceLedger | null;
 	messageCount: number;
 	createdAt: number;
 	updatedAt: number;

@@ -6,8 +6,10 @@ import {
 	appendMessage,
 	getOwnedMessage,
 	messageExists,
-	updateMessageContentCost
+	updateMessageContentCost,
+	updateAppearances
 } from '$lib/server/db/chats';
+import type { AppearanceLedger } from '$lib/types';
 import { findCharacter } from '$lib/server/characters';
 import { getCharacterPrompt } from '$lib/server/db/characters';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
@@ -52,6 +54,10 @@ const MAX_RECENT_MSGS = 6;
 const MAX_RECENT_MSG_CHARS = 2000;
 /** NAI V4.5 캐릭터 최대 인원(공식 상한 6). 초과분은 잘라낸다. */
 const MAX_CHARACTERS = 6;
+/** 외형 원장 최대 인원. 초과 시 가장 오래 안 나온 인물부터 evict. */
+const MAX_LEDGER_ENTRIES = 16;
+/** 원장에 박는 고정 외형 태그 최대 길이(자). */
+const MAX_APPEARANCE_CHARS = 300;
 
 /** 요청의 상황 프롬프트 모델 검증 — 구조화 출력 안정 모델(Gemini 계열+Opus)만. 미허용이면 기본 모델. */
 function pickPromptModel(requested?: string): string {
@@ -63,12 +69,15 @@ function pickPromptModel(requested?: string): string {
 /**
  * 구조화 출력 스키마(generateObject) — NAI V4.5 캐릭터 기능에 맞춰 장면을 분해한다.
  *  - base: 배경·구도·인원수 태그(1girl/2girls/1boy 1girl)·상호작용(source#/target#) 등 전역 캡션.
- *  - characters[]: 화면에 보이는 인물별 캡션(번호 없는 girl/boy + 외형 + 복장 + 표정/포즈).
+ *  - characters[]: 화면에 보이는 인물별로 name/appearance/state 분해.
+ *    · name: 외형 원장 대조용 안정 식별자(주인공=char, 유저=user, 그 외 in-story 이름/식별자).
+ *    · appearance: 고정 외형(머리·눈·체형·고유특징) — 원장에 박아 턴 간 고정.
+ *    · state: 가변(현재 복장·노출·표정·포즈) — 매 턴 새로.
  *    인물을 분리하면 NAI 가 인물 간 속성 누출(머리색·옷 bleeding)을 막는다.
  */
 const SITUATION_SCHEMA = jsonSchema<{
 	base: string;
-	characters: { caption: string }[];
+	characters: { name: string; appearance: string; state: string }[];
 }>({
 	type: 'object',
 	additionalProperties: false,
@@ -79,8 +88,12 @@ const SITUATION_SCHEMA = jsonSchema<{
 			items: {
 				type: 'object',
 				additionalProperties: false,
-				properties: { caption: { type: 'string' } },
-				required: ['caption']
+				properties: {
+					name: { type: 'string' },
+					appearance: { type: 'string' },
+					state: { type: 'string' }
+				},
+				required: ['name', 'appearance', 'state']
 			}
 		}
 	},
@@ -89,17 +102,20 @@ const SITUATION_SCHEMA = jsonSchema<{
 
 const SITUATION_SYSTEM = [
 	`You convert the latest moment of a Korean roleplay scene into a structured image-generation prompt for NovelAI Diffusion V4.5 (anime illustration), using its MULTI-CHARACTER feature.`,
-	`You are given a [Character] reference sheet and the [Recent conversation] (the last few turns, oldest to newest, including the user's actions). Depict ONLY the LATEST moment — the final line of the conversation; use the earlier lines purely as context for what is happening right now. Ignore the reference's non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
+	`You are given a [Character] reference sheet for the main roleplay character, an optional [Known characters] roster of people whose fixed appearance was already established earlier in this story, and the [Recent conversation] (the last few turns, oldest to newest, including the user's actions). Depict ONLY the LATEST moment — the final line of the conversation; use the earlier lines purely as context for what is happening right now. Ignore non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
 	``,
 	`Output a JSON object with two keys:`,
 	`  "base": string  — Danbooru-style tags for everything that is NOT an individual character's body/clothes: the SUBJECT COUNT tag (e.g. "1girl", "1boy, 1girl", "2girls"), framing/composition (e.g. "upper body", "cowboy shot", "full body", "from above", "pov"), setting/background, lighting and mood, and INTERACTION action tags between characters using the "source#"/"target#"/"mutual#" prefixes (e.g. "source#hug" on the initiator's intent, "target#hug", "mutual#kiss"). Lowercase, comma-separated.`,
-	`  "characters": array — one entry per person VISIBLE in the frame, ordered top-to-bottom / left-to-right. Each entry is { "caption": string } where caption is Danbooru tags for THAT person only: an UNNUMBERED subject word ("girl"/"boy"/"other"), hair color/length/style, eye color, body type and notable features (from the reference for the roleplay character), the CURRENT clothing or state of undress from the [Latest scene] (e.g. "white blouse, unbuttoned, no bra", "naked, towel"), plus that person's expression and pose. Lowercase, comma-separated.`,
+	`  "characters": array — one entry per person VISIBLE in the frame, ordered top-to-bottom / left-to-right. Each entry is { "name", "appearance", "state" }:`,
+	`    - "name": a STABLE identifier for this person, used to keep their look consistent across images. Use the literal "char" for the main roleplay character ({{char}}), and the literal "user" for the user/{{나}}. For anyone else, if they are the SAME person as someone in [Known characters], reuse that EXACT name; otherwise assign a short identifier (their in-story name if any, else a concise descriptor like "waitress").`,
+	`    - "appearance": that person's FIXED physical look as Danbooru tags only — an UNNUMBERED subject word ("girl"/"boy"/"other"), hair color/length/style, eye color, body type, and distinctive PERMANENT features. NEVER put clothing, expression, or pose here. For "char" use the [Character] reference. For a person listed in [Known characters], COPY their recorded appearance verbatim. For a brand-new person, invent a plausible consistent appearance.`,
+	`    - "state": that person's CURRENT scene-specific look from the latest moment — clothing or state of undress (e.g. "white blouse, unbuttoned, no bra", "naked, towel"), plus expression and pose. This is the only part that changes turn to turn. Lowercase, comma-separated.`,
 	``,
 	`Character rules:`,
-	`- The roleplay character ({{char}}) MUST keep the reference's fixed appearance (hair color/length/style, eye color, body type, distinctive features) so it stays consistent across images. Only clothing/undress and expression/pose follow the latest scene.`,
-	`- Include the user/{{나}} as a SEPARATE character entry ONLY if they are physically in the frame in this moment (e.g. the two are embracing, the user's body is shown). For typical 1:1 POV shots where only the character is depicted, output just one character entry.`,
+	`- "appearance" must stay identical for the same person across turns (that is what keeps images consistent); only "state" follows the latest scene.`,
+	`- Include the user ("user") as a SEPARATE entry ONLY if they are physically in the frame in this moment (e.g. the two are embracing, the user's body is shown). For typical 1:1 POV shots where only the character is depicted, output just one entry.`,
 	`- The subject COUNT tag in "base" must match the number of character entries (1 entry → "1girl" or "1boy"; 2 entries → e.g. "1boy, 1girl").`,
-	`- Put per-person body/clothes ONLY in "characters", never in "base". Put the count tag ONLY in "base", never in a character entry.`,
+	`- Put per-person body/clothes ONLY in "appearance"/"state", never in "base". Put the count tag ONLY in "base", never in a character entry.`,
 	``,
 	`General rules:`,
 	`- English only. Focus on the single most recent visual beat, not the whole history.`,
@@ -130,6 +146,32 @@ function sanitizeSituation(raw: string): string {
 		.join(', ')
 		.replace(/\s+/g, ' ')
 		.trim();
+}
+
+/**
+ * 외형 원장 키 정규화 — LLM 이 준 name 의 표기 흔들림(공백/대소문자)만 흡수한다.
+ * 동일인 판정(대명사·호칭 변동)은 LLM 이 [Known characters] 대조로 이미 처리하므로 여기선 가볍게만.
+ */
+function normalizeKey(name: string): string {
+	return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** 주인공/유저 예약 슬롯인지 — 이들은 원장에 박지 않는다(주인공은 매 턴 ref 로 안정, 유저는 persona). */
+function isReservedName(key: string, charLabel: string, userLabel: string): boolean {
+	return (
+		key === 'char' ||
+		key === 'user' ||
+		key === '나' ||
+		key === '{{나}}' ||
+		key === normalizeKey(charLabel) ||
+		key === normalizeKey(userLabel)
+	);
+}
+
+/** 원장을 LLM 주입용 [Known characters] 블록으로. 비면 빈 문자열. */
+function buildKnownBlock(ledger: AppearanceLedger): string {
+	const lines = Object.entries(ledger).map(([name, e]) => `- ${name}: ${e.appearance}`);
+	return lines.length ? `[Known characters]\n${lines.join('\n')}` : '';
 }
 
 interface ImageRequestBody {
@@ -286,6 +328,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		);
 	}
 
+	// 외형 원장(세션 누적) — 동적 NPC 외형 고정용. 작업 사본으로 변이 후, 변경 시 NovelAI 전에 영속.
+	const ledger: AppearanceLedger = { ...(session.appearances ?? {}) };
+	let ledgerDirty = false;
+	const knownBlock = buildKnownBlock(ledger); // LLM 주입용 [Known characters] 블록
+
 	// 디버그(요청자가 debug 모드일 때만)용 진단값 누적 — 성공·실패 양쪽에서 동봉한다.
 	let situation = ''; // base 와 인물 캡션을 ' | ' 로 합친 표시용
 	let baseScene = '';
@@ -302,6 +349,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			? {
 					promptModel,
 					characterRef,
+					knownCharacters: knownBlock,
 					situation,
 					baseScene,
 					characters: charCaptions,
@@ -331,7 +379,12 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		const sceneBlock = recentBlock
 			? `[Recent conversation]\n${recentBlock}`
 			: `[Latest scene]\n${assistantText}`;
-		const userPrompt = characterRef ? `[Character]\n${characterRef}\n\n${sceneBlock}` : sceneBlock;
+		// [Character](주인공 ref) + [Known characters](기존 NPC 외형 원장) + 장면. LLM 이 name 으로 원장 대조.
+		const promptParts: string[] = [];
+		if (characterRef) promptParts.push(`[Character]\n${characterRef}`);
+		if (knownBlock) promptParts.push(knownBlock);
+		promptParts.push(sceneBlock);
+		const userPrompt = promptParts.join('\n\n');
 		// 게이트웨이가 일시적 503/500 을 자동 재시도하지 않으므로 직접 백오프 재시도한다.
 		const result = await generateObjectWithRetry({
 			model: gateway(promptModel),
@@ -348,10 +401,42 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		rawSituation = JSON.stringify(obj);
 		// base·각 인물 캡션을 필드별로 한글/잡음 제거(모델이 상태창을 베껴 넣어도 영어 태그만 남김).
 		baseScene = sanitizeSituation(str(obj.base));
-		charCaptions = (Array.isArray(obj.characters) ? obj.characters : [])
-			.map((c) => sanitizeSituation(str((c as { caption?: unknown })?.caption)))
-			.filter(Boolean)
-			.slice(0, MAX_CHARACTERS);
+
+		// 인물별: name 으로 원장 대조 → 기존이면 외형 고정(override), 신규면 핀. 최종 캡션 = 외형 + 상태.
+		const turnRef = session.messageCount;
+		const rawChars = (Array.isArray(obj.characters) ? obj.characters : []).slice(0, MAX_CHARACTERS);
+		charCaptions = [];
+		for (const c of rawChars) {
+			const entry = c as { name?: unknown; appearance?: unknown; state?: unknown };
+			const cleanState = sanitizeSituation(str(entry.state));
+			let appearance = sanitizeSituation(str(entry.appearance)).slice(0, MAX_APPEARANCE_CHARS);
+			const key = normalizeKey(str(entry.name));
+			// 주인공(char)·유저(user)는 원장에 박지 않는다(주인공은 매 턴 ref 로 안정).
+			if (key && !isReservedName(key, charLabel, userLabel)) {
+				const known = ledger[key];
+				if (known) {
+					appearance = known.appearance; // 기존 인물: 고정 외형 강제(LLM 드리프트 무시)
+					ledger[key] = { appearance: known.appearance, lastSeen: turnRef };
+					ledgerDirty = true;
+				} else if (appearance) {
+					ledger[key] = { appearance, lastSeen: turnRef }; // 첫 등장: 외형 핀
+					ledgerDirty = true;
+				}
+			}
+			const caption = [appearance, cleanState].filter(Boolean).join(', ');
+			if (caption) charCaptions.push(caption);
+		}
+
+		// 원장 상한 초과 시 가장 오래 안 나온 인물부터 제거(LRU evict).
+		const names = Object.keys(ledger);
+		if (names.length > MAX_LEDGER_ENTRIES) {
+			names
+				.sort((a, b) => ledger[a].lastSeen - ledger[b].lastSeen)
+				.slice(0, names.length - MAX_LEDGER_ENTRIES)
+				.forEach((n) => delete ledger[n]);
+			ledgerDirty = true;
+		}
+
 		// 표시용 합본(디버그 패널·빈값 판정). base 와 인물 캡션을 ' | ' 로 잇는다.
 		situation = [baseScene, ...charCaptions].filter(Boolean).join(' | ');
 		finishReason = (result.finishReason as string | undefined) ?? null;
@@ -411,6 +496,15 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			{ error: 'blocked', message: '생성할 수 없는 내용이 포함되어 있어 이미지를 만들지 않았습니다.', debug: makeDebug(positive) },
 			{ status: 422 }
 		);
+	}
+
+	// 외형 원장 변경분 영속 — 다음 턴 일관성. NovelAI 전에 inline 저장(빠른 재요청 레이스 방지).
+	if (ledgerDirty) {
+		try {
+			await updateAppearances(db, sessionId, ledger);
+		} catch (e) {
+			console.warn('[chat/image] 외형 원장 저장 실패(무시):', String(e));
+		}
 	}
 
 	// ── 2) NovelAI 생성(스트리밍) ──

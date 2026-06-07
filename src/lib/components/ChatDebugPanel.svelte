@@ -345,6 +345,13 @@
 					<p class="muted">없음(description 비어 있음).</p>
 				{/if}
 
+				<div class="sub">외형 원장 — 동적 NPC (LLM 입력)</div>
+				{#if imageDebug.knownCharacters}
+					<pre class="dump small">{imageDebug.knownCharacters}</pre>
+				{:else}
+					<p class="muted">없음(아직 고정된 NPC 외형 없음).</p>
+				{/if}
+
 				<div class="sub">상황 프롬프트 모델 응답 (원문)</div>
 				{#if imageDebug.rawSituation}
 					<pre class="dump small">{imageDebug.rawSituation}</pre>
