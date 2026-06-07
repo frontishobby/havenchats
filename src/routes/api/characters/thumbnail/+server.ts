@@ -1,5 +1,4 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { generateText } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
@@ -121,11 +120,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	let situation = givenSituation;
 	const needLlm = !situation || regen;
 	if (needLlm) {
-		const apiKey = env.AI_GATEWAY_API_KEY;
+		const apiKey = await getDecryptedKey(db, locals.user.id, 'gateway');
 		if (!apiKey) {
 			return json(
-				{ error: 'situation', message: '상황 프롬프트 생성을 사용할 수 없습니다 (AI Gateway 미설정).' },
-				{ status: 503 }
+				{ error: 'no_gateway_key', message: 'API 키 관리에서 Vercel AI Gateway 키를 먼저 등록해 주세요.' },
+				{ status: 400 }
 			);
 		}
 		if (!description) {

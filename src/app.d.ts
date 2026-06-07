@@ -21,7 +21,6 @@ declare global {
 		// interface PageState {}
 		interface Platform {
 			env: {
-				AI_GATEWAY_API_KEY?: string;
 				DB?: D1Database;
 				IMAGES?: R2Bucket;
 				SESSIONS?: KVNamespace;

@@ -1,8 +1,8 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { generateText } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
 import { isAdmin } from '$lib/server/auth';
+import { getDecryptedKey } from '$lib/server/db/userKeys';
 import { notifyServerError } from '$lib/server/notify';
 import { buildProviderOptions, reasoningHeadroom } from '$lib/server/chatAssembly';
 import { isOverDailyBudget, addDailySpend, DAILY_BUDGET_USD } from '$lib/server/budget';
@@ -183,11 +183,13 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const model = pickAssistModel(body?.model);
 	const currentBlock = serializeCurrent(body?.current);
 
-	const apiKey = env.AI_GATEWAY_API_KEY;
+	const db = platform?.env?.DB;
+	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
+	const apiKey = await getDecryptedKey(db, locals.user.id, 'gateway');
 	if (!apiKey) {
 		return json(
-			{ error: 'unavailable', message: '캐릭터 보조 생성을 사용할 수 없습니다 (AI Gateway 미설정).' },
-			{ status: 503 }
+			{ error: 'no_gateway_key', message: 'API 키 관리에서 Vercel AI Gateway 키를 먼저 등록해 주세요.' },
+			{ status: 400 }
 		);
 	}
 

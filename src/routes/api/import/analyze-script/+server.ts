@@ -1,6 +1,6 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { requireAdmin } from '$lib/server/auth';
-import { env } from '$env/dynamic/private';
+import { getDecryptedKey } from '$lib/server/db/userKeys';
 import { generateText } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
 
@@ -39,7 +39,7 @@ const SYSTEM = [
 	`코드에 근거해 설명하고, 확신 못 하는 부분은 "추정"이라고 밝혀라. 코드 원문을 그대로 길게 옮기지 마라.`
 ].join('\n');
 
-export const POST: RequestHandler = async ({ request, locals }) => {
+export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
 	requireAdmin(locals.user.email); // charx import(스크립트 분석)는 관리자 전용
 
@@ -73,11 +73,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return json({ error: '분석할 내용이 비어있어요.' }, { status: 400 });
 	}
 
-	const apiKey = env.AI_GATEWAY_API_KEY;
+	const db = platform?.env?.DB;
+	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
+	const apiKey = await getDecryptedKey(db, locals.user.id, 'gateway');
 	if (!apiKey) {
 		return json(
-			{ error: 'AI 분석 키가 설정되지 않았어요(AI_GATEWAY_API_KEY).' },
-			{ status: 503 }
+			{ error: 'no_gateway_key', message: 'API 키 관리에서 Vercel AI Gateway 키를 먼저 등록해 주세요.' },
+			{ status: 400 }
 		);
 	}
 
