@@ -37,8 +37,8 @@ export const DIRECTIVE_EST = 60;
 export const REASONING_HEADROOM = 8000;
 /** Google(Gemini) 계열에 허용할 thinking 예산(완전 차단 X — 소량 허용). */
 const GOOGLE_THINKING_BUDGET = 1024;
-/** OpenAI(GPT) 추론 모델의 추론 강도(소설모드엔 최소). */
-const OPENAI_REASONING_EFFORT = 'minimal';
+/** OpenAI(GPT) 추론 모델의 추론 강도(소설모드엔 최소). GPT-5.4는 'minimal' 미지원 → 'none'/'low'만. */
+const OPENAI_REASONING_EFFORT = 'none';
 /** xAI(Grok) 추론 모델의 추론 강도. */
 const XAI_REASONING_EFFORT = 'low';
 /** 한 번에 보낼 수 있는 유저 메시지의 토큰 상한. */
@@ -106,7 +106,7 @@ export function buildProviderOptions(
 			}
 		};
 	} else if (modelId.startsWith('openai/')) {
-		out.openai = { reasoningEffort: noThink ? 'minimal' : OPENAI_REASONING_EFFORT };
+		out.openai = { reasoningEffort: noThink ? 'none' : OPENAI_REASONING_EFFORT };
 	} else if (modelId.startsWith('xai/')) {
 		out.xai = { reasoningEffort: noThink ? 'low' : XAI_REASONING_EFFORT };
 	} else if (modelId.startsWith('deepseek/')) {
