@@ -2,10 +2,10 @@ import { encryptSecret, decryptSecret } from '$lib/server/crypto';
 
 /**
  * 외부 서비스 API 키 보관(user_keys 테이블). 평문은 절대 저장하지 않고 AES-GCM 암호문만 저장한다.
- * 현재 provider 는 'novelai' 하나. 키 검증·생성 로직은 lib/server/novelai.ts.
+ * provider: 'novelai'(이미지 생성), 'gateway'(Vercel AI Gateway — 챗/상황프롬프트 LLM).
  */
 
-export type KeyProvider = 'novelai';
+export type KeyProvider = 'novelai' | 'gateway';
 
 /** 등록 시점 검증 스냅샷(NovelAI: { tier, active, isOpus }). UI 표시·재검증 생략용. */
 export type StoredKeyMeta = Record<string, unknown>;

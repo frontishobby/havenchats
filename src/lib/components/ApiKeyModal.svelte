@@ -17,16 +17,73 @@
 	let saved = $state(false);
 	let initialized = $state(false);
 
+	// Vercel AI Gateway 키(챗 필수) 상태
+	let gStatus = $state<{ registered: boolean; updatedAt: number | null } | null>(null);
+	let gKeyInput = $state('');
+	let gSaving = $state(false);
+	let gDeleting = $state(false);
+	let gError = $state('');
+	let gSaved = $state(false);
+
 	async function loadStatus() {
 		loading = true;
 		error = '';
 		try {
-			const res = await fetch('/api/keys/novelai');
-			if (res.ok) status = (await res.json()) as KeyStatus;
+			const [n, g] = await Promise.all([
+				fetch('/api/keys/novelai'),
+				fetch('/api/keys/gateway')
+			]);
+			if (n.ok) status = (await n.json()) as KeyStatus;
+			if (g.ok) gStatus = (await g.json()) as { registered: boolean; updatedAt: number | null };
 		} catch (e) {
 			console.error(e);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function gSave() {
+		const key = gKeyInput.trim();
+		if (!key || gSaving) return;
+		gSaving = true;
+		gError = '';
+		gSaved = false;
+		try {
+			const res = await fetch('/api/keys/gateway', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ key })
+			});
+			const d = (await res.json().catch(() => ({}))) as { message?: string };
+			if (res.ok) {
+				gKeyInput = '';
+				gSaved = true;
+				await loadStatus();
+			} else {
+				gError = d.message ?? '등록에 실패했습니다.';
+			}
+		} catch (e) {
+			gError = e instanceof Error ? e.message : '등록에 실패했습니다.';
+		} finally {
+			gSaving = false;
+		}
+	}
+
+	async function gRemove() {
+		if (gDeleting) return;
+		if (!confirm('등록된 Vercel AI Gateway 키를 삭제할까요? 삭제하면 채팅을 사용할 수 없어요.')) return;
+		gDeleting = true;
+		gError = '';
+		try {
+			const res = await fetch('/api/keys/gateway', { method: 'DELETE' });
+			if (res.ok) {
+				gSaved = false;
+				await loadStatus();
+			}
+		} catch (e) {
+			console.error(e);
+		} finally {
+			gDeleting = false;
 		}
 	}
 
@@ -37,6 +94,9 @@
 			keyInput = '';
 			saved = false;
 			error = '';
+			gKeyInput = '';
+			gSaved = false;
+			gError = '';
 			loadStatus();
 		} else if (!apiKeyModal.open && initialized) {
 			initialized = false;
@@ -114,8 +174,54 @@
 
 			<div class="head">
 				<h2>API 키 관리</h2>
-				<p class="sub">실시간 이미지 생성에 쓸 NovelAI 키를 등록하세요.</p>
+				<p class="sub">채팅에는 Vercel AI Gateway 키가, 실시간 이미지 생성에는 NovelAI 키가 필요해요.</p>
 			</div>
+
+			<div class="provider">
+				<div class="provider-head">
+					<strong>Vercel AI Gateway</strong>
+					{#if loading}
+						<span class="badge pending">확인 중…</span>
+					{:else if gStatus?.registered}
+						<span class="badge ok">등록됨</span>
+					{:else}
+						<span class="badge none">미등록</span>
+					{/if}
+				</div>
+
+				<p class="hint">
+					채팅(AI 응답)에 사용할 키예요. <strong>필수</strong> — 없으면 채팅을 사용할 수 없어요. 키는
+					<a href="https://vercel.com/dashboard/ai-gateway/api-keys" target="_blank" rel="noreferrer noopener">Vercel AI Gateway</a>
+					대시보드에서 발급해요. 서버에 암호화되어 저장됩니다.
+				</p>
+
+				<div class="field">
+					<label for="gw-key">{gStatus?.registered ? '키 교체' : '키 등록'}</label>
+					<input
+						id="gw-key"
+						type="password"
+						placeholder="vck_..."
+						autocomplete="off"
+						bind:value={gKeyInput}
+					/>
+				</div>
+
+				{#if gError}<p class="error">{gError}</p>{/if}
+				{#if gSaved}<p class="ok-msg">저장되었습니다.</p>{/if}
+
+				<div class="actions">
+					{#if gStatus?.registered}
+						<button class="del" onclick={gRemove} disabled={gDeleting}>
+							{gDeleting ? '삭제 중…' : '삭제'}
+						</button>
+					{/if}
+					<button class="save" onclick={gSave} disabled={!gKeyInput.trim() || gSaving}>
+						{gSaving ? '확인 중…' : gStatus?.registered ? '교체' : '등록'}
+					</button>
+				</div>
+			</div>
+
+			<div class="provider-sep"></div>
 
 			<div class="provider">
 				<div class="provider-head">
@@ -216,6 +322,11 @@
 		margin: 0 0 20px;
 		font-size: 0.85rem;
 		color: var(--text-dim);
+	}
+	.provider-sep {
+		height: 1px;
+		margin: 22px 0;
+		background: var(--border);
 	}
 	.provider-head {
 		display: flex;

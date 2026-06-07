@@ -24,6 +24,7 @@ import { pinSceneCodes } from '$lib/imageCodes';
 import { personalize } from '$lib/placeholders';
 import { notifyServerError } from '$lib/server/notify';
 import { isOverDailyBudget, addDailySpend, DAILY_BUDGET_USD } from '$lib/server/budget';
+import { getDecryptedKey } from '$lib/server/db/userKeys';
 import {
 	assembleTurn,
 	buildSnapshot,
@@ -87,6 +88,16 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const budgetExempt = isAdmin(locals.user.email);
 	if (!budgetExempt && (await isOverDailyBudget(kv, locals.user.id, Date.now()))) {
 		return json({ error: 'daily_limit', limit: DAILY_BUDGET_USD }, { status: 429 });
+	}
+
+	// 챗은 유저 본인 Vercel AI Gateway 키로 호출(BYO). 키 없으면 차단(admin 은 서버 키로 폴백).
+	let gatewayKey = await getDecryptedKey(db, locals.user.id, 'gateway');
+	if (!gatewayKey && budgetExempt) gatewayKey = env.AI_GATEWAY_API_KEY ?? null;
+	if (!gatewayKey) {
+		return json(
+			{ error: 'no_gateway_key', message: 'API 키 관리에서 Vercel AI Gateway 키를 먼저 등록해 주세요.' },
+			{ status: 400 }
+		);
 	}
 
 	const body = (await request.json()) as ChatRequestBody;
@@ -203,8 +214,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			})
 		: null;
 
-	const apiKey = env.AI_GATEWAY_API_KEY;
-	const gateway = apiKey ? createGateway({ apiKey }) : null;
+	const gateway = createGateway({ apiKey: gatewayKey });
 
 	// 응답 종료 후 처리(영속화·요약)를 워커 생존 보장 하에 실행.
 	const after = (p: Promise<unknown>) => {
@@ -223,22 +233,6 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		'x-haven-input-tokens': String(inputTokensEst),
 		'x-haven-input-max': String(inputLimit)
 	};
-
-	// 키가 없으면 mock 스트리머로 폴백 (로컬에서 키 없이도 UI 동작)
-	if (!gateway) {
-		return mockStream(
-			db,
-			after,
-			session,
-			character,
-			modelId,
-			inputTokensEst,
-			assistantMsgId,
-			maxSentences,
-			tokenHeaders,
-			debugSnapshot
-		);
-	}
 
 	console.log(
 		`[chat] session=${session.id} character=${character.id} model=${modelId} window=${window.length} inputEst=${inputTokensEst} summarized=${session.summaryUptoSeq > 0}`
@@ -516,77 +510,4 @@ function pickMsgId(requested?: string): string {
 	return typeof requested === 'string' && requested.trim() !== ''
 		? requested.trim()
 		: crypto.randomUUID();
-}
-
-// ─────────────────────────────────────────────────────────────
-// 폴백: AI Gateway 키가 없을 때 사용하는 mock 스트리머 (저장은 동일하게 수행)
-// ─────────────────────────────────────────────────────────────
-function mockStream(
-	db: D1Database,
-	after: (p: Promise<unknown>) => void,
-	session: ChatSession,
-	character: Character,
-	modelId: string,
-	inputTokensEst: number,
-	assistantMsgId: string,
-	maxSentences: number,
-	tokenHeaders: Record<string, string>,
-	debugSnapshot: ChatDebugSnapshot | null
-): Response {
-	const reply = mockReply(character.name);
-
-	const encoder = new TextEncoder();
-	const stream = new ReadableStream({
-		async start(controller) {
-			const tokens = reply.match(/\S+\s*/g) ?? [reply];
-			for (const token of tokens) {
-				controller.enqueue(encoder.encode(token));
-				await new Promise((r) => setTimeout(r, 35));
-			}
-			controller.enqueue(
-				encoder.encode(
-					META_SEP +
-						safeJson({
-							model: modelId,
-							finishReason: 'stop',
-							mock: true,
-							...(debugSnapshot ? { debug: debugSnapshot } : {})
-						})
-				)
-			);
-			controller.close();
-			// mock 은 실 usage 가 없으므로 추정치를 input 토큰으로 저장.
-			after(
-				appendMessage(
-					db,
-					session.id,
-					'assistant',
-					reply,
-					modelId,
-					inputTokensEst,
-					undefined,
-					assistantMsgId,
-					maxSentences
-				).then(() => undefined)
-			);
-		}
-	});
-
-	return new Response(stream, {
-		headers: {
-			'content-type': 'text/plain; charset=utf-8',
-			'cache-control': 'no-store',
-			'x-haven-mock': '1',
-			...tokenHeaders
-		}
-	});
-}
-
-function mockReply(name: string): string {
-	const samples = [
-		`그래? 사실 나도 비슷한 생각 하고 있었어. 근데 너는 어떻게 하고 싶은데?`,
-		`(${name}이/가 잠시 고민한다) 흠... 솔직히 말하면, 네가 그렇게 말해주니까 좀 기뻐.`,
-		`그 말, 곱씹게 되네. 우리 천천히 같이 풀어보자.`
-	];
-	return samples[name.length % samples.length];
 }

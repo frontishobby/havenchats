@@ -927,6 +927,13 @@
 					'⚠️ 오늘 사용량 한도에 도달했어요. 내일 다시 이어가 주세요. (베타 기간 한도)';
 				return;
 			}
+			if (res.status === 400) {
+				const j = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+				messages[idx].content = `⚠️ ${j.message ?? '요청을 처리할 수 없어요.'}`;
+				// Gateway 키 미등록이면 키 관리 모달을 바로 열어 등록을 유도.
+				if (j.error === 'no_gateway_key') apiKeyModal.open = true;
+				return;
+			}
 			if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
 			// 서버가 lazy 생성한 세션 id 회수 (이후 전송부터 이어가기)
