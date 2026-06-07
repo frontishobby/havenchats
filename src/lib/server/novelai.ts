@@ -62,8 +62,9 @@ export async function verifySubscription(token: string): Promise<VerifyResult> {
 export const QUALITY_TAIL =
 	', -4::artist collaboration, year 2025, year 2024, -3::spoken bubble, text, cross-section::, rating:explicit, {{{-3::censored, photo inset, stomach deformation}}}, {{{-3::small lines::}}}, 1.5::balanced contrast::, -2::simple illustration::, -1::censored::, best quality, amazing quality, very aesthetic, intricate detail, highres, incredibly absurdres';
 
-/** 고정 네거티브 프롬프트. */
+/** 고정 네거티브 프롬프트. 맨 앞 아동 코드 차단 태그는 미성년 묘사 억제(하드 차단과 병행). */
 export const NEGATIVE_PROMPT =
+	'child, loli, shota, toddler, infant, baby, young child, age regression, ' +
 	'text, logo, signature, watermark, too many watermarks, chili inset, 0.4::artist:nameo (judgemasterkou), artist:matsunaga kouyou::, artist collaboration, chibi, 1990s (style), bad anatomy, distorted anatomy, disfigured, bad hands, missing finger, extra digits, mutation, extra arms, extra legs, long neck, bad feet, very displeasing, undetailed eyes, multiple views, negative space, blank page, variant set, large variant set, 4koma, 2koma, oekaki, halftone, screentone, artistic error, film grain, scan artifacts, jpeg artifacts, chromatic aberration, dithering, disorganized colors, lowres, worst quality, bad quality, cheesy, sloppiness, unfinished, Incomplete, ai-generated';
 
 export const MODEL = 'nai-diffusion-4-5-full';

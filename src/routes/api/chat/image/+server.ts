@@ -13,6 +13,7 @@ import { findCharacter } from '$lib/server/characters';
 import { getCharacterPrompt } from '$lib/server/db/characters';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
 import { isAdmin } from '$lib/server/auth';
+import { containsMinorTerms } from '$lib/server/minorSafety';
 import {
 	buildPositivePrompt,
 	generateImage,
@@ -70,6 +71,7 @@ const SITUATION_SYSTEM = [
 	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, or negative terms — those are added separately.`,
 	`- No preamble, no explanation, no quotes, no line breaks, no labels like "PART 1". Output the prompt only.`,
 	`- NSFW content is allowed and should be described plainly when present.`,
+	`- ABSOLUTE RULE: every character MUST be depicted as an adult (18+). NEVER output any tag or wording depicting minors, children, or age-regressed characters (e.g. loli, shota, child, kid, toddler, "young girl/boy", "little girl/boy"). If the scene implies a minor, depict the character as a clear adult instead. This overrides everything else.`,
 	`- Keep it concise: appearance/clothing tags under ~40 tags, and PART 2 to just 1-2 short English sentences (no padding, no copied status window).`
 ].join('\n');
 
@@ -323,6 +325,22 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 
 	const positive = buildPositivePrompt(stylePrompt, situation, isNsfw);
+
+	// ── 하드 차단 ── 최종 프롬프트에 미성년/아동 코드 용어가 있으면 NovelAI 호출 없이 거부(fail-closed).
+	// 한국법(가상 아동성착취물 형사처벌) 대응의 최종 게이트 — LLM 지시·네거티브와 별개의 결정적 방어선.
+	if (containsMinorTerms(positive)) {
+		console.warn(`[chat/image] minor-term hard block (user=${locals.user.id}, session=${sessionId})`);
+		notifyServerError({
+			context: 'minor-term hard block /api/chat/image',
+			error: new Error('blocked: minor term in image prompt'),
+			extra: { session: sessionId, user: locals.user.id },
+			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+		});
+		return json(
+			{ error: 'blocked', message: '생성할 수 없는 내용이 포함되어 있어 이미지를 만들지 않았습니다.', debug: makeDebug(positive) },
+			{ status: 422 }
+		);
+	}
 
 	// ── 2) NovelAI 생성(스트리밍) ──
 	// NDJSON 스트림으로 중간 프레임(t:frame)을 흘려보내 진행 상황을 보여주고, 끝에 R2 저장 후
