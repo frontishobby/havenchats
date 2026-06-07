@@ -35,3 +35,29 @@ export function base64ToBlob(b64: string): Blob {
 	const bytes = base64ToBytes(b64);
 	return new Blob([bytes as BlobPart], { type: sniffImageMime(bytes) });
 }
+
+/**
+ * 이미지 Blob → webp Blob(canvas 변환, 클라 전용).
+ * NovelAI 생성 결과(보통 PNG)를 썸네일 업로드용 webp 로 바꾼다(폼은 webp/avif 만 허용).
+ * 해상도는 보존한다(832×1216 등). canvas 미지원/디코드 실패 시 throw.
+ */
+export async function blobToWebp(blob: Blob, quality = 0.9): Promise<Blob> {
+	const bitmap = await createImageBitmap(blob);
+	try {
+		const canvas = document.createElement('canvas');
+		canvas.width = bitmap.width;
+		canvas.height = bitmap.height;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('canvas 컨텍스트를 만들 수 없습니다.');
+		ctx.drawImage(bitmap, 0, 0);
+		return await new Promise<Blob>((resolve, reject) => {
+			canvas.toBlob(
+				(b) => (b ? resolve(b) : reject(new Error('webp 변환에 실패했습니다.'))),
+				'image/webp',
+				quality
+			);
+		});
+	} finally {
+		bitmap.close?.();
+	}
+}

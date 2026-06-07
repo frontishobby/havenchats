@@ -14,6 +14,10 @@
 		type NamedApply
 	} from '$lib/components/NamedImagesModal.svelte';
 	import CharacterLorebookModal from '$lib/components/CharacterLorebookModal.svelte';
+	import CharacterAssistPanel, {
+		type AssistCharacter
+	} from '$lib/components/CharacterAssistPanel.svelte';
+	import CharacterThumbnailPanel from '$lib/components/CharacterThumbnailPanel.svelte';
 	import { isGrid, isNamed, namedUrl } from '$lib/imageCodes';
 	import { estimatePromptTokens } from '$lib/tokens';
 	import type {
@@ -314,6 +318,36 @@
 		tags = tags.filter((x) => x !== t);
 	}
 
+	// 현재 폼 내용 스냅샷 — AI 보조 패널에 넘겨, 채워진 게 있으면 보존하며 수정하도록 한다.
+	const currentDraft = $derived<AssistCharacter>({
+		name,
+		tagline,
+		intro,
+		description,
+		tags,
+		greetings,
+		audience,
+		nsfw
+	});
+
+	// AI 보조 패널 결과로 폼 필드를 채운다(create 모드 전용). 이미지·로어북 등은 건드리지 않는다.
+	function applyAssist(c: AssistCharacter) {
+		name = c.name.slice(0, NAME_MAX);
+		tagline = c.tagline.slice(0, TAGLINE_MAX);
+		intro = c.intro.slice(0, INTRO_MAX);
+		description = c.description;
+		tags = c.tags.slice(0, TAGS_MAX);
+		audience = c.audience;
+		nsfw = c.nsfw;
+		const gs = c.greetings
+			.map((g) => ({ name: g.name.trim(), content: g.content.trim() }))
+			.filter((g) => g.content)
+			.slice(0, GREETINGS_MAX);
+		greetings = gs.length ? gs : [{ name: '', content: '' }];
+		// 사용자가 채워진 폼을 바로 확인할 수 있게 맨 위로.
+		if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+	}
+
 	async function submit() {
 		if (!canSubmit) return;
 		// 수정 모드에선 새 이미지가 없어도(기존 유지) 진행.
@@ -403,6 +437,7 @@
 	}
 </script>
 
+<div class="create-layout">
 <div class="create">
 	<a class="back" href={isEdit ? returnTo : '/'}>← {isEdit ? returnLabel : '탐색으로'}</a>
 
@@ -842,6 +877,22 @@
 	</button>
 </div>
 
+	{#if !isEdit}
+		<div class="assist-col">
+			<CharacterAssistPanel {nsfw} current={currentDraft} onapply={applyAssist} />
+			<CharacterThumbnailPanel
+				{description}
+				{nsfw}
+				onuse={(file, styleId) => {
+					setImage(file);
+					// 이 썸네일을 만든 그림체를 추천 그림체로 자동 반영(목록에 있을 때만).
+					if (styleId && myStyles.some((s) => s.id === styleId)) recommendedStyleId = styleId;
+				}}
+			/>
+		</div>
+	{/if}
+</div>
+
 <CharacterImagesModal
 	open={imagesOpen}
 	{characterId}
@@ -878,10 +929,36 @@
 />
 
 <style>
+	/* 폼 + (PC 전용) AI 보조 패널 2열 레이아웃. 패널 없는 폭에선 폼이 그대로 중앙 정렬. */
+	.create-layout {
+		display: flex;
+		justify-content: center;
+		align-items: flex-start;
+		gap: 28px;
+	}
 	.create {
+		flex: 0 1 640px;
 		max-width: 640px;
-		margin: 0 auto;
 		padding: 28px 20px 80px;
+	}
+	/* AI 보조 패널은 PC(넓은 화면)에서만 노출. 스크롤해도 따라오도록 sticky. */
+	.assist-col {
+		display: none;
+	}
+	@media (min-width: 1080px) {
+		.assist-col {
+			display: flex;
+			flex-direction: column;
+			gap: 18px;
+			flex: 0 0 340px;
+			width: 340px;
+			position: sticky;
+			top: 20px;
+			margin-top: 76px;
+			/* 두 패널을 합치면 길어질 수 있으니 sticky 영역 안에서 자체 스크롤. */
+			max-height: calc(100vh - 40px);
+			overflow-y: auto;
+		}
 	}
 	.back {
 		display: inline-block;
