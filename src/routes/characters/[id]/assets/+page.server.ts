@@ -2,6 +2,7 @@ import { error, redirect } from '@sveltejs/kit';
 import { findCharacter } from '$lib/server/characters';
 import { getCharacterOwnership } from '$lib/server/db/characters';
 import { isAdmin } from '$lib/server/auth';
+import { canSeeNsfw } from '$lib/nsfw';
 import type { PageServerLoad } from './$types';
 
 /**
@@ -27,8 +28,13 @@ export const load: PageServerLoad = async ({ params, locals, platform, depends }
 		}
 	}
 
-	// NSFW 캐릭터는 비로그인 접근 불가.
-	if (character.contentRating === 'nsfw' && !locals.user) {
+	// NSFW 캐릭터는 파라과이(PY) 유저만. 단 제작자 본인·관리자는 미리보기 접근 허용.
+	if (
+		character.contentRating === 'nsfw' &&
+		!canSeeNsfw(locals.user) &&
+		character.creator.id !== locals.user?.id &&
+		!isAdmin(locals.user?.email)
+	) {
 		redirect(302, '/');
 	}
 

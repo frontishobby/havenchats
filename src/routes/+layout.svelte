@@ -1,6 +1,6 @@
 <script lang="ts">
 	import '../app.css';
-	import { invalidate } from '$app/navigation';
+	import { invalidate, invalidateAll } from '$app/navigation';
 	import LoginModal from '$lib/components/LoginModal.svelte';
 	import ProfileModal from '$lib/components/ProfileModal.svelte';
 	import ApiKeyModal from '$lib/components/ApiKeyModal.svelte';
@@ -56,6 +56,47 @@
 	function openProfileSettings() {
 		profileModal.open = true;
 		menuOpen = false;
+	}
+
+	// ── NSFW 토글(=국가 전환) ── SFW=대한민국(KR), NSFW=파라과이(PY).
+	// PY 전환은 서버에서 승인 코드('arca') 검증. 메뉴 닫히면 코드 입력 상태 초기화.
+	let nsfwBusy = $state(false);
+	let codeOpen = $state(false);
+	let codeInput = $state('');
+	let codeError = $state('');
+	$effect(() => {
+		if (!menuOpen) {
+			codeOpen = false;
+			codeInput = '';
+			codeError = '';
+		}
+	});
+	async function setCountry(country: 'KR' | 'PY', code?: string): Promise<boolean> {
+		nsfwBusy = true;
+		codeError = '';
+		try {
+			const res = await fetch('/api/profile/country', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ country, code })
+			});
+			if (!res.ok) {
+				const j = (await res.json().catch(() => ({}))) as { message?: string };
+				codeError = j.message ?? '전환에 실패했어요.';
+				return false;
+			}
+			await invalidateAll();
+			return true;
+		} finally {
+			nsfwBusy = false;
+		}
+	}
+	async function turnNsfwOff() {
+		if (await setCountry('KR')) menuOpen = false;
+	}
+	async function submitNsfwCode() {
+		if (!codeInput.trim() || nsfwBusy) return;
+		if (await setCountry('PY', codeInput.trim())) menuOpen = false;
 	}
 	function openApiKeys() {
 		apiKeyModal.open = true;
@@ -144,6 +185,49 @@
 								>
 									관리자
 								</a>
+							{/if}
+							<div class="menu-sep"></div>
+							{#if data.user.country === 'PY'}
+								<button
+									class="menu-item nsfw-on"
+									role="menuitemcheckbox"
+									aria-checked="true"
+									onclick={turnNsfwOff}
+									disabled={nsfwBusy}
+								>
+									<span>🔞 성인 콘텐츠 (NSFW)</span>
+									<span class="nsfw-state">켜짐 · 끄기</span>
+								</button>
+							{:else if codeOpen}
+								<div class="nsfw-code">
+									<!-- svelte-ignore a11y_autofocus -->
+									<input
+										type="text"
+										autocomplete="off"
+										placeholder="승인 코드 입력"
+										bind:value={codeInput}
+										onkeydown={(e) => e.key === 'Enter' && submitNsfwCode()}
+										autofocus
+									/>
+									<button onclick={submitNsfwCode} disabled={nsfwBusy || !codeInput.trim()}>
+										확인
+									</button>
+								</div>
+								{#if codeError}
+									<span class="nsfw-err">{codeError}</span>
+								{:else}
+									<span class="nsfw-hint">대한민국에서는 NSFW 를 볼 수 없어요. 코드로 파라과이 전환.</span>
+								{/if}
+							{:else}
+								<button
+									class="menu-item"
+									role="menuitemcheckbox"
+									aria-checked="false"
+									onclick={() => (codeOpen = true)}
+								>
+									<span>🔞 성인 콘텐츠 (NSFW)</span>
+									<span class="nsfw-state">꺼짐 · 켜기</span>
+								</button>
 							{/if}
 							<div class="menu-sep"></div>
 							<a
@@ -377,6 +461,69 @@
 		height: 1px;
 		margin: 6px 4px;
 		background: var(--border);
+	}
+	/* NSFW 토글 메뉴 아이템 */
+	.menu-item[role='menuitemcheckbox'] {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+	}
+	.menu-item:disabled {
+		opacity: 0.5;
+	}
+	.nsfw-state {
+		font-size: 0.74rem;
+		color: var(--text-faint);
+		white-space: nowrap;
+	}
+	.menu-item.nsfw-on .nsfw-state {
+		color: var(--nsfw);
+	}
+	.nsfw-code {
+		display: flex;
+		gap: 6px;
+		padding: 4px 8px 2px;
+	}
+	.nsfw-code input {
+		flex: 1;
+		min-width: 0;
+		background: var(--bg-elev);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 7px 10px;
+		color: var(--text);
+		font-size: 0.84rem;
+		outline: none;
+	}
+	.nsfw-code input:focus {
+		border-color: var(--accent);
+	}
+	.nsfw-code button {
+		flex-shrink: 0;
+		border: none;
+		border-radius: 8px;
+		padding: 0 12px;
+		background: var(--accent);
+		color: #fff;
+		font-size: 0.82rem;
+		font-weight: 600;
+	}
+	.nsfw-code button:disabled {
+		opacity: 0.45;
+	}
+	.nsfw-err,
+	.nsfw-hint {
+		display: block;
+		padding: 2px 12px 6px;
+		font-size: 0.74rem;
+		line-height: 1.4;
+	}
+	.nsfw-err {
+		color: var(--nsfw);
+	}
+	.nsfw-hint {
+		color: var(--text-faint);
 	}
 	.user-fallback {
 		width: 28px;

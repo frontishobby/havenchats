@@ -14,6 +14,8 @@
 	let personaName = $state('');
 	let persona = $state('');
 	let preference = $state<'male' | 'female' | null>(null);
+	let country = $state<'KR' | 'PY' | null>(null);
+	let countryCode = $state(''); // 파라과이(NSFW) 전환 승인 코드
 	let saving = $state(false);
 	let error = $state('');
 	let initialized = $state(false);
@@ -60,6 +62,8 @@
 			personaName = user?.personaName ?? '';
 			persona = user?.persona ?? '';
 			preference = user?.preference ?? null;
+			country = user?.country ?? null;
+			countryCode = '';
 			error = '';
 			resetAvatar();
 			initialized = true;
@@ -69,7 +73,14 @@
 		}
 	});
 
-	const canSave = $derived(name.trim().length > 0 && preference !== null);
+	// 파라과이를 처음 고르면(이전이 PY 가 아니면) 승인 코드 입력칸이 나타난다.
+	const needsCode = $derived(country === 'PY' && user?.country !== 'PY');
+	const canSave = $derived(
+		name.trim().length > 0 &&
+			preference !== null &&
+			country !== null &&
+			(!needsCode || countryCode.trim().length > 0)
+	);
 
 	function close() {
 		if (dismissable) profileModal.open = false;
@@ -88,6 +99,8 @@
 			fd.set('persona_name', personaName.trim());
 			fd.set('persona', persona.trim());
 			if (preference) fd.set('preference', preference);
+			if (country) fd.set('country', country);
+			if (needsCode && countryCode.trim()) fd.set('country_code', countryCode.trim());
 			if (avatarFile) fd.set('avatar', avatarFile);
 			const res = await fetch('/api/profile', { method: 'POST', body: fd });
 			if (!res.ok) {
@@ -183,6 +196,40 @@
 					maxlength="2000"
 					bind:value={persona}
 				></textarea>
+			</div>
+
+			<div class="field">
+				<span class="field-label">국가</span>
+				<div class="pref">
+					<button
+						type="button"
+						class="pref-btn"
+						class:active={country === 'KR'}
+						onclick={() => (country = 'KR')}
+					>
+						<strong>🇰🇷 대한민국</strong>
+						<span>전체 이용가 (SFW)</span>
+					</button>
+					<button
+						type="button"
+						class="pref-btn"
+						class:active={country === 'PY'}
+						onclick={() => (country = 'PY')}
+					>
+						<strong>🇵🇾 파라과이</strong>
+						<span>성인 콘텐츠 포함 (NSFW)</span>
+					</button>
+				</div>
+				{#if needsCode}
+					<input
+						class="code-input"
+						type="text"
+						placeholder="파라과이 전환 승인 코드"
+						autocomplete="off"
+						bind:value={countryCode}
+					/>
+					<span class="code-hint">NSFW 를 보려면 승인 코드가 필요해요.</span>
+				{/if}
 			</div>
 
 			<div class="field">
@@ -376,6 +423,15 @@
 	.pref {
 		display: flex;
 		gap: 10px;
+	}
+	.code-input {
+		margin-top: 10px;
+	}
+	.code-hint {
+		display: block;
+		margin-top: 6px;
+		font-size: 0.74rem;
+		color: var(--text-faint);
 	}
 	.pref-btn {
 		flex: 1;

@@ -35,6 +35,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		avatarUrl: null,
 		persona: null,
 		preference: null,
+		country: null,
 		profileComplete: false,
 		blockedReason: null
 	};

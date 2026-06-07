@@ -1,9 +1,10 @@
 import { getVisibleCharacters } from '$lib/server/characters';
+import { canSeeNsfw } from '$lib/nsfw';
 import type { PageServerLoad } from './$types';
 
-// 비로그인 상태에서는 NSFW 캐릭터를 숨긴다 (로그인 시에만 노출).
+// NSFW 캐릭터는 파라과이(country=PY) 프로필 유저에게만 노출. 그 외(비로그인·KR·미선택)는 숨김.
 export const load: PageServerLoad = async ({ locals, url, platform }) => {
-	const visible = await getVisibleCharacters(platform?.env?.DB, !!locals.user);
+	const visible = await getVisibleCharacters(platform?.env?.DB, canSeeNsfw(locals.user));
 	const tags = [...new Set(visible.flatMap((c) => c.tags))];
 	return {
 		characters: visible,

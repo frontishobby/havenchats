@@ -1,5 +1,8 @@
 export type ContentRating = 'sfw' | 'nsfw';
 
+/** 프로필 국가(NSFW 노출 게이트). 'KR'=대한민국(SFW만), 'PY'=파라과이(NSFW 허용). */
+export type Country = 'KR' | 'PY';
+
 /** 타깃 독자층. 'all'=공통, 'male'=남성향, 'female'=여성향. */
 export type Audience = 'all' | 'male' | 'female';
 

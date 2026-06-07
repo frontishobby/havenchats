@@ -1,4 +1,5 @@
 import type { SessionIdentity } from '$lib/server/auth';
+import type { Country } from '$lib/types';
 import { withVersion } from '$lib/imageCodes';
 
 export interface OAuthProfile {
@@ -17,6 +18,7 @@ export interface UserProfile {
 	avatarUrl: string | null; // 프로필 사진(servable URL) — 없으면 null
 	persona: string | null;
 	preference: Preference | null;
+	country: Country | null; // NSFW 노출 게이트(PY 만 노출). 미선택이면 null → SFW 만
 	profileComplete: boolean; // display_name 설정 여부
 	blockedReason: string | null; // null 이 아니면 차단된 유저
 }
@@ -77,7 +79,7 @@ export async function findOrCreateOAuthUser(
 export async function getUserProfile(db: D1Database, id: string): Promise<UserProfile | null> {
 	const row = await db
 		.prepare(
-			'SELECT id, email, display_name, persona_name, avatar_url, persona, preference, blocked_reason, updated_at FROM users WHERE id = ?'
+			'SELECT id, email, display_name, persona_name, avatar_url, persona, preference, country, blocked_reason, updated_at FROM users WHERE id = ?'
 		)
 		.bind(id)
 		.first<{
@@ -88,6 +90,7 @@ export async function getUserProfile(db: D1Database, id: string): Promise<UserPr
 			avatar_url: string | null;
 			persona: string | null;
 			preference: string | null;
+			country: string | null;
 			blocked_reason: string | null;
 			updated_at: number;
 		}>();
@@ -95,6 +98,7 @@ export async function getUserProfile(db: D1Database, id: string): Promise<UserPr
 	if (!row) return null;
 
 	const pref = row.preference === 'male' || row.preference === 'female' ? row.preference : null;
+	const country = row.country === 'KR' || row.country === 'PY' ? row.country : null;
 	return {
 		id: row.id,
 		email: row.email,
@@ -103,6 +107,7 @@ export async function getUserProfile(db: D1Database, id: string): Promise<UserPr
 		avatarUrl: avatarUrlFromKey(row.avatar_url, row.updated_at),
 		persona: row.persona,
 		preference: pref,
+		country,
 		profileComplete: !!row.display_name && row.display_name.trim() !== '',
 		blockedReason: row.blocked_reason
 	};
@@ -123,6 +128,14 @@ export async function setBlockedReason(
 		.bind(text, Date.now(), id)
 		.run();
 	return text;
+}
+
+/** 프로필 국가만 갱신(드롭다운 NSFW 토글용). PY 전환의 코드 검증은 호출부(엔드포인트) 책임. */
+export async function updateCountry(db: D1Database, id: string, country: Country): Promise<void> {
+	await db
+		.prepare('UPDATE users SET country = ?, updated_at = ? WHERE id = ?')
+		.bind(country, Date.now(), id)
+		.run();
 }
 
 /** 유저 페이지 헤더용 공개 프로필. 없으면 null. */
@@ -166,20 +179,22 @@ export async function updateProfile(
 		personaName: string | null;
 		persona: string | null;
 		preference: Preference | null;
+		country: Country | null;
 	}
 ): Promise<void> {
 	const now = Date.now();
 	await db
 		.prepare(
-			`INSERT INTO users (id, email, display_name, persona_name, persona, preference, age_verified, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+			`INSERT INTO users (id, email, display_name, persona_name, persona, preference, country, age_verified, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
 			 ON CONFLICT(id) DO UPDATE SET
 			   display_name = excluded.display_name,
 			   persona_name = excluded.persona_name,
 			   persona = excluded.persona,
 			   preference = excluded.preference,
+			   country = excluded.country,
 			   updated_at = excluded.updated_at`
 		)
-		.bind(id, email, data.name, data.personaName, data.persona, data.preference, now, now)
+		.bind(id, email, data.name, data.personaName, data.persona, data.preference, data.country, now, now)
 		.run();
 }

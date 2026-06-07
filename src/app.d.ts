@@ -12,6 +12,7 @@ declare global {
 				avatarUrl: string | null; // 프로필 사진(servable URL) — 없으면 null
 				persona: string | null;
 				preference: 'male' | 'female' | null;
+				country: 'KR' | 'PY' | null; // NSFW 노출 게이트(PY 만 노출)
 				profileComplete: boolean;
 				blockedReason: string | null; // null 이 아니면 차단된 유저
 			} | null;

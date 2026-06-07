@@ -1,5 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
 import { findCharacter } from '$lib/server/characters';
+import { canSeeNsfw } from '$lib/nsfw';
 import { getCharacterOwnership } from '$lib/server/db/characters';
 import { getSession, getMessagePage } from '$lib/server/db/chats';
 import { getStyle } from '$lib/server/db/styles';
@@ -50,8 +51,12 @@ export async function loadChatPage(opts: {
 		}
 	}
 
-	// NSFW 캐릭터는 비로그인 상태에서 접근 불가 (목록에서도 숨겨짐)
-	if (character.contentRating === 'nsfw' && !locals.user) {
+	// NSFW 캐릭터는 파라과이(country=PY) 유저만 접근. 단 제작자 본인은 항상 자기 캐릭터 접근 가능.
+	if (
+		character.contentRating === 'nsfw' &&
+		!canSeeNsfw(locals.user) &&
+		character.creator.id !== locals.user?.id
+	) {
 		redirect(302, '/');
 	}
 

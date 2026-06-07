@@ -1,5 +1,7 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { updateAvatarKey, updateProfile, type Preference } from '$lib/server/db/users';
+import { isValidUnlockCode } from '$lib/server/nsfwUnlock';
+import type { Country } from '$lib/types';
 
 /** 허용 이미지 타입 → 확장자. (webp/avif 만) */
 const ALLOWED_AVATAR: Record<string, string> = {
@@ -32,6 +34,18 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		prefRaw === 'male' || prefRaw === 'female' ? prefRaw : null;
 	const persona = String(form.get('persona') ?? '').trim().slice(0, 2000) || null;
 
+	// 국가(=NSFW 게이트). 미전송이면 기존 값 유지. PY(파라과이) 신규 전환은 승인 코드 필요(서버 검증).
+	const countryRaw = String(form.get('country') ?? '');
+	const country: Country | null =
+		countryRaw === 'KR' || countryRaw === 'PY' ? countryRaw : locals.user.country ?? null;
+	const countryCode = String(form.get('country_code') ?? '');
+	if (country === 'PY' && locals.user.country !== 'PY' && !isValidUnlockCode(countryCode)) {
+		return json(
+			{ error: '파라과이로 전환하려면 승인 코드가 필요해요. (코드가 올바르지 않습니다)' },
+			{ status: 403 }
+		);
+	}
+
 	// ── 프로필 사진(선택) ──
 	const avatar = form.get('avatar');
 	if (avatar instanceof File && avatar.size > 0) {
@@ -59,7 +73,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		name,
 		personaName,
 		persona,
-		preference
+		preference,
+		country
 	});
 	return json({ ok: true });
 };

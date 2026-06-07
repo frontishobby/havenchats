@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import { listCharactersByCreator } from '$lib/server/db/characters';
 import { getPublicProfile } from '$lib/server/db/users';
 import { isAdmin } from '$lib/server/auth';
+import { canSeeNsfw } from '$lib/nsfw';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, locals, platform }) => {
@@ -15,8 +16,9 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 	const isOwner = locals.user?.id === params.id;
 	// 비공개 캐릭터는 본인에게만 보인다. 외부 방문자에겐 공개 캐릭터만 조회.
 	const all = await listCharactersByCreator(db, params.id, isOwner);
-	// 비로그인 방문자에게는 NSFW 캐릭터도 숨긴다(본인은 항상 전체 노출).
-	const characters = isOwner || locals.user ? all : all.filter((c) => c.contentRating === 'sfw');
+	// NSFW 캐릭터는 본인 또는 파라과이(PY) 방문자에게만 노출(그 외엔 SFW 만).
+	const characters =
+		isOwner || canSeeNsfw(locals.user) ? all : all.filter((c) => c.contentRating === 'sfw');
 
 	// 관리자는 가져온(import) 캐릭터의 프롬프트도 편집할 수 있다.
 	return { profile, characters, isOwner, isAdmin: isAdmin(locals.user?.email) };
