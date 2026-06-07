@@ -41,6 +41,15 @@ export const ASSIST_MODEL_IDS: Set<string> = new Set(ASSIST_MODELS.map((m) => m.
 /** assist 기본 모델(허용목록에 있어야 함). */
 export const DEFAULT_ASSIST_MODEL_ID = 'google/gemini-3.1-pro-preview';
 
+/**
+ * 실시간 이미지 상황 프롬프트(generateObject 구조화 출력)에 허용하는 모델 — assist 와 동일하게
+ * 구조화 출력이 안정적인 Gemini 계열 + Claude Opus 만. (다른 모델은 JSON 출력이 불안정)
+ */
+export const IMAGE_PROMPT_MODELS: ModelOption[] = ASSIST_MODELS;
+export const IMAGE_PROMPT_MODEL_IDS: Set<string> = new Set(IMAGE_PROMPT_MODELS.map((m) => m.id));
+/** 이미지 상황 프롬프트 기본 모델 — 빠른 Gemini Flash. */
+export const DEFAULT_IMAGE_PROMPT_MODEL_ID = 'google/gemini-3.5-flash';
+
 /** 알 수 없는 모델의 보수적 기본 컨텍스트 상한. */
 const FALLBACK_CONTEXT_LIMIT = 128_000;
 

@@ -352,11 +352,22 @@
 					<p class="muted">빈 응답 — 모델이 아무 텍스트도 내지 않았습니다(안전필터 차단/길이 초과 등 finishReason 확인).</p>
 				{/if}
 
-				<div class="sub">정리 후 상황 프롬프트</div>
-				{#if imageDebug.situation}
-					<pre class="dump small">{imageDebug.situation}</pre>
+				<div class="sub">정리 후 base 장면 (배경·인원수·상호작용)</div>
+				{#if imageDebug.baseScene}
+					<pre class="dump small">{imageDebug.baseScene}</pre>
+				{:else if imageDebug.situation}
+					<p class="muted">base 비어 있음(인물 캡션만).</p>
 				{:else}
 					<p class="muted">없음 → NovelAI 요청을 보내지 않았습니다.</p>
+				{/if}
+
+				<div class="sub">인물별 캡션 (char_captions, {imageDebug.characters?.length ?? 0}명)</div>
+				{#if imageDebug.characters && imageDebug.characters.length > 0}
+					{#each imageDebug.characters as cap, i (i)}
+						<pre class="dump small">[{i + 1}] {cap}</pre>
+					{/each}
+				{:else}
+					<p class="muted">인물 분리 없음(단일 base_caption 으로 생성).</p>
 				{/if}
 
 				<div class="sub">그림체 프롬프트</div>

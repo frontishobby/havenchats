@@ -1,5 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { generateText } from 'ai';
+import { generateObject, jsonSchema } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
 import {
 	getSession,
@@ -27,7 +27,7 @@ import {
 } from '$lib/server/novelai';
 import { buildProviderOptions, reasoningHeadroom } from '$lib/server/chatAssembly';
 import { notifyServerError } from '$lib/server/notify';
-import { MODEL_IDS } from '$lib/data/models';
+import { IMAGE_PROMPT_MODEL_IDS, DEFAULT_IMAGE_PROMPT_MODEL_ID } from '$lib/data/models';
 import { isOverDailyBudget, addDailySpend, DAILY_BUDGET_USD } from '$lib/server/budget';
 import type { ImageDebug } from '$lib/chatDebug';
 
@@ -43,36 +43,74 @@ import type { ImageDebug } from '$lib/chatDebug';
  *  4) R2(chatimg/<sessionId>/<msgId>.<ext>) 저장 + role=image_generation 메시지 영속.
  */
 
-/** 상황 프롬프트 생성 기본 모델(설정에서 바꿀 수 있음). */
-const DEFAULT_PROMPT_MODEL = 'google/gemini-3.5-flash';
 const MAX_ASSISTANT_CHARS = 6000;
 const MAX_STYLE_CHARS = 1000;
 /** 외형 레퍼런스로 넣을 캐릭터 description 최대 길이(자). 토큰·지연 보호용. */
 const MAX_DESC_CHARS = 6000;
+/** NAI V4.5 캐릭터 최대 인원(공식 상한 6). 초과분은 잘라낸다. */
+const MAX_CHARACTERS = 6;
 
-/** 요청의 상황 프롬프트 모델 검증(허용목록). 없거나 미허용이면 기본 모델. */
+/** 요청의 상황 프롬프트 모델 검증 — 구조화 출력 안정 모델(Gemini 계열+Opus)만. 미허용이면 기본 모델. */
 function pickPromptModel(requested?: string): string {
-	return requested && MODEL_IDS.has(requested) ? requested : DEFAULT_PROMPT_MODEL;
+	return requested && IMAGE_PROMPT_MODEL_IDS.has(requested)
+		? requested
+		: DEFAULT_IMAGE_PROMPT_MODEL_ID;
 }
 
+/**
+ * 구조화 출력 스키마(generateObject) — NAI V4.5 캐릭터 기능에 맞춰 장면을 분해한다.
+ *  - base: 배경·구도·인원수 태그(1girl/2girls/1boy 1girl)·상호작용(source#/target#) 등 전역 캡션.
+ *  - characters[]: 화면에 보이는 인물별 캡션(번호 없는 girl/boy + 외형 + 복장 + 표정/포즈).
+ *    인물을 분리하면 NAI 가 인물 간 속성 누출(머리색·옷 bleeding)을 막는다.
+ */
+const SITUATION_SCHEMA = jsonSchema<{
+	base: string;
+	characters: { caption: string }[];
+}>({
+	type: 'object',
+	additionalProperties: false,
+	properties: {
+		base: { type: 'string' },
+		characters: {
+			type: 'array',
+			items: {
+				type: 'object',
+				additionalProperties: false,
+				properties: { caption: { type: 'string' } },
+				required: ['caption']
+			}
+		}
+	},
+	required: ['base', 'characters']
+});
+
 const SITUATION_SYSTEM = [
-	`You convert the latest moment of a Korean roleplay scene into an image-generation prompt for NovelAI Diffusion V4.5 (anime illustration).`,
-	`You are given a [Character] reference sheet and the [Latest scene]. ALWAYS reflect the character's fixed physical appearance from the reference (hair color/length/style, eye color, body type, skin, distinctive features) so the character looks consistent across images. But depict ONLY the [Latest scene]'s current moment. Ignore the reference's non-visual text (personality, backstory, rules, command/keyword lists).`,
-	`Output format: two parts in this exact order, joined together by a comma.`,
-	`  PART 1 — Danbooru-style tags describing the character's appearance and current clothing state: count tag (e.g. 1girl), hair color/length/style, eye color, body type and notable physical features (from the reference), plus the current clothing or state of undress as shown in the [Latest scene] (e.g. "school uniform, unbuttoned shirt, no bra", "naked, towel"). Lowercase, comma-separated.`,
-	`  PART 2 — summarize the CURRENT SITUATION in 1-2 short English sentences describing the depicted moment (pose, action, expression, setting, mood). Do NOT copy the status window, stat block, or any prompt/instruction text from the input — write your own brief description.`,
-	`Example: "1girl, long black hair, red eyes, slim, large breasts, white blouse, unbuttoned, no bra, She leans forward on the edge of the bed, blushing and breathless in a dimly lit bedroom."`,
-	`Output ONLY these two parts. Add nothing else — no other sections, formatting, or content of any kind.`,
-	`Rules:`,
-	`- English only.`,
-	`- Focus on the single most recent visual beat, not the whole history.`,
-	`- The appearance tags (hair, eyes, body) must stay consistent with the reference; only the clothing/undress state follows the latest scene.`,
-	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, or negative terms — those are added separately.`,
-	`- No preamble, no explanation, no quotes, no line breaks, no labels like "PART 1". Output the prompt only.`,
+	`You convert the latest moment of a Korean roleplay scene into a structured image-generation prompt for NovelAI Diffusion V4.5 (anime illustration), using its MULTI-CHARACTER feature.`,
+	`You are given a [Character] reference sheet and the [Latest scene]. Depict ONLY the [Latest scene]'s current moment. Ignore the reference's non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
+	``,
+	`Output a JSON object with two keys:`,
+	`  "base": string  — Danbooru-style tags for everything that is NOT an individual character's body/clothes: the SUBJECT COUNT tag (e.g. "1girl", "1boy, 1girl", "2girls"), framing/composition (e.g. "upper body", "cowboy shot", "full body", "from above", "pov"), setting/background, lighting and mood, and INTERACTION action tags between characters using the "source#"/"target#"/"mutual#" prefixes (e.g. "source#hug" on the initiator's intent, "target#hug", "mutual#kiss"). Lowercase, comma-separated.`,
+	`  "characters": array — one entry per person VISIBLE in the frame, ordered top-to-bottom / left-to-right. Each entry is { "caption": string } where caption is Danbooru tags for THAT person only: an UNNUMBERED subject word ("girl"/"boy"/"other"), hair color/length/style, eye color, body type and notable features (from the reference for the roleplay character), the CURRENT clothing or state of undress from the [Latest scene] (e.g. "white blouse, unbuttoned, no bra", "naked, towel"), plus that person's expression and pose. Lowercase, comma-separated.`,
+	``,
+	`Character rules:`,
+	`- The roleplay character ({{char}}) MUST keep the reference's fixed appearance (hair color/length/style, eye color, body type, distinctive features) so it stays consistent across images. Only clothing/undress and expression/pose follow the latest scene.`,
+	`- Include the user/{{나}} as a SEPARATE character entry ONLY if they are physically in the frame in this moment (e.g. the two are embracing, the user's body is shown). For typical 1:1 POV shots where only the character is depicted, output just one character entry.`,
+	`- The subject COUNT tag in "base" must match the number of character entries (1 entry → "1girl" or "1boy"; 2 entries → e.g. "1boy, 1girl").`,
+	`- Put per-person body/clothes ONLY in "characters", never in "base". Put the count tag ONLY in "base", never in a character entry.`,
+	``,
+	`General rules:`,
+	`- English only. Focus on the single most recent visual beat, not the whole history.`,
+	`- Do NOT copy the status window, stat block, or any prompt/instruction text from the input — write your own concise tags.`,
+	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, "rating:" tags, or negative terms — those are added separately.`,
+	`- Keep it concise (combined budget is small): "base" short, each character under ~40 tags.`,
 	`- NSFW content is allowed and should be described plainly when present.`,
-	`- ABSOLUTE RULE: every character MUST be depicted as an adult (18+). NEVER output any tag or wording depicting minors, children, or age-regressed characters (e.g. loli, shota, child, kid, toddler, "young girl/boy", "little girl/boy"). If the scene implies a minor, depict the character as a clear adult instead. This overrides everything else.`,
-	`- Keep it concise: appearance/clothing tags under ~40 tags, and PART 2 to just 1-2 short English sentences (no padding, no copied status window).`
+	`- ABSOLUTE RULE: every person MUST be depicted as an adult (18+). NEVER output any tag or wording depicting minors, children, or age-regressed characters (e.g. loli, shota, child, kid, toddler, "young girl/boy", "little girl/boy"). If the scene implies a minor, depict them as a clear adult instead. This overrides everything else.`
 ].join('\n');
+
+/** 문자열 정규화(trim). 알 수 없는 값은 빈 문자열. */
+function str(v: unknown): string {
+	return typeof v === 'string' ? v.trim() : '';
+}
 
 /**
  * 상황 프롬프트 후처리. NovelAI 는 영어/danbooru 태그만 해석하므로, 모델이 (지시에도 불구하고)
@@ -127,15 +165,15 @@ function isTransientGatewayError(e: unknown): boolean {
 	return /temporarily unavailable|service unavailable|overloaded|try again|rate limit|timeout/.test(msg);
 }
 
-/** generateText 를 일시적 에러에 한해 백오프 재시도한다(기본 2회 추가 시도). */
-async function generateTextWithRetry(
-	opts: Parameters<typeof generateText>[0],
+/** generateObject 를 일시적 에러에 한해 백오프 재시도한다(기본 2회 추가 시도). */
+async function generateObjectWithRetry(
+	opts: Parameters<typeof generateObject>[0],
 	retries = 2
-): Promise<Awaited<ReturnType<typeof generateText>>> {
+): Promise<Awaited<ReturnType<typeof generateObject>>> {
 	let lastErr: unknown;
 	for (let i = 0; i <= retries; i++) {
 		try {
-			return await generateText(opts);
+			return await generateObject(opts);
 		} catch (e) {
 			lastErr = e;
 			if (i < retries && isTransientGatewayError(e)) {
@@ -233,7 +271,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 
 	// 디버그(요청자가 debug 모드일 때만)용 진단값 누적 — 성공·실패 양쪽에서 동봉한다.
-	let situation = '';
+	let situation = ''; // base 와 인물 캡션을 ' | ' 로 합친 표시용
+	let baseScene = '';
+	let charCaptions: string[] = [];
 	let rawSituation = '';
 	let finishReason: string | null = null;
 	let warnings: unknown[] = [];
@@ -247,6 +287,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 					promptModel,
 					characterRef,
 					situation,
+					baseScene,
+					characters: charCaptions,
 					rawSituation,
 					finishReason,
 					warnings,
@@ -273,8 +315,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			? `[Character]\n${characterRef}\n\n[Latest scene]\n${assistantText}`
 			: assistantText;
 		// 게이트웨이가 일시적 503/500 을 자동 재시도하지 않으므로 직접 백오프 재시도한다.
-		const result = await generateTextWithRetry({
+		const result = await generateObjectWithRetry({
 			model: gateway(promptModel),
+			schema: SITUATION_SCHEMA,
 			system: SITUATION_SYSTEM,
 			prompt: userPrompt,
 			temperature: 0.7,
@@ -283,8 +326,16 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			maxOutputTokens: 2000 + reasoningHeadroom(promptModel),
 			providerOptions: buildProviderOptions(promptModel, { noThinking: true })
 		});
-		rawSituation = result.text ?? '';
-		situation = sanitizeSituation(rawSituation);
+		const obj = (result.object ?? {}) as { base?: unknown; characters?: unknown };
+		rawSituation = JSON.stringify(obj);
+		// base·각 인물 캡션을 필드별로 한글/잡음 제거(모델이 상태창을 베껴 넣어도 영어 태그만 남김).
+		baseScene = sanitizeSituation(str(obj.base));
+		charCaptions = (Array.isArray(obj.characters) ? obj.characters : [])
+			.map((c) => sanitizeSituation(str((c as { caption?: unknown })?.caption)))
+			.filter(Boolean)
+			.slice(0, MAX_CHARACTERS);
+		// 표시용 합본(디버그 패널·빈값 판정). base 와 인물 캡션을 ' | ' 로 잇는다.
+		situation = [baseScene, ...charCaptions].filter(Boolean).join(' | ');
 		finishReason = (result.finishReason as string | undefined) ?? null;
 		warnings = result.warnings ?? [];
 		cost = parseGatewayCost(result.providerMetadata);
@@ -294,7 +345,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		console.error('[chat/image] situation prompt error:', e);
 		llmError = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
 		notifyServerError({
-			context: 'generateText /api/chat/image',
+			context: 'generateObject /api/chat/image',
 			error: e,
 			extra: { session: sessionId, user: locals.user.id, model: promptModel },
 			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
@@ -324,11 +375,13 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		);
 	}
 
-	const positive = buildPositivePrompt(stylePrompt, situation, isNsfw);
+	// base_caption = (NSFW면) rating + 그림체 + base 장면 + 퀄리티 꼬리. 인물 외형은 char_captions 로 분리.
+	const positive = buildPositivePrompt(stylePrompt, baseScene, isNsfw);
 
 	// ── 하드 차단 ── 최종 프롬프트에 미성년/아동 코드 용어가 있으면 NovelAI 호출 없이 거부(fail-closed).
 	// 한국법(가상 아동성착취물 형사처벌) 대응의 최종 게이트 — LLM 지시·네거티브와 별개의 결정적 방어선.
-	if (containsMinorTerms(positive)) {
+	// base 와 모든 인물 캡션을 합쳐 검사한다(인물 캡션에 들어간 용어도 잡아야 함).
+	if (containsMinorTerms([positive, ...charCaptions].join(', '))) {
 		console.warn(`[chat/image] minor-term hard block (user=${locals.user.id}, session=${sessionId})`);
 		notifyServerError({
 			context: 'minor-term hard block /api/chat/image',
@@ -354,7 +407,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			// 2-1) 스트리밍 시도(프레임 emit, 마지막 프레임 = 최종 후보).
 			let finalB64: string | null = null;
 			try {
-				for await (const b64 of generateImageStream(naiKey, { positive, resolution })) {
+				for await (const b64 of generateImageStream(naiKey, { positive, charCaptions, resolution })) {
 					finalB64 = b64;
 					controller.enqueue(line({ t: 'frame', img: b64 }));
 				}
@@ -373,7 +426,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 				}
 			}
 			if (!image) {
-				const gen = await generateImage(naiKey, { positive, resolution });
+				const gen = await generateImage(naiKey, { positive, charCaptions, resolution });
 				if (!gen.ok) {
 					controller.enqueue(line({ t: 'error', error: 'novelai', message: gen.message, debug: makeDebug(positive) }));
 					controller.close();

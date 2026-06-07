@@ -124,12 +124,29 @@ export type GenerateResult =
 	| { ok: true; image: GeneratedImage }
 	| { ok: false; status: number; message: string };
 
+/**
+ * AUTO 위치(좌표 미지정) 센터. NAI 의 PositionMap.AUTO = (0,0). `use_coords:false` 면 무시되지만
+ * char_caption 마다 centers 배열이 있어야 하므로 동일하게 채운다(NAI 가 알아서 배치).
+ */
+const AUTO_CENTER = [{ x: 0, y: 0 }];
+
 /** NovelAI 이미지 생성 요청 → ZIP 해제 → 이미지 바이트. */
-/** generate / generate-stream 공용 요청 바디. */
-function buildPayload(positive: string, resolution: ResolutionKey) {
+/**
+ * generate / generate-stream 공용 요청 바디.
+ *
+ * `charCaptions` 가 비면(기본) 단일 base_caption 만 쓰는 기존 동작과 동일(char_captions:[]).
+ * 인물별 캡션을 주면 NAI V4.5 **캐릭터 기능**(char_captions 분리)으로 외형 누출(머리색·옷 bleeding)
+ * 을 막는다. 위치는 항상 AUTO(use_coords:false) — 순서(use_order)+상호작용 태그로만 제어한다.
+ * 음수 프롬프트의 char_captions 는 양수와 **개수를 맞춰**(빈 캡션) 안정성을 확보한다.
+ */
+function buildPayload(positive: string, charCaptions: string[], resolution: ResolutionKey) {
 	const { width, height } = RESOLUTIONS[resolution];
 	// 0 ~ 2^32-1 시드(Workers: crypto.getRandomValues).
 	const seed = crypto.getRandomValues(new Uint32Array(1))[0];
+	const chars = charCaptions.map((c) => c.trim()).filter(Boolean);
+	const posCharCaptions = chars.map((c) => ({ char_caption: c, centers: AUTO_CENTER }));
+	// 음수는 인물별 별도 UC 없이 개수만 맞춘 빈 캡션(전역 네거티브는 base_caption 에).
+	const negCharCaptions = chars.map(() => ({ char_caption: '', centers: AUTO_CENTER }));
 	return {
 		input: positive,
 		model: MODEL,
@@ -156,12 +173,12 @@ function buildPayload(positive: string, resolution: ResolutionKey) {
 			seed,
 			negative_prompt: NEGATIVE_PROMPT,
 			v4_prompt: {
-				caption: { base_caption: positive, char_captions: [] },
+				caption: { base_caption: positive, char_captions: posCharCaptions },
 				use_coords: false,
 				use_order: true
 			},
 			v4_negative_prompt: {
-				caption: { base_caption: NEGATIVE_PROMPT, char_captions: [] },
+				caption: { base_caption: NEGATIVE_PROMPT, char_captions: negCharCaptions },
 				legacy_uc: false
 			}
 		}
@@ -170,9 +187,9 @@ function buildPayload(positive: string, resolution: ResolutionKey) {
 
 export async function generateImage(
 	token: string,
-	opts: { positive: string; resolution: ResolutionKey }
+	opts: { positive: string; charCaptions?: string[]; resolution: ResolutionKey }
 ): Promise<GenerateResult> {
-	const payload = buildPayload(opts.positive, opts.resolution);
+	const payload = buildPayload(opts.positive, opts.charCaptions ?? [], opts.resolution);
 
 	let res: Response;
 	try {
@@ -290,9 +307,9 @@ function base64ToBytes(b64: string): Uint8Array {
  */
 export async function* generateImageStream(
 	token: string,
-	opts: { positive: string; resolution: ResolutionKey }
+	opts: { positive: string; charCaptions?: string[]; resolution: ResolutionKey }
 ): AsyncGenerator<string, void, unknown> {
-	const payload = buildPayload(opts.positive, opts.resolution);
+	const payload = buildPayload(opts.positive, opts.charCaptions ?? [], opts.resolution);
 	const res = await fetch(STREAM_URL, {
 		method: 'POST',
 		headers: {

@@ -70,10 +70,14 @@ export interface ImageDebug {
 	promptModel: string;
 	/** 외형 일관성용으로 LLM 에 함께 넣은 캐릭터 description(통짜, 길이 제한 적용). 없으면 ''. */
 	characterRef: string;
-	/** 정리(trim/공백 압축) 후 상황 프롬프트(빈 문자열이면 생성 실패/미생성). */
+	/** 정리(trim/공백 압축) 후 상황 프롬프트 — base 와 인물 캡션을 ' | ' 로 합친 표시용(비면 생성 실패). */
 	situation: string;
-	/** 상황 프롬프트 모델의 원문 응답(정리 전). 빈 응답 진단용. */
+	/** 상황 프롬프트 모델의 원문 응답(구조화 객체를 JSON 문자열로). 빈 응답 진단용. */
 	rawSituation: string;
+	/** 정리 후 base 장면 캡션(배경·인원수·상호작용 태그). 인물 외형은 characters 에. */
+	baseScene?: string;
+	/** 정리 후 인물별 char_caption(분리). NAI V4.5 캐릭터 기능으로 외형 누출 방지. */
+	characters?: string[];
 	/** 상황 프롬프트 호출의 종료 사유(예: stop / length / content-filter). 없으면 null. */
 	finishReason: string | null;
 	/** 상황 프롬프트 호출 경고(AI SDK warnings). 없으면 빈 배열. */

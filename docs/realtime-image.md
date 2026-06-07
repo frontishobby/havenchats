@@ -29,3 +29,24 @@ CFG rescale 0.28
 
 
 구현중 애매하면 질의
+
+---
+
+## 업데이트: NAI 캐릭터 기능 + 구조화 출력 (2026-06)
+
+상황 프롬프트 생성을 단일 문자열(`generateText`)에서 **구조화 출력(`generateObject`)** 으로 전환하고,
+NovelAI V4.5 **멀티 캐릭터 기능**(`char_captions`)을 사용하도록 변경.
+
+- **모델 한정**: 상황 프롬프트 모델을 구조화 출력이 안정적인 **Gemini 계열 + Claude Opus** 로만 허용
+  (`IMAGE_PROMPT_MODELS`/`IMAGE_PROMPT_MODEL_IDS`, 기본 `google/gemini-3.5-flash`). 다른 모델은 JSON 불안정.
+- **구조화 스키마**: `{ base, characters: [{ caption }] }`
+  - `base` = 배경·구도·**인원수 태그**(`1girl`/`1boy, 1girl`/`2girls`)·상호작용 태그(`source#`/`target#`/`mutual#`).
+  - `characters[]` = 화면에 보이는 인물별 캡션(번호 없는 `girl`/`boy` + 외형(레퍼런스 고정) + 현재 복장 + 표정/포즈).
+    인물을 분리하면 NAI 가 인물 간 속성 누출(머리색·옷 bleeding)을 막는다. {{나}}(유저)는 프레임에 실제로
+    보일 때만 별도 엔트리(보통 1:1 POV 는 캐릭터 1명만). 최대 6명.
+- **페이로드**: `v4_prompt.caption.char_captions` 채움, 위치는 **AUTO**(`use_coords:false`, `use_order:true`).
+  음수(`v4_negative_prompt.char_captions`)는 양수와 **개수만 맞춘 빈 캡션**(전역 네거티브는 base_caption).
+- **base_caption** = (NSFW면 `rating:nsfw`) + 그림체 + base 장면 + 퀄리티 꼬리. 인물 외형은 char_captions 로 분리.
+- **안전**: base+모든 인물 캡션을 합쳐 미성년 하드차단(`containsMinorTerms`) 검사. 한글/잡음은 필드별 sanitize.
+- 썸네일(`characters/thumbnail`)·그림체(`styles/generate`)는 단일 표준 장면이라 기존 flat 경로 유지
+  (`generateImage`/`generateImageStream` 의 `charCaptions` 는 옵셔널 — 미전달 시 char_captions:[]).

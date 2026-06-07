@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
 	import { invalidate, replaceState } from '$app/navigation';
-	import { MODELS, DEFAULT_MODEL_ID, getModel } from '$lib/data/models';
+	import {
+		MODELS,
+		DEFAULT_MODEL_ID,
+		getModel,
+		IMAGE_PROMPT_MODELS,
+		IMAGE_PROMPT_MODEL_IDS,
+		DEFAULT_IMAGE_PROMPT_MODEL_ID
+	} from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { base64ToBlob } from '$lib/imagePreview';
@@ -55,8 +62,8 @@
 	const IMG_EARLY_TRIGGER_CHARS = 600;
 	const IMG_RESOLUTIONS = ['832x1216', '1024x1024'] as const;
 	type ImgResolution = (typeof IMG_RESOLUTIONS)[number];
-	// 상황 프롬프트 생성 기본 모델(이미지 설정에서 변경 가능).
-	const DEFAULT_IMG_PROMPT_MODEL = 'google/gemini-3.5-flash';
+	// 상황 프롬프트 생성 기본 모델(이미지 설정에서 변경 가능 — 구조화 출력 안정 모델만).
+	const DEFAULT_IMG_PROMPT_MODEL = DEFAULT_IMAGE_PROMPT_MODEL_ID;
 
 	// 서버가 스트림 끝에 붙이는 응답 메타 프레임 구분자(서버 META_SEP 와 동일).
 	const META_SEP = '␞';
@@ -362,7 +369,7 @@
 	let naiKeyRegistered = $state<boolean | null>(null); // null=미확인, false=미등록, true=등록됨
 	let naiStatusLoading = $state(false);
 
-	const currentImgModel = $derived(getModel(imagePromptModel) ?? MODELS[0]);
+	const currentImgModel = $derived(getModel(imagePromptModel) ?? IMAGE_PROMPT_MODELS[0]);
 
 	const currentModel = $derived(getModel(model) ?? MODELS[0]);
 
@@ -400,7 +407,8 @@
 		if (savedRes === '832x1216' || savedRes === '1024x1024') imageResolution = savedRes;
 		imageStyleId = localStorage.getItem(IMG_STYLE_ID_KEY) ?? '';
 		const savedPM = localStorage.getItem(IMG_PROMPT_MODEL_KEY);
-		if (savedPM && getModel(savedPM)) imagePromptModel = savedPM;
+		// 허용목록(구조화 출력 안정 모델)에 있는 값만 복원 — 옛 비허용 모델이 저장돼 있으면 기본값 유지.
+		if (savedPM && IMAGE_PROMPT_MODEL_IDS.has(savedPM)) imagePromptModel = savedPM;
 		imageEarly = localStorage.getItem(IMG_EARLY_KEY) === '1';
 		ignoreCharacterAssets = localStorage.getItem(IMG_IGNORE_ASSETS_KEY) === '1';
 		// 이미지 생성 ON 여부·그림체:
@@ -1456,7 +1464,7 @@
 							</button>
 							{#if imgModelOpen}
 								<ul class="model-list" role="listbox" aria-labelledby="img-model-label">
-									{#each MODELS as m (m.id)}
+									{#each IMAGE_PROMPT_MODELS as m (m.id)}
 										<li>
 											<button
 												class="model-option"
