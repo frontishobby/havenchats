@@ -182,7 +182,9 @@
 
 	{#if data.isOwner}
 		<a class="create-btn" href="/create">+ 캐릭터 만들기</a>
-		<a class="create-btn" href="/import">+ charx 가져오기</a>
+		{#if data.isAdmin}
+			<a class="create-btn" href="/import">+ charx 가져오기</a>
+		{/if}
 
 		{#snippet ownerRow(c: Character)}
 			<li class="row">

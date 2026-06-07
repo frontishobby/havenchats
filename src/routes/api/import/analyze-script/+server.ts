@@ -1,4 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
+import { requireAdmin } from '$lib/server/auth';
 import { env } from '$env/dynamic/private';
 import { generateText } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
@@ -40,6 +41,7 @@ const SYSTEM = [
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
+	requireAdmin(locals.user.email); // charx import(스크립트 분석)는 관리자 전용
 
 	let body: unknown;
 	try {

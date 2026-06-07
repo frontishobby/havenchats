@@ -1,4 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
+import { requireAdmin } from '$lib/server/auth';
 import { createCharacter } from '$lib/server/db/characters';
 import { parseImportMeta, assignImageIds } from '$lib/server/importCharx';
 import { IMPORT_IMAGE_EXT } from '$lib/import/cardToCharacter';
@@ -11,6 +12,7 @@ import { IMPORT_IMAGE_EXT } from '$lib/import/cardToCharacter';
  */
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
+	requireAdmin(locals.user.email); // charx import 는 관리자 전용
 
 	const db = platform?.env?.DB;
 	const bucket = platform?.env?.IMAGES;

@@ -1,4 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
+import { requireAdmin } from '$lib/server/auth';
 import { getCharacterOwnership, updateImageSet } from '$lib/server/db/characters';
 import { IMPORT_IMAGE_EXT } from '$lib/import/cardToCharacter';
 import { NAMED_LIMITS } from '$lib/imageCodes';
@@ -12,6 +13,7 @@ import type { NamedImage } from '$lib/types';
  */
 export const POST: RequestHandler = async ({ params, request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
+	requireAdmin(locals.user.email); // charx import 는 관리자 전용
 
 	const db = platform?.env?.DB;
 	if (!db) return json({ error: 'storage unavailable' }, { status: 500 });
