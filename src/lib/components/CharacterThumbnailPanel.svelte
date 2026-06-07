@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
-	import { base64ToBlob, blobToWebp } from '$lib/imagePreview';
+	import { base64ToBlob, blobToBase64, blobToWebp } from '$lib/imagePreview';
 	import type { ArtStyle } from '$lib/types';
 
 	let {
@@ -150,12 +150,36 @@
 		}
 	}
 
+	/** "이 썸네일 사용": NAI 2x 업스케일 → webp 변환 → 폼 썸네일 등록. */
 	async function useThumb() {
 		if (!finalBlob || using) return;
 		using = true;
 		error = null;
+		noKey = false;
 		try {
-			const webp = await blobToWebp(finalBlob);
+			// 1) 원본 치수(업스케일 요청에 필요).
+			const bmp = await createImageBitmap(finalBlob);
+			const w = bmp.width;
+			const h = bmp.height;
+			bmp.close?.();
+
+			// 2) NAI 업스케일(서버 경유 — 키는 서버에만). 실패 시 사유 노출, 등록 안 함.
+			const b64 = await blobToBase64(finalBlob);
+			const res = await fetch('/api/characters/thumbnail/upscale', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ image: b64, width: w, height: h })
+			});
+			if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) {
+				const d = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+				error = d.message ?? '업스케일에 실패했어요.';
+				if (d.error === 'no_key') noKey = true;
+				return;
+			}
+			const upscaled = await res.blob();
+
+			// 3) webp 변환 후 등록.
+			const webp = await blobToWebp(upscaled);
 			onuse(new File([webp], 'thumbnail.webp', { type: 'image/webp' }), usedStyleId);
 		} catch (e) {
 			error = e instanceof Error ? e.message : '썸네일 변환에 실패했어요.';
@@ -232,12 +256,12 @@
 			{generating ? '생성 중…' : previewUrl ? '다시 생성' : '썸네일 생성'}
 		</button>
 		<button class="t-use" onclick={useThumb} disabled={!finalBlob || generating || using}>
-			{using ? '적용 중…' : '이 썸네일 사용'}
+			{using ? '업스케일 중…' : '이 썸네일 사용'}
 		</button>
 	</div>
 	<p class="t-note">
-		생성 비용은 본인 NovelAI Anlas로 차감돼요. "사용"을 누르면 webp로 변환해 위 썸네일에 등록되고, 사용한
-		그림체가 <strong>추천 그림체</strong>로 자동 설정돼요.
+		생성·업스케일 비용은 본인 NovelAI Anlas로 차감돼요. "사용"을 누르면 <strong>2배 업스케일</strong> 후
+		webp로 변환해 위 썸네일에 등록되고, 사용한 그림체가 <strong>추천 그림체</strong>로 자동 설정돼요.
 	</p>
 </aside>
 

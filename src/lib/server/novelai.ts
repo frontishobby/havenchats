@@ -12,6 +12,7 @@
 
 const SUBSCRIPTION_URL = 'https://api.novelai.net/user/subscription';
 const GENERATE_URL = 'https://image.novelai.net/ai/generate-image';
+const UPSCALE_URL = 'https://api.novelai.net/ai/upscale';
 
 /** NovelAI 구독 등급. 3 = Opus. */
 export const OPUS_TIER = 3;
@@ -205,6 +206,60 @@ export async function generateImage(
 		imgBytes = await extractFirstFileFromZip(zip);
 	} catch (e) {
 		return { ok: false, status: 502, message: `NovelAI 응답(zip) 해석 실패: ${String(e)}` };
+	}
+
+	const { ext, contentType } = sniffImage(imgBytes);
+	return { ok: true, image: { bytes: imgBytes, ext, contentType } };
+}
+
+/**
+ * NovelAI 업스케일(2배). NAIA2.0 의 upscale_NAI 와 동일 동작:
+ *   POST /ai/upscale  body { image: base64, width, height, scale } → 응답 ZIP(이미지 1장).
+ * 이미 인코딩된 base64(클라가 보낸 원본)를 그대로 전달해 재인코딩을 피한다.
+ */
+export async function upscaleImage(
+	token: string,
+	opts: { imageBase64: string; width: number; height: number; scale?: number }
+): Promise<GenerateResult> {
+	const scale = opts.scale ?? 2;
+	let res: Response;
+	try {
+		res = await fetch(UPSCALE_URL, {
+			method: 'POST',
+			headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+			body: JSON.stringify({
+				image: opts.imageBase64,
+				width: opts.width,
+				height: opts.height,
+				scale
+			})
+		});
+	} catch (e) {
+		return { ok: false, status: 502, message: `NovelAI 업스케일 요청 실패: ${String(e)}` };
+	}
+
+	if (!res.ok) {
+		let detail = '';
+		try {
+			detail = (await res.text()).slice(0, 300);
+		} catch {
+			/* ignore */
+		}
+		const message =
+			res.status === 401 || res.status === 403
+				? 'NovelAI 키가 유효하지 않습니다.'
+				: res.status === 402
+					? 'NovelAI Anlas(크레딧)가 부족합니다.'
+					: `NovelAI 업스케일 실패 (${res.status}). ${detail}`;
+		return { ok: false, status: res.status, message };
+	}
+
+	const zip = new Uint8Array(await res.arrayBuffer());
+	let imgBytes: Uint8Array;
+	try {
+		imgBytes = await extractFirstFileFromZip(zip);
+	} catch (e) {
+		return { ok: false, status: 502, message: `NovelAI 업스케일 응답(zip) 해석 실패: ${String(e)}` };
 	}
 
 	const { ext, contentType } = sniffImage(imgBytes);

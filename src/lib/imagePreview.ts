@@ -36,6 +36,17 @@ export function base64ToBlob(b64: string): Blob {
 	return new Blob([bytes as BlobPart], { type: sniffImageMime(bytes) });
 }
 
+/** Blob → base64 문자열(data URL 접두 없이). 업로드/업스케일 전송용. */
+export async function blobToBase64(blob: Blob): Promise<string> {
+	const bytes = new Uint8Array(await blob.arrayBuffer());
+	let bin = '';
+	const chunk = 0x8000;
+	for (let i = 0; i < bytes.length; i += chunk) {
+		bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+	}
+	return btoa(bin);
+}
+
 /**
  * 이미지 Blob → webp Blob(canvas 변환, 클라 전용).
  * NovelAI 생성 결과(보통 PNG)를 썸네일 업로드용 webp 로 바꾼다(폼은 webp/avif 만 허용).

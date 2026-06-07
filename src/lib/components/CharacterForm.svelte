@@ -877,20 +877,19 @@
 	</button>
 </div>
 
-	{#if !isEdit}
-		<div class="assist-col">
-			<CharacterAssistPanel {nsfw} current={currentDraft} onapply={applyAssist} />
-			<CharacterThumbnailPanel
-				{description}
-				{nsfw}
-				onuse={(file, styleId) => {
-					setImage(file);
-					// 이 썸네일을 만든 그림체를 추천 그림체로 자동 반영(목록에 있을 때만).
-					if (styleId && myStyles.some((s) => s.id === styleId)) recommendedStyleId = styleId;
-				}}
-			/>
-		</div>
-	{/if}
+	<!-- AI 보조 패널(PC 전용) — 생성·수정 양쪽에서 노출. 수정 모드에선 기존 내용 보존·수정. -->
+	<div class="assist-col">
+		<CharacterAssistPanel {nsfw} current={currentDraft} onapply={applyAssist} />
+		<CharacterThumbnailPanel
+			{description}
+			{nsfw}
+			onuse={(file, styleId) => {
+				setImage(file);
+				// 이 썸네일을 만든 그림체를 추천 그림체로 자동 반영(목록에 있을 때만).
+				if (styleId && myStyles.some((s) => s.id === styleId)) recommendedStyleId = styleId;
+			}}
+		/>
+	</div>
 </div>
 
 <CharacterImagesModal
