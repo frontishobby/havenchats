@@ -1807,19 +1807,11 @@
 							</button>
 						{/if}
 						{#if m.role === 'image_generation'}
-							{#if m.pending && m.previewUrl}
-								<!-- 스트리밍 중간 프레임 프리뷰(점점 또렷해짐) + 진행 표시. content 보다 우선 →
-								     재생성도 첫 프레임이 오는 순간 기존 이미지를 프리뷰로 덮고, done 에서 최종 교체. -->
-								<div class="scene-streaming">
-									<img class="scene-img" src={m.previewUrl} alt="생성 중" />
-									<span class="scene-streaming-tag">
-										<span class="typing"><i></i><i></i><i></i></span> 생성 중…
-									</span>
-								</div>
-							{:else if m.content}
-								<!-- 최종 이미지. 스트리밍 직후엔 프리뷰 blob 을 placeholder 로 깔아 높이를 유지하고,
-								     실제 /img 이미지가 load 되면 그 자리에서 교체 → 레이아웃 붕괴·스크롤 점프 방지.
-								     (재생성 첫 프레임 전엔 previewUrl 이 없어 기존 이미지가 그대로 보임 → 빈 깜빡임 없음) -->
+							{#if m.previewUrl || m.content}
+								<!-- 스트리밍 프리뷰 → 최종 이미지 전환에서 깜빡임 방지: 컨테이너와 베이스 <img> 를
+								     같은 위치에 유지(브랜치 통째 교체 X)해 프리뷰 엘리먼트가 파괴되지 않게 한다.
+								     · 베이스: 프리뷰가 있으면 프리뷰(placeholder), 없으면(재생성 대기) 기존 최종 이미지.
+								     · 생성 완료(!pending) 시에만 최종 /img 를 위에 겹쳐 로드 → onload 후 프리뷰 제거(점프 없음). -->
 								<div class="scene-final">
 									{#if m.previewUrl}
 										<img
@@ -1828,16 +1820,30 @@
 											alt=""
 											aria-hidden="true"
 										/>
+									{:else if m.pending && m.content}
+										<img
+											class="scene-img"
+											src={`/img/${m.content}`}
+											alt="생성된 장면 이미지"
+											loading="lazy"
+										/>
 									{/if}
-									<img
-										class="scene-img"
-										class:scene-overlay={m.previewUrl}
-										src={`/img/${m.content}`}
-										alt="생성된 장면 이미지"
-										loading="lazy"
-										onload={() => clearScenePreview(m)}
-										onerror={() => clearScenePreview(m)}
-									/>
+									{#if !m.pending && m.content}
+										<img
+											class="scene-img"
+											class:scene-overlay={m.previewUrl}
+											src={`/img/${m.content}`}
+											alt="생성된 장면 이미지"
+											loading="lazy"
+											onload={() => clearScenePreview(m)}
+											onerror={() => clearScenePreview(m)}
+										/>
+									{/if}
+									{#if m.pending}
+										<span class="scene-streaming-tag">
+											<span class="typing"><i></i><i></i><i></i></span> 생성 중…
+										</span>
+									{/if}
 								</div>
 							{:else if m.pending}
 								<div class="scene-loading">
@@ -2508,18 +2514,14 @@
 		font-size: 0.82rem;
 		color: var(--text-dim);
 	}
-	/* 스트리밍 프리뷰(중간 프레임) + 진행 태그 */
-	.scene-streaming {
+	/* 스트리밍 프리뷰 → 최종 이미지를 한 컨테이너에서 처리(브랜치 통째 교체 X): 프리뷰 placeholder 가
+	   높이를 잡고, 실제 /img 는 그 위에 겹쳐 로드 → load 완료 후 clearScenePreview 로 제거(점프·깜빡임 없음). */
+	.scene-final {
 		position: relative;
 		margin: 0.8em 0;
 	}
-	.scene-streaming .scene-img {
+	.scene-final .scene-img {
 		margin: 0;
-	}
-	/* 최종 이미지 ↔ 프리뷰 placeholder 교차구간: placeholder 가 높이를 잡고, 실제 이미지는
-	   그 위에 겹쳐 로드 → load 완료 후 clearScenePreview 로 placeholder 제거(점프 없음). */
-	.scene-final {
-		position: relative;
 	}
 	.scene-final .scene-overlay {
 		position: absolute;
