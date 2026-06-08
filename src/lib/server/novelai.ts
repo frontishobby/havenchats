@@ -403,6 +403,7 @@ function sniffImage(b: Uint8Array): { ext: 'webp' | 'png' | 'jpg'; contentType: 
 
 const LOCAL_SIG = 0x04034b50; // PK\x03\x04
 const CENTRAL_SIG = 0x02014b50; // PK\x01\x02
+const EOCD_SIG = 0x06054b50; // PK\x05\x06 — End Of Central Directory
 
 function readU16(b: Uint8Array, o: number): number {
 	return b[o] | (b[o + 1] << 8);
@@ -411,35 +412,40 @@ function readU32(b: Uint8Array, o: number): number {
 	return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
 }
 
-/** ZIP 의 첫 로컬 파일 항목을 해제해 바이트로 반환. */
+/**
+ * ZIP 의 첫 파일 항목을 해제해 바이트로 반환.
+ *
+ * NovelAI 는 ZIP 을 스트리밍 생성하므로 로컬 헤더에 data descriptor(flag bit 3)를 쓰고
+ * compSize 를 0 으로 남긴다. 따라서 로컬 헤더만으로는 데이터 길이를 알 수 없다.
+ * → 데이터를 전진 풀스캔(멀티-MB × readU32, ~400ms CPU)하는 대신,
+ *   파일 끝의 EOCD → 중앙 디렉터리에서 압축 크기/방식/로컬 헤더 오프셋을 O(1) 로 읽는다.
+ */
 async function extractFirstFileFromZip(zip: Uint8Array): Promise<Uint8Array> {
-	if (zip.length < 30 || readU32(zip, 0) !== LOCAL_SIG) {
+	if (zip.length < 22 || readU32(zip, 0) !== LOCAL_SIG) {
 		throw new Error('ZIP 시그니처 불일치');
 	}
-	const method = readU16(zip, 8);
-	const flags = readU16(zip, 6);
-	let compSize = readU32(zip, 18);
-	const fnameLen = readU16(zip, 26);
-	const extraLen = readU16(zip, 28);
-	const dataStart = 30 + fnameLen + extraLen;
-
-	// data descriptor(flag bit 3) → 헤더의 compSize 가 0. 중앙 디렉터리 시그니처까지를 데이터로 본다.
-	if (compSize === 0 || flags & 0x08) {
-		let end = zip.length;
-		for (let i = dataStart; i + 4 <= zip.length; i++) {
-			if (readU32(zip, i) === CENTRAL_SIG) {
-				end = i;
-				break;
-			}
+	// EOCD 는 보통 마지막 22바이트. 주석이 있으면 그 앞(최대 64KB)에서 역방향 탐색.
+	const minEocd = Math.max(0, zip.length - 22 - 0xffff);
+	let eocd = -1;
+	for (let i = zip.length - 22; i >= minEocd; i--) {
+		if (readU32(zip, i) === EOCD_SIG) {
+			eocd = i;
+			break;
 		}
-		// data descriptor 가 데이터 뒤에 붙는 경우(최대 16바이트) 보정.
-		if (flags & 0x08) {
-			// descriptor: [opt sig(4)] crc(4) compSize(4) uncompSize(4)
-			const hasSig = end >= dataStart + 16 && readU32(zip, end - 16) === 0x08074b50;
-			end -= hasSig ? 16 : 12;
-		}
-		compSize = end - dataStart;
 	}
+	if (eocd < 0) throw new Error('ZIP EOCD 불일치');
+
+	const cdOffset = readU32(zip, eocd + 16);
+	if (readU32(zip, cdOffset) !== CENTRAL_SIG) throw new Error('ZIP 중앙 디렉터리 불일치');
+	const method = readU16(zip, cdOffset + 10);
+	const compSize = readU32(zip, cdOffset + 20);
+	const localOffset = readU32(zip, cdOffset + 42);
+
+	// 데이터 시작은 로컬 헤더 기준(파일명/extra 길이는 중앙 디렉터리와 다를 수 있음).
+	if (readU32(zip, localOffset) !== LOCAL_SIG) throw new Error('ZIP 로컬 헤더 불일치');
+	const fnameLen = readU16(zip, localOffset + 26);
+	const extraLen = readU16(zip, localOffset + 28);
+	const dataStart = localOffset + 30 + fnameLen + extraLen;
 
 	const data = zip.subarray(dataStart, dataStart + compSize);
 	if (method === 0) return data.slice(); // STORED — 그대로
