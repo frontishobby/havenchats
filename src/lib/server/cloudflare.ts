@@ -317,6 +317,50 @@ async function fetchPages(): Promise<PagesDeployment[] | null> {
 	}));
 }
 
+// ── Plan (구독) ────────────────────────────────────────────────────────────────
+
+export interface WorkersPlan {
+	/** 활성 Workers 유료 구독 여부. */
+	paid: boolean;
+	/** 표시용 플랜명(예: 'Workers Paid' / 'Workers Free'). */
+	name: string;
+	/** 월 기본료(USD) — API 가 주는 실제 금액. Free 면 0. */
+	baseFee: number;
+	currency: string;
+}
+
+interface RawSub {
+	rate_plan?: { id?: string; public_name?: string; name?: string };
+	price?: number;
+	currency?: string;
+	frequency?: string;
+	state?: string;
+	product?: { name?: string };
+}
+
+/**
+ * 계정 구독에서 Workers 플랜·기본료를 동적으로 조회. (토큰에 Account Billing:Read 필요)
+ * 권한/오류로 못 가져오면 null → 호출측에서 공개가 기준 기본료로 폴백.
+ */
+async function fetchPlan(): Promise<WorkersPlan | null> {
+	const acct = creds()?.account ?? '';
+	const subs = await cfRest<RawSub[]>(`/accounts/${acct}/subscriptions`);
+	if (!subs) return null;
+	// Workers 구독: product=prod_workers 또는 rate_plan.id 가 workers* 인 항목.
+	const w = subs.find(
+		(s) => s.product?.name === 'prod_workers' || (s.rate_plan?.id ?? '').startsWith('workers')
+	);
+	if (!w) return { paid: false, name: 'Workers Free', baseFee: 0, currency: 'USD' };
+	const baseFee = w.price ?? 0;
+	const paid = baseFee > 0 || /paid/i.test(w.state ?? '');
+	return {
+		paid,
+		name: w.rate_plan?.public_name || w.rate_plan?.name || (paid ? 'Workers Paid' : 'Workers Free'),
+		baseFee,
+		currency: w.currency ?? 'USD'
+	};
+}
+
 // ── orchestration ─────────────────────────────────────────────────────────────
 
 export interface InfraMetrics {
@@ -326,6 +370,8 @@ export interface InfraMetrics {
 	d1: D1Metrics;
 	r2: R2Metrics;
 	pages: PagesDeployment[] | null;
+	/** Workers 플랜·기본료(동적). 권한 없음/오류 시 null → 공개가 기준 폴백. */
+	plan: WorkersPlan | null;
 }
 
 /** 인프라 탭 전체 지표(Workers·D1·R2·Pages)를 병렬로 조회. */
@@ -336,14 +382,16 @@ export async function fetchInfraMetrics(): Promise<InfraMetrics> {
 			workers: { last7d: null },
 			d1: { sizeBytes: null, tableCount: null, last7d: null },
 			r2: { storage: null, ops: null, classA: 0, classB: 0 },
-			pages: null
+			pages: null,
+			plan: null
 		};
 	}
-	const [workers, d1, r2, pages] = await Promise.all([
+	const [workers, d1, r2, pages, plan] = await Promise.all([
 		fetchWorkers(),
 		fetchD1(),
 		fetchR2(),
-		fetchPages()
+		fetchPages(),
+		fetchPlan()
 	]);
-	return { configured: true, workers, d1, r2, pages };
+	return { configured: true, workers, d1, r2, pages, plan };
 }

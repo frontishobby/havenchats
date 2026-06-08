@@ -18,8 +18,8 @@ const TO_MONTH = 30 / 7;
 const GB = 1e9;
 const MILLION = 1e6;
 
-/** Workers 유료 플랜 기본료(월, USD). */
-const BASE_FEE = 5;
+/** Workers 유료 플랜 기본료(월, USD) — 구독(plan) 조회 실패 시 폴백 기본값. */
+const BASE_FEE_FALLBACK = 5;
 
 const PRICING = {
 	workers: {
@@ -89,10 +89,17 @@ function storageCost(bytes: number, freeGb: number, ratePerGb: number): number {
 /** 인프라 지표 → 서비스별/총 월 청구 추정. */
 export function estimateBilling(infra: InfraMetrics): BillingEstimate {
 	if (!infra.configured) {
-		return { available: false, monthlyTotal: 0, baseFee: BASE_FEE, services: [] };
+		return { available: false, monthlyTotal: 0, baseFee: BASE_FEE_FALLBACK, services: [] };
 	}
 
 	const p = PRICING;
+	// 기본료·플랜명은 구독 조회(infra.plan)에서 동적으로. 권한 없음/오류면 공개가 기준으로 폴백.
+	const baseFee = infra.plan?.baseFee ?? BASE_FEE_FALLBACK;
+	const workersLabel = infra.plan
+		? infra.plan.paid
+			? `Workers 유료 플랜 (${infra.plan.name})`
+			: `Workers 무료 플랜 (${infra.plan.name})`
+		: 'Workers 유료 플랜';
 
 	// ── Workers / Pages Functions ──
 	const w = infra.workers.last7d;
@@ -102,7 +109,7 @@ export function estimateBilling(infra: InfraMetrics): BillingEstimate {
 	const wCpuCost = cpuMonthly != null ? meteredCost(cpuMonthly, p.workers.cpuMsFree, p.workers.cpuMsRatePerMillion) : 0;
 
 	const workersItems: BillItem[] = [
-		{ name: '기본료', monthly: null, unit: 'count', free: 0, cost: BASE_FEE, available: true, projected: false },
+		{ name: '기본료', monthly: null, unit: 'count', free: 0, cost: baseFee, available: true, projected: false },
 		{
 			name: '요청',
 			monthly: reqMonthly,
@@ -122,7 +129,7 @@ export function estimateBilling(infra: InfraMetrics): BillingEstimate {
 			projected: true
 		}
 	];
-	const workersSubtotal = BASE_FEE + wReqCost + wCpuCost;
+	const workersSubtotal = baseFee + wReqCost + wCpuCost;
 
 	// ── D1 ──
 	const d1 = infra.d1;
@@ -207,7 +214,7 @@ export function estimateBilling(infra: InfraMetrics): BillingEstimate {
 	const r2Subtotal = r2StorageCost + r2ACost + r2BCost;
 
 	const services: BillService[] = [
-		{ key: 'workers', label: 'Workers 유료 플랜', subtotal: workersSubtotal, items: workersItems },
+		{ key: 'workers', label: workersLabel, subtotal: workersSubtotal, items: workersItems },
 		{ key: 'd1', label: 'D1', subtotal: d1Subtotal, items: d1Items },
 		{ key: 'r2', label: 'R2', subtotal: r2Subtotal, items: r2Items }
 	];
@@ -215,7 +222,7 @@ export function estimateBilling(infra: InfraMetrics): BillingEstimate {
 	return {
 		available: true,
 		monthlyTotal: workersSubtotal + d1Subtotal + r2Subtotal,
-		baseFee: BASE_FEE,
+		baseFee,
 		services
 	};
 }

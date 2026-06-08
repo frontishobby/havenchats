@@ -118,8 +118,9 @@
 			</table>
 		</div>
 		<p class="dim-note">
-			공개 Workers 유료 플랜 가격표 기준 <strong>추정치</strong>예요. 저장량은 현재 스냅샷, 쿼리·작업은
-			최근 7일을 월(×30/7)로 환산했어요. 정확한 청구는 Cloudflare 대시보드 기준.
+			기본료·플랜명은 <strong>실제 구독</strong>에서 가져오고, 사용량 단가는 공개 가격표 기준
+			<strong>추정치</strong>예요. 저장량은 현재 스냅샷, 쿼리·작업은 최근 7일을 월(×30/7)로 환산했어요.
+			정확한 청구는 Cloudflare 대시보드 기준.
 		</p>
 	</section>
 {/if}
