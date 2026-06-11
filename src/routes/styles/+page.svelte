@@ -2,6 +2,7 @@
 	import { invalidate } from '$app/navigation';
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import StyleWorkshopModal from '$lib/components/StyleWorkshopModal.svelte';
+	import { resized } from '$lib/imageUrl';
 	import type { ArtStyle } from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -143,7 +144,7 @@
 				<div class="card" onclick={() => openDetail(s)} role="button" tabindex="0">
 					<div class="thumb">
 						{#if s.thumbnailUrl}
-							<img src={s.thumbnailUrl} alt={s.title} loading="lazy" />
+							<img src={resized(s.thumbnailUrl, 480)} alt={s.title} loading="lazy" />
 						{:else}
 							<span class="no-thumb">✦</span>
 						{/if}

@@ -11,6 +11,7 @@
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { privacyMode } from '$lib/state/privacyMode.svelte';
 	import { isAdmin } from '$lib/admin';
+	import { resized } from '$lib/imageUrl';
 	import type { LayoutData } from './$types';
 	let { children, data }: { children: import('svelte').Snippet; data: LayoutData } = $props();
 
@@ -110,7 +111,7 @@
 						title="메뉴"
 					>
 						{#if data.user.avatarUrl}
-							<img class="user-avatar" src={data.user.avatarUrl} alt="" />
+							<img class="user-avatar" src={resized(data.user.avatarUrl, 64)} alt="" />
 						{:else}
 							<span class="user-fallback">
 								{(data.user.name ?? data.user.email).charAt(0).toUpperCase()}

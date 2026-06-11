@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { fade, fly } from 'svelte/transition';
 	import type { RecentChat } from '$lib/types';
+	import { resized } from '$lib/imageUrl';
 
 	let {
 		open = false,
@@ -84,7 +85,7 @@
 							href={`/chat/${c.characterId}/session/${c.sessionId}`}
 							onclick={onClose}
 						>
-							<img class="thumb" src={c.avatarUrl} alt={c.characterName} loading="lazy" />
+							<img class="thumb" src={resized(c.avatarUrl, 96)} alt={c.characterName} loading="lazy" />
 							<div class="meta">
 								<div class="top">
 									<span class="name">{c.characterName}</span>

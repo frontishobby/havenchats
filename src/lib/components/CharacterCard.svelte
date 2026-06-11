@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Character } from '$lib/types';
+	import { resized } from '$lib/imageUrl';
 	import NsfwBadge from './NsfwBadge.svelte';
 
 	let { character, onselect }: { character: Character; onselect: (c: Character) => void } =
@@ -22,7 +23,7 @@
 			<span class="avatar-fallback">{initial}</span>
 		{:else}
 			<img
-				src={character.avatarUrl}
+				src={resized(character.avatarUrl, 480)}
 				alt={character.name}
 				loading="lazy"
 				onerror={() => (imgFailed = true)}

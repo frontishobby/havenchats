@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import NsfwBadge from './NsfwBadge.svelte';
 	import { hasScenes, looksLikeSceneToken } from '$lib/imageCodes';
+	import { resized } from '$lib/imageUrl';
 	import type { Character } from '$lib/types';
 
 	let { character, onclose }: { character: Character | null; onclose: () => void } = $props();
@@ -186,7 +187,7 @@
 				<span class="creator-avatar">
 					{#if character.creator.avatarUrl && !creatorImgFailed}
 						<img
-							src={character.creator.avatarUrl}
+							src={resized(character.creator.avatarUrl, 96)}
 							alt={creatorName}
 							onerror={() => (creatorImgFailed = true)}
 						/>

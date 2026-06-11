@@ -7,6 +7,7 @@
 	import { promoteLocalCharacter, type PromoteProgress } from '$lib/import/promote';
 	import { deleteLocalScenes, getLocalSceneBlob } from '$lib/import/localImages';
 	import { addAssetsFromZip, type AddAssetsProgress } from '$lib/import/addAssets';
+	import { resized } from '$lib/imageUrl';
 	import type { Character } from '$lib/types';
 	import type { PageData } from './$types';
 
@@ -169,7 +170,7 @@
 	<header class="profile-head">
 		<div class="avatar">
 			{#if data.profile.avatarUrl && !avatarFailed}
-				<img src={data.profile.avatarUrl} alt={data.profile.name} onerror={() => (avatarFailed = true)} />
+				<img src={resized(data.profile.avatarUrl, 160)} alt={data.profile.name} onerror={() => (avatarFailed = true)} />
 			{:else}
 				<span class="avatar-fallback">{initial}</span>
 			{/if}
@@ -190,7 +191,7 @@
 			<li class="row">
 				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 				<button class="row-main" type="button" onclick={() => (detail = c)}>
-					<img class="thumb" src={c.avatarUrl} alt={c.name} />
+					<img class="thumb" src={resized(c.avatarUrl, 128)} alt={c.name} />
 					<span class="info">
 						<span class="name-line">
 							<span class="name">{c.name}</span>

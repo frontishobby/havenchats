@@ -12,6 +12,7 @@
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { base64ToBlob } from '$lib/imagePreview';
+	import { resized } from '$lib/imageUrl';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import CharacterDetailModal from '$lib/components/CharacterDetailModal.svelte';
 	import {
@@ -1184,7 +1185,7 @@
 				{#if imgFailed}
 					<span>{character.name.charAt(0)}</span>
 				{:else}
-					<img src={character.avatarUrl} alt={character.name} onerror={() => (imgFailed = true)} />
+					<img src={resized(character.avatarUrl, 96)} alt={character.name} onerror={() => (imgFailed = true)} />
 				{/if}
 			</div>
 			<div class="who">
@@ -1602,7 +1603,7 @@
 									onclick={() => selectStyle(st.id)}
 								>
 									{#if st.thumbnailUrl}
-										<img class="style-swatch" src={st.thumbnailUrl} alt="" />
+										<img class="style-swatch" src={resized(st.thumbnailUrl, 64)} alt="" />
 									{:else}
 										<span class="style-swatch default">✦</span>
 									{/if}
@@ -1621,7 +1622,7 @@
 								aria-expanded={styleOpen}
 							>
 								{#if trigStyle?.thumbnailUrl}
-									<img class="style-swatch" src={trigStyle.thumbnailUrl} alt="" />
+									<img class="style-swatch" src={resized(trigStyle.thumbnailUrl, 64)} alt="" />
 								{:else}
 									<span class="style-swatch default">✦</span>
 								{/if}
@@ -1639,7 +1640,7 @@
 											onclick={() => selectStyle('')}
 										>
 											{#if fallbackStyle?.thumbnailUrl}
-												<img class="style-swatch" src={fallbackStyle.thumbnailUrl} alt="" />
+												<img class="style-swatch" src={resized(fallbackStyle.thumbnailUrl, 64)} alt="" />
 											{:else}
 												<span class="style-swatch default">✦</span>
 											{/if}
