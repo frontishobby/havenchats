@@ -321,6 +321,9 @@
 	// 헤더의 캐릭터 정보(썸네일·이름·설명) 클릭 시 상세 모달 표시.
 	let showCharModal = $state(false);
 	let scroller = $state<HTMLDivElement | null>(null);
+	// 전송 시 내 메시지를 맨 위로 올리기 위한 하단 빈 공간(px). 아래 내용이 짧으면 이만큼 늘려
+	// 스크롤 여지를 만들고, 응답이 스트리밍되며 자연스럽게 채워진다. 세션 전환 시 리셋.
+	let tailPad = $state(0);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
 	// 터치(모바일) 기기 여부 — 이 경우 Enter 는 전송하지 않고 개행(기본 동작) 시킨다.
 	let isTouch = $state(false);
@@ -794,6 +797,7 @@
 		memoryDraft = '';
 		summary = null;
 		summaryDraft = '';
+		tailPad = 0;
 		// 이어가는 세션은 맨 아래(최신 메시지)로, 새 채팅(오프닝만)은 맨 위로 즉시 이동
 		if (messages.length > 0)
 			tick().then(() => scroller?.scrollTo({ top: data.sessionId ? scroller.scrollHeight : 0 }));
@@ -925,9 +929,23 @@
 
 	const lastMessage = $derived(messages[messages.length - 1]);
 
-	async function scrollToBottom() {
+	// 전송 직후 내 메시지를 스크롤 영역 맨 위로 — Claude.ai 와 같은 동작.
+	// 아래 내용이 짧아 그만큼 스크롤할 수 없으면 tailPad(하단 스페이서)를 늘려 공간을 확보한다.
+	async function scrollUserToTop(id: string) {
 		await tick();
-		scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+		if (!scroller) return;
+		const el = scroller.querySelector<HTMLElement>(`[data-mid="${CSS.escape(id)}"]`);
+		if (!el) return;
+		const target = Math.max(
+			0,
+			el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - 12
+		);
+		const deficit = target - (scroller.scrollHeight - scroller.clientHeight);
+		if (deficit > 0) {
+			tailPad += deficit;
+			await tick();
+		}
+		scroller.scrollTo({ top: target, behavior: 'smooth' });
 	}
 
 	async function send() {
@@ -963,7 +981,7 @@
 		streaming = true;
 		// 첫 대화(세션 없음)면 미리 입력해 둔 상시 기억을 세션 생성과 함께 저장한다.
 		const newSessionMemory = sessionId ? undefined : memoryDraft.trim() || undefined;
-		await scrollToBottom();
+		await scrollUserToTop(userMsgId);
 
 		// 응답 완료 후 실시간 이미지를 생성할지(정상 응답일 때만) — finally 에서 트리거.
 		let imageAfter = false;
@@ -1766,7 +1784,7 @@
 		<article class="novel">
 			{#each messages as m (m.id)}
 				{#if m.content || m.errorReason || m.role === 'image_generation' || (streaming && m === lastMessage)}
-					<div class="para {m.role}">
+					<div class="para {m.role}" data-mid={m.id}>
 						{#if !(streaming && m === lastMessage) && !m.pending}
 							{#if (m.role === 'assistant' || m.role === 'image_generation') && m.cost != null && Number.isFinite(m.cost) && m.cost > 0}
 								<span class="msg-cost" title="이 응답 생성 비용(USD)">{formatCost(m.cost)}</span>
@@ -1866,6 +1884,9 @@
 				{/if}
 			{/each}
 		</article>
+		{#if tailPad > 0}
+			<div style:height="{tailPad}px" aria-hidden="true"></div>
+		{/if}
 	</div>
 
 	<div class="composer">
