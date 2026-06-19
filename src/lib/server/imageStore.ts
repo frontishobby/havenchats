@@ -188,9 +188,10 @@ export async function commitSceneImages(
 	return commitImageSet(bucket, characterId, parsed.data, oldSet);
 }
 
-/** 키 목록을 best-effort 삭제(실패 무시). 롤백·고아 정리용. */
+/** 키 목록을 best-effort 삭제(실패 무시). 롤백·고아 정리용. R2 는 배열 삭제를 지원(원격 왕복 1회). */
 export async function deleteKeys(bucket: R2Bucket, keys: string[]): Promise<void> {
-	await Promise.all(keys.map((k) => bucket.delete(k).catch(() => {})));
+	if (keys.length === 0) return;
+	await bucket.delete(keys).catch(() => {});
 }
 
 /** 캐릭터의 모든 장면 이미지 삭제(캐릭터 삭제 시). */

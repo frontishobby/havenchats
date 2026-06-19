@@ -15,5 +15,6 @@
 			"database_name": "haven",
 			"database_id": "b8c2b1a3-78e8-4527-aefa-461bcd3486b7"
 		}
-	]
+	],
+	"r2_buckets": [{ "binding": "IMAGES", "bucket_name": "haven-images" }]
 }

@@ -1,3 +1,4 @@
+import { getImages } from '$lib/server/images';
 import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { getStyle, getStyleOwner, deleteStyle, setShared } from '$lib/server/db/styles';
@@ -39,7 +40,7 @@ export const DELETE: RequestHandler = async ({ params, locals, platform }) => {
 	await deleteStyle(db, params.id!);
 	if (owner.thumbnailKey) {
 		try {
-			await platform?.env?.IMAGES?.delete(owner.thumbnailKey);
+			await getImages(platform)?.delete(owner.thumbnailKey);
 		} catch (e) {
 			console.error('[styles] 썸네일 삭제 실패:', e);
 		}

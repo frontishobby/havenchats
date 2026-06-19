@@ -1,3 +1,4 @@
+import { getImages } from '$lib/server/images';
 import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { updateAvatarKey, updateProfile, type Preference } from '$lib/server/db/users';
@@ -50,7 +51,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	// ── 프로필 사진(선택) ──
 	const avatar = form.get('avatar');
 	if (avatar instanceof File && avatar.size > 0) {
-		const bucket = platform?.env?.IMAGES;
+		const bucket = getImages(platform);
 		if (!bucket) {
 			return json({ error: 'storage unavailable' }, { status: 500 });
 		}

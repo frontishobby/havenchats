@@ -1,3 +1,4 @@
+import { getImages } from '$lib/server/images';
 import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import {
@@ -23,7 +24,7 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 	}
 
 	const db = getDB(platform);
-	const bucket = platform?.env?.IMAGES;
+	const bucket = getImages(platform);
 	if (!db || !bucket) {
 		return json({ error: 'storage unavailable' }, { status: 500 });
 	}
@@ -128,7 +129,7 @@ export const DELETE: RequestHandler = async ({ params, locals, platform }) => {
 	}
 
 	const db = getDB(platform);
-	const bucket = platform?.env?.IMAGES;
+	const bucket = getImages(platform);
 	if (!db) {
 		return json({ error: 'storage unavailable' }, { status: 500 });
 	}

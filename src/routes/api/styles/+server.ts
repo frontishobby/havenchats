@@ -1,3 +1,4 @@
+import { getImages } from '$lib/server/images';
 import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { listStyles, createStyle } from '$lib/server/db/styles';
@@ -28,7 +29,7 @@ export const GET: RequestHandler = async ({ locals, platform }) => {
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
 	const db = getDB(platform);
-	const bucket = platform?.env?.IMAGES;
+	const bucket = getImages(platform);
 	if (!db || !bucket) return json({ error: 'storage unavailable' }, { status: 500 });
 
 	const form = await request.formData();
