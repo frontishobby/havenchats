@@ -1,3 +1,4 @@
+import { getWaitUntil } from '$lib/server/waitUntil';
 import { getImages } from '$lib/server/images';
 import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
@@ -444,7 +445,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			context: 'generateObject /api/chat/image',
 			error: e,
 			extra: { session: sessionId, user: locals.user.id, model: promptModel },
-			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+			waitUntil: getWaitUntil(platform)
 		});
 		return json(
 			{
@@ -483,7 +484,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			context: 'minor-term hard block /api/chat/image',
 			error: new Error('blocked: minor term in image prompt'),
 			extra: { session: sessionId, user: locals.user.id },
-			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+			waitUntil: getWaitUntil(platform)
 		});
 		return json(
 			{ error: 'blocked', message: '생성할 수 없는 내용이 포함되어 있어 이미지를 만들지 않았습니다.', debug: makeDebug(positive) },

@@ -1,3 +1,4 @@
+import { getWaitUntil } from '$lib/server/waitUntil';
 import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { streamText, generateText } from 'ai';
@@ -207,10 +208,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const gateway = createGateway({ apiKey: gatewayKey });
 
 	// 응답 종료 후 처리(영속화·요약)를 워커 생존 보장 하에 실행.
-	const after = (p: Promise<unknown>) => {
-		const guarded = p.catch((e) => console.error('[chat] after-task error:', e));
-		if (platform?.context?.waitUntil) platform.context.waitUntil(guarded);
-	};
+	const after = getWaitUntil(platform);
 
 	// CBS 평가로 변수 상태가 바뀌었으면(또는 기본변수 첫 시딩) 턴 종료 후 영속.
 	if (JSON.stringify(ctx.vars) !== scriptStateBefore) {
@@ -249,7 +247,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 				context: 'streamText /api/chat',
 				error,
 				extra: { model: modelId, session: session!.id, character: character.id, user: userId },
-				waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+				waitUntil: getWaitUntil(platform)
 			});
 		},
 		onFinish: ({ text: reply, usage, providerMetadata }) => {
@@ -305,7 +303,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 					context: 'textStream iterate /api/chat',
 					error: err,
 					extra: { model: modelId, session: session!.id, character: character.id, user: userId },
-					waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+					waitUntil: getWaitUntil(platform)
 				});
 			}
 			if (streamError) {

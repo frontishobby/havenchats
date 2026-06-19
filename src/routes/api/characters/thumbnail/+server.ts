@@ -1,3 +1,4 @@
+import { getWaitUntil } from '$lib/server/waitUntil';
 import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { generateText } from 'ai';
@@ -134,7 +135,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 				context: 'generateText /api/characters/thumbnail',
 				error: e,
 				extra: { user: locals.user.id, model },
-				waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+				waitUntil: getWaitUntil(platform)
 			});
 			return json(
 				{ error: 'situation', message: '상황 프롬프트 생성에 실패했어요. 다시 시도해 주세요.' },

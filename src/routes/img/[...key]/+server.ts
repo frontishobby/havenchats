@@ -1,3 +1,4 @@
+import { getWaitUntil } from '$lib/server/waitUntil';
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
@@ -65,7 +66,7 @@ export const GET: RequestHandler = async ({ params, platform, request, url }) =>
 	if (cache) {
 		// 본문을 소비하기 전 clone 을 캐시에 저장(응답 지연 없이 백그라운드).
 		// dev(getPlatformProxy)의 caches 는 no-op 스텁 → 항상 MISS. prod 워커 런타임선 정상 HIT.
-		platform?.context?.waitUntil?.(cache.put(cacheKey, res.clone()));
+		getWaitUntil(platform)(cache.put(cacheKey, res.clone()));
 	}
 	res.headers.set('x-cache', cache ? 'MISS' : 'BYPASS');
 	return res;

@@ -1,3 +1,4 @@
+import { getWaitUntil } from '$lib/server/waitUntil';
 import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { SESSION_COOKIE, verifySessionToken } from '$lib/server/auth';
 import { getDB } from '$lib/server/db/remote';
@@ -69,7 +70,7 @@ export const handleError: HandleServerError = ({ error, event, status }) => {
 			context: `${event.request.method} ${event.url.pathname}`,
 			error,
 			extra: { status, userId: event.locals.user?.id ?? 'anon' },
-			waitUntil: event.platform?.context?.waitUntil?.bind(event.platform.context)
+			waitUntil: getWaitUntil(event.platform)
 		});
 	}
 	return { message: '서버 오류가 발생했습니다.' };

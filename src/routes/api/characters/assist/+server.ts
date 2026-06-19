@@ -1,3 +1,4 @@
+import { getWaitUntil } from '$lib/server/waitUntil';
 import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { generateObject, jsonSchema } from 'ai';
@@ -228,7 +229,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			context: 'generateObject /api/characters/assist',
 			error: e,
 			extra: { user: locals.user.id, model },
-			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+			waitUntil: getWaitUntil(platform)
 		});
 		const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
 		return json(
@@ -271,7 +272,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			context: 'incomplete /api/characters/assist',
 			error: new Error(`불완전 결과 — ${diag}\n${JSON.stringify(parsed).slice(0, 600)}`),
 			extra: { user: locals.user.id, model },
-			waitUntil: platform?.context?.waitUntil?.bind(platform.context)
+			waitUntil: getWaitUntil(platform)
 		});
 		return json(
 			{
