@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { findCharacter } from '$lib/server/characters';
 import { getCharacterDefaultVars } from '$lib/server/db/characters';
@@ -31,7 +32,7 @@ async function guard(
 
 export const GET: RequestHandler = async ({ url, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	const sessionId = url.searchParams.get('sessionId');
@@ -55,7 +56,7 @@ interface VarsBody {
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	const body = (await request.json()) as VarsBody;

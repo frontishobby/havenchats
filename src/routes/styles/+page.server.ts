@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { listStyles, listFavorites, listMyCreated } from '$lib/server/db/styles';
 import type { PageServerLoad } from './$types';
 
@@ -9,7 +10,7 @@ import type { PageServerLoad } from './$types';
  */
 export const load: PageServerLoad = async ({ locals, platform, depends }) => {
 	depends('app:styles');
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	const uid = locals.user?.id ?? null;
 	if (!db) return { shared: [], favorites: [], saved: [] };
 

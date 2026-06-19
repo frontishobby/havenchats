@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { error } from '@sveltejs/kit';
 import { fetchInfraMetrics } from '$lib/server/cloudflare';
 import { estimateBilling } from '$lib/server/cfPricing';
@@ -20,7 +21,7 @@ async function tableRows(db: D1Database): Promise<{ table: string; rows: number 
 }
 
 export const load: PageServerLoad = async ({ platform }) => {
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) error(500, '저장소를 사용할 수 없어요.');
 
 	const [infra, rows] = await Promise.all([fetchInfraMetrics(), tableRows(db)]);

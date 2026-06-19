@@ -1,0 +1,19 @@
+{
+	"$schema": "../node_modules/wrangler/config-schema.json",
+	// Haven 앱(Vercel 등 비-Workers 호스트)에서 D1(`haven`)을 HTTP 로 쓰기 위한 얇은 프록시 Worker.
+	// D1 의 prepare/bind 인터페이스를 그대로 미러링한다(/query/all·first·run·batch·exec).
+	// 인증: Authorization: Bearer <APP_SECRET> (wrangler secret put APP_SECRET).
+	"name": "haven-d1-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-06-01",
+	"observability": { "enabled": true },
+	// 커스텀 도메인. 존(havenchats.com)이 같은 CF 계정이라 DNS·인증서 자동 프로비저닝.
+	"routes": [{ "pattern": "d1-worker.havenchats.com", "custom_domain": true }],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "haven",
+			"database_id": "b8c2b1a3-78e8-4527-aefa-461bcd3486b7"
+		}
+	]
+}

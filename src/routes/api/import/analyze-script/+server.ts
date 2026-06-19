@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { requireAdmin } from '$lib/server/auth';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
@@ -73,7 +74,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		return json({ error: '분석할 내용이 비어있어요.' }, { status: 400 });
 	}
 
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 	const apiKey = await getDecryptedKey(db, locals.user.id, 'gateway');
 	if (!apiKey) {

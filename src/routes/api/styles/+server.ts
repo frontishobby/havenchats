@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { listStyles, createStyle } from '$lib/server/db/styles';
 
@@ -18,7 +19,7 @@ const EXT_BY_TYPE: Record<string, string> = {
 };
 
 export const GET: RequestHandler = async ({ locals, platform }) => {
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ styles: [] });
 	const styles = await listStyles(db, locals.user?.id ?? null);
 	return json({ styles });
@@ -26,7 +27,7 @@ export const GET: RequestHandler = async ({ locals, platform }) => {
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	const bucket = platform?.env?.IMAGES;
 	if (!db || !bucket) return json({ error: 'storage unavailable' }, { status: 500 });
 

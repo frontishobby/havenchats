@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { error, redirect } from '@sveltejs/kit';
 import { findCharacter } from '$lib/server/characters';
 import { getCharacterOwnership } from '$lib/server/db/characters';
@@ -14,7 +15,7 @@ export const load: PageServerLoad = async ({ params, locals, platform, depends }
 	// (이 load 는 fetch 없이 D1 직접조회라 기본 무효화 대상이 아님 → 수동 키 등록 필요.)
 	depends(`character:${params.id}`);
 
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	const character = await findCharacter(db, params.id);
 	if (!character) {
 		throw error(404, '캐릭터를 찾을 수 없어요.');

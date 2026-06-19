@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { requireAdmin } from '$lib/server/auth';
 import {
@@ -16,7 +17,7 @@ export const POST: RequestHandler = async ({ params, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
 	requireAdmin(locals.user.email); // imported(charx) 캐릭터 전용 기능 → 관리자 전용
 
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	const bucket = platform?.env?.IMAGES;
 	if (!db || !bucket) return json({ error: 'storage unavailable' }, { status: 500 });
 

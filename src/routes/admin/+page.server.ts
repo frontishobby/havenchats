@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { error } from '@sveltejs/kit';
 import { listUsersWithStats, getOverallSummary } from '$lib/server/db/admin';
 import type { PageServerLoad } from './$types';
@@ -5,7 +6,7 @@ import type { PageServerLoad } from './$types';
 const DAY = 86_400_000;
 
 export const load: PageServerLoad = async ({ platform }) => {
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) error(500, '저장소를 사용할 수 없어요.');
 
 	const now = Date.now();

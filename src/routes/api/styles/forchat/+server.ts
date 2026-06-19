@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { listFavorites, listMyCreated, getOldestSharedStyle } from '$lib/server/db/styles';
 
@@ -10,7 +11,7 @@ import { listFavorites, listMyCreated, getOldestSharedStyle } from '$lib/server/
  */
 export const GET: RequestHandler = async ({ locals, platform }) => {
 	if (!locals.user) return json({ saved: [], favorites: [], fallback: null });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ saved: [], favorites: [], fallback: null });
 	const uid = locals.user.id;
 	const [saved, favs, fallback] = await Promise.all([

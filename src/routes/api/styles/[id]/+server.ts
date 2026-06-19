@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { getStyle, getStyleOwner, deleteStyle, setShared } from '$lib/server/db/styles';
 
@@ -5,7 +6,7 @@ import { getStyle, getStyleOwner, deleteStyle, setShared } from '$lib/server/db/
 
 export const PATCH: RequestHandler = async ({ params, request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	const owner = await getStyleOwner(db, params.id!);
@@ -19,7 +20,7 @@ export const PATCH: RequestHandler = async ({ params, request, locals, platform 
 };
 
 export const GET: RequestHandler = async ({ params, locals, platform }) => {
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 	const style = await getStyle(db, params.id!, locals.user?.id ?? null);
 	if (!style) return json({ error: 'not found' }, { status: 404 });
@@ -28,7 +29,7 @@ export const GET: RequestHandler = async ({ params, locals, platform }) => {
 
 export const DELETE: RequestHandler = async ({ params, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	const owner = await getStyleOwner(db, params.id!);

@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { getSession, setMemoryText } from '$lib/server/db/chats';
 
@@ -9,7 +10,7 @@ interface MemoryBody {
 /** 유저가 직접 넣은 "상시 기억" 저장. 빈 값이면 제거. (최대 길이는 서버에서 강제) */
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	const body = (await request.json()) as MemoryBody;

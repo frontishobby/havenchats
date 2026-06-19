@@ -1,5 +1,6 @@
 import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { SESSION_COOKIE, verifySessionToken } from '$lib/server/auth';
+import { getDB } from '$lib/server/db/remote';
 import { getUserProfile } from '$lib/server/db/users';
 import { notifyServerError } from '$lib/server/notify';
 
@@ -24,7 +25,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		return resolve(event);
 	}
 
-	const db = event.platform?.env?.DB;
+	const db = getDB(event.platform);
 	const profile = db ? await getUserProfile(db, identity.id) : null;
 
 	event.locals.user = profile ?? {

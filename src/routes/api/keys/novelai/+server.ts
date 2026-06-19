@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { getKeyStatus, setKey, deleteKey } from '$lib/server/db/userKeys';
 import { verifySubscription } from '$lib/server/novelai';
@@ -20,7 +21,7 @@ interface NovelaiKeyMeta {
 
 export const GET: RequestHandler = async ({ locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	const status = await getKeyStatus(db, locals.user.id, PROVIDER);
@@ -35,7 +36,7 @@ export const GET: RequestHandler = async ({ locals, platform }) => {
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	const body = (await request.json().catch(() => null)) as { key?: unknown } | null;
@@ -75,7 +76,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 export const DELETE: RequestHandler = async ({ locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	await deleteKey(db, locals.user.id, PROVIDER);

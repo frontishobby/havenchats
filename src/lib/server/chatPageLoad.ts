@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { error, redirect } from '@sveltejs/kit';
 import { findCharacter } from '$lib/server/characters';
 import { canSeeNsfw } from '$lib/nsfw';
@@ -37,7 +38,7 @@ export async function loadChatPage(opts: {
 	url: URL;
 }): Promise<ChatPageLoadData> {
 	const { params, locals, platform, url } = opts;
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	const character = await findCharacter(db, params.id);
 	if (!character) {
 		throw error(404, '캐릭터를 찾을 수 없어요.');

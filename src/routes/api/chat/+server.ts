@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { streamText, generateText } from 'ai';
 import { createGateway, type GatewayProvider } from '@ai-sdk/gateway';
@@ -22,7 +23,6 @@ import type { Character, ChatSession, StoredMessage } from '$lib/types';
 import { pinSceneCodes } from '$lib/imageCodes';
 import { personalize } from '$lib/placeholders';
 import { notifyServerError } from '$lib/server/notify';
-import { isOverDailyBudget, addDailySpend, DAILY_BUDGET_USD } from '$lib/server/budget';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
 import {
 	assembleTurn,
@@ -76,17 +76,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) {
 		return json({ error: 'unauthorized' }, { status: 401 });
 	}
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) {
 		return json({ error: 'db unavailable' }, { status: 500 });
-	}
-
-	// 일일 비용 상한 게이트 — 오늘(KST) 누적이 한도 넘으면 다음 자정까지 차단(클라가 429 처리).
-	// 운영자(admin)는 테스트 중 락아웃 방지를 위해 제외.
-	const kv = platform?.env?.SESSIONS;
-	const budgetExempt = isAdmin(locals.user.email);
-	if (!budgetExempt && (await isOverDailyBudget(kv, locals.user.id, Date.now()))) {
-		return json({ error: 'daily_limit', limit: DAILY_BUDGET_USD }, { status: 429 });
 	}
 
 	// 챗은 유저 본인 Vercel AI Gateway 키로 호출(BYO). 키 없으면 차단(예외 없음).
@@ -283,8 +275,6 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			if (!clean) return; // 에러/빈 응답은 저장하지 않음(유저 메시지는 이미 저장됨)
 			const inputTokens = usage?.inputTokens ?? inputTokensEst;
 			const cost = parseGatewayCost(providerMetadata);
-			// 이번 턴 비용을 유저 일일 카운터에 가산(다음 요청 게이트 기준).
-			after(addDailySpend(kv, userId, cost, Date.now()));
 			after(
 				persistAndMaybeSummarize(
 					db,

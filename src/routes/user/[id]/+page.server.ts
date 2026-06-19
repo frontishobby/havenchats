@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { error } from '@sveltejs/kit';
 import { listCharactersByCreator } from '$lib/server/db/characters';
 import { getPublicProfile } from '$lib/server/db/users';
@@ -6,7 +7,7 @@ import { canSeeNsfw } from '$lib/nsfw';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, locals, platform }) => {
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) error(500, '저장소를 사용할 수 없어요.');
 
 	const profile = await getPublicProfile(db, params.id);

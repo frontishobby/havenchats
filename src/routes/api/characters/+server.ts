@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { createCharacter } from '$lib/server/db/characters';
 import { styleExists } from '$lib/server/db/styles';
@@ -10,7 +11,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		return json({ error: 'unauthorized' }, { status: 401 });
 	}
 
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	const bucket = platform?.env?.IMAGES;
 	if (!db || !bucket) {
 		return json({ error: 'storage unavailable' }, { status: 500 });

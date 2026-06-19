@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { redirect } from '@sveltejs/kit';
 import { decodeIdToken } from 'arctic';
 import {
@@ -49,7 +50,7 @@ export const GET: RequestHandler = async ({ url, cookies, platform }) => {
 
 	// DB에 유저 upsert → 내부 user id 로 세션 발급. (DB 바인딩 없으면 google sub 로 폴백)
 	let identity: SessionIdentity;
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (db) {
 		identity = await findOrCreateOAuthUser(db, { provider: 'google', providerUserId, email });
 	} else {

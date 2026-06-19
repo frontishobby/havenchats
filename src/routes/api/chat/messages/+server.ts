@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { getSession, getMessagePage, deleteMessage } from '$lib/server/db/chats';
 
@@ -10,7 +11,7 @@ const PAGE_SIZE = 20;
  */
 export const GET: RequestHandler = async ({ url, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	const sessionId = url.searchParams.get('sessionId');
@@ -47,7 +48,7 @@ interface DeleteBody {
 /** 대화 로그에서 메시지 1건 삭제(소유자만, user/assistant 무관). 실제 DB 행을 제거. */
 export const DELETE: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	const body = (await request.json()) as DeleteBody;

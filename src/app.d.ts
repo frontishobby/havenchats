@@ -23,7 +23,6 @@ declare global {
 			env: {
 				DB?: D1Database;
 				IMAGES?: R2Bucket;
-				SESSIONS?: KVNamespace;
 			};
 			context: { waitUntil(promise: Promise<unknown>): void };
 			caches: CacheStorage & { default: Cache };

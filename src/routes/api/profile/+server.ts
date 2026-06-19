@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { updateAvatarKey, updateProfile, type Preference } from '$lib/server/db/users';
 import { isValidUnlockCode } from '$lib/server/nsfwUnlock';
@@ -14,7 +15,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) {
 		return json({ error: 'unauthorized' }, { status: 401 });
 	}
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) {
 		return json({ error: 'db unavailable' }, { status: 500 });
 	}

@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { error } from '@sveltejs/kit';
 import {
 	getUserDetail,
@@ -9,7 +10,7 @@ import type { PageServerLoad } from './$types';
 const DAY = 86_400_000;
 
 export const load: PageServerLoad = async ({ params, platform }) => {
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) error(500, '저장소를 사용할 수 없어요.');
 
 	const detail = await getUserDetail(db, params.id);

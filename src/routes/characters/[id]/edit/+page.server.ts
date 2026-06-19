@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { error, redirect } from '@sveltejs/kit';
 import {
 	getCharacterById,
@@ -13,7 +14,7 @@ export const load: PageServerLoad = async ({ params, locals, platform }) => {
 	if (!locals.user) {
 		redirect(302, '/');
 	}
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) error(500, '저장소를 사용할 수 없어요.');
 
 	const owner = await getCharacterOwnership(db, params.id);

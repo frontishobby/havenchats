@@ -1,11 +1,10 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { generateObject, jsonSchema } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
-import { isAdmin } from '$lib/server/auth';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
 import { notifyServerError } from '$lib/server/notify';
 import { buildProviderOptions, reasoningHeadroom } from '$lib/server/chatAssembly';
-import { isOverDailyBudget, addDailySpend, DAILY_BUDGET_USD } from '$lib/server/budget';
 import { ASSIST_MODEL_IDS, DEFAULT_ASSIST_MODEL_ID } from '$lib/data/models';
 import type { Audience } from '$lib/types';
 
@@ -15,9 +14,8 @@ import type { Audience } from '$lib/types';
  * 실제 등록은 사용자가 폼에서 검토·수정 후 진행한다(여기선 폼 채우기 데이터만 생성).
  *
  * 흐름:
- *  1) 로그인 + 일일 비용 상한 게이트(채팅과 같은 카운터 — 보조 생성 비용도 서버 부담).
+ *  1) 로그인 확인 + 유저 본인 게이트웨이 키 복호화.
  *  2) 러프 입력 → LLM → 엄격 JSON(코드펜스 제거 후 파싱) → 필드별 clamp.
- *  3) 게이트웨이 추론 비용을 유저 일일 카운터에 가산.
  */
 
 /** 요청의 모델을 assist 허용목록(Gemini 계열+Opus)으로 검증. 없거나 미허용이면 기본 모델. */
@@ -172,23 +170,8 @@ function str(v: unknown): string {
 	return typeof v === 'string' ? v.trim() : '';
 }
 
-/** AI Gateway providerMetadata 에서 이번 호출 추론 비용(USD) 추출. */
-function parseGatewayCost(providerMetadata: unknown): number | undefined {
-	const meta = providerMetadata as { gateway?: { cost?: unknown } } | undefined;
-	const raw = meta?.gateway?.cost;
-	if (raw == null) return undefined;
-	const n = typeof raw === 'number' ? raw : Number(raw);
-	return Number.isFinite(n) ? n : undefined;
-}
-
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-
-	// 일일 비용 상한 게이트 — 채팅·이미지와 같은 카운터.
-	const kv = platform?.env?.SESSIONS;
-	if (!isAdmin(locals.user.email) && (await isOverDailyBudget(kv, locals.user.id, Date.now()))) {
-		return json({ error: 'daily_limit', limit: DAILY_BUDGET_USD }, { status: 429 });
-	}
 
 	const body = (await request.json().catch(() => null)) as AssistBody | null;
 	const rough = str(body?.rough).slice(0, ROUGH_MAX);
@@ -197,7 +180,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const model = pickAssistModel(body?.model);
 	const currentBlock = serializeCurrent(body?.current);
 
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 	const apiKey = await getDecryptedKey(db, locals.user.id, 'gateway');
 	if (!apiKey) {
@@ -238,8 +221,6 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			providerOptions: buildProviderOptions(model)
 		});
 		parsed = result.object as Record<string, unknown>;
-		const cost = parseGatewayCost(result.providerMetadata);
-		platform?.context?.waitUntil?.(addDailySpend(kv, locals.user.id, cost, Date.now()));
 		console.log(`[characters/assist] model=${model} finishReason=${result.finishReason}`);
 	} catch (e) {
 		console.error('[characters/assist] generateObject error:', e);

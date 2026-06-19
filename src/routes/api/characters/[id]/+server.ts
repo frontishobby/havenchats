@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import {
 	deleteCharacter,
@@ -21,7 +22,7 @@ export const PUT: RequestHandler = async ({ params, request, locals, platform })
 		return json({ error: 'unauthorized' }, { status: 401 });
 	}
 
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	const bucket = platform?.env?.IMAGES;
 	if (!db || !bucket) {
 		return json({ error: 'storage unavailable' }, { status: 500 });
@@ -126,7 +127,7 @@ export const DELETE: RequestHandler = async ({ params, locals, platform }) => {
 		return json({ error: 'unauthorized' }, { status: 401 });
 	}
 
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	const bucket = platform?.env?.IMAGES;
 	if (!db) {
 		return json({ error: 'storage unavailable' }, { status: 500 });

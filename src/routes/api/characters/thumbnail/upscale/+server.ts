@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
 import { upscaleImage } from '$lib/server/novelai';
@@ -24,7 +25,7 @@ interface Body {
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) return json({ error: 'db unavailable' }, { status: 500 });
 
 	const body = (await request.json().catch(() => null)) as Body | null;

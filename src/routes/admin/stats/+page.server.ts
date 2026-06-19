@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { error } from '@sveltejs/kit';
 import { getModelStats, getCharacterStats, getDailyCost } from '$lib/server/db/admin';
 import type { PageServerLoad } from './$types';
@@ -14,7 +15,7 @@ const PERIODS: Record<string, number> = {
 };
 
 export const load: PageServerLoad = async ({ platform, url }) => {
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 	if (!db) error(500, '저장소를 사용할 수 없어요.');
 
 	// 최초 진입(쿼리 없음)은 1일.

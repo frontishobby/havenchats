@@ -1,3 +1,4 @@
+import { getDB } from '$lib/server/db/remote';
 import { listRecentSessions } from '$lib/server/db/chats';
 import { findCharacter } from '$lib/server/characters';
 import { fetchGatewayCredits } from '$lib/server/credits';
@@ -21,7 +22,7 @@ function previewText(raw: string): string {
 export const load: LayoutServerLoad = async ({ locals, platform, depends }) => {
 	// 채팅 전송·세션 삭제 후 invalidate('app:recentChats') 로 사이드바만 새로고침.
 	depends('app:recentChats');
-	const db = platform?.env?.DB;
+	const db = getDB(platform);
 
 	let recentChats: RecentChat[] = [];
 	if (locals.user && db) {
