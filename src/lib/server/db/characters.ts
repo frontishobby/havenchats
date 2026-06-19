@@ -11,6 +11,7 @@ import type {
 	Visibility
 } from '$lib/types';
 import { withVersion } from '$lib/imageCodes';
+import { imgSrc } from '$lib/imageBase';
 
 /** /create 에서 등록되는 새 캐릭터 입력. */
 export interface NewCharacter {
@@ -71,7 +72,7 @@ interface CharacterRow {
 
 /** avatar_url 컬럼(R2 키)을 servable URL 로 변환. 없으면 null. version 은 캐시 버스팅. */
 function avatarUrlFromKey(key: string | null, version?: number | null): string | null {
-	return key ? withVersion(`/img/${key}`, version) : null;
+	return key ? withVersion(imgSrc(key), version) : null;
 }
 
 /** dicebear 폴백 아바타 (이미지 미등록 시). */
@@ -253,7 +254,7 @@ function rowToCharacter(row: CharacterRow): Character {
 		id: row.id,
 		name: row.name,
 		avatarUrl: row.thumbnail_key
-			? withVersion(`/img/${row.thumbnail_key}`, row.updated_at)
+			? withVersion(imgSrc(row.thumbnail_key), row.updated_at)
 			: fallbackAvatar(row.id),
 		tagline: row.tagline,
 		intro: row.intro,

@@ -13,6 +13,7 @@
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { base64ToBlob } from '$lib/imagePreview';
 	import { resized } from '$lib/imageUrl';
+	import { imgSrc } from '$lib/imageBase';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import CharacterDetailModal from '$lib/components/CharacterDetailModal.svelte';
 	import {
@@ -1842,7 +1843,7 @@
 									{:else if m.pending && m.content}
 										<img
 											class="scene-img"
-											src={`/img/${m.content}`}
+											src={imgSrc(m.content)}
 											alt="생성된 장면 이미지"
 											loading="lazy"
 										/>
@@ -1851,7 +1852,7 @@
 										<img
 											class="scene-img"
 											class:scene-overlay={m.previewUrl}
-											src={`/img/${m.content}`}
+											src={imgSrc(m.content)}
 											alt="생성된 장면 이미지"
 											loading="lazy"
 											onload={() => clearScenePreview(m)}

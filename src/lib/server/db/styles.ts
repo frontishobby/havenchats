@@ -1,4 +1,5 @@
 import type { ArtStyle } from '$lib/types';
+import { imgSrc } from '$lib/imageBase';
 
 /**
  * 그림체(아트 스타일) 영속화 — Hub 공유·즐겨찾기.
@@ -30,7 +31,7 @@ function rowToStyle(r: StyleRow): ArtStyle {
 		title: r.title,
 		memo: r.memo,
 		prompt: r.prompt,
-		thumbnailUrl: r.thumbnail_key ? `/img/${r.thumbnail_key}?v=${r.updated_at}` : null,
+		thumbnailUrl: r.thumbnail_key ? `${imgSrc(r.thumbnail_key)}?v=${r.updated_at}` : null,
 		shared: r.shared === 1,
 		favorited: r.favorited === 1,
 		createdAt: r.created_at,

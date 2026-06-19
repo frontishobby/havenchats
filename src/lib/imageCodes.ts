@@ -5,6 +5,7 @@ import type {
 	NamedImage,
 	NamedImageSet
 } from '$lib/types';
+import { imgSrc } from './imageBase';
 
 /**
  * 장면 이미지 코드 유틸 (순수 함수 — 클라이언트·서버 공용).
@@ -123,7 +124,7 @@ export function withVersion(url: string, version?: number | string | null): stri
 
 /** 조합 이미지 URL (기존 /img/[...key] 라우트로 서빙). */
 export function entryUrl(characterId: string, entry: ImageEntry, version?: number | string | null): string {
-	return withVersion(`/img/${entryKey(characterId, entry)}`, version);
+	return withVersion(imgSrc(entryKey(characterId, entry)), version);
 }
 
 /** 조합의 사람이 읽는 설명("홍길동 · 한복 · 화남"). alt/툴팁용. 범위 밖이면 '?'. */
@@ -161,7 +162,7 @@ export function namedKey(characterId: string, img: NamedImage): string {
 
 /** 네임드 이미지 URL. */
 export function namedUrl(characterId: string, img: NamedImage, version?: number | string | null): string {
-	return withVersion(`/img/${namedKey(characterId, img)}`, version);
+	return withVersion(imgSrc(namedKey(characterId, img)), version);
 }
 
 /** id 로 네임드 이미지 조회. */

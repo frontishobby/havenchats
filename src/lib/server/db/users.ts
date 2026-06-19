@@ -1,6 +1,7 @@
 import type { SessionIdentity } from '$lib/server/auth';
 import type { Country } from '$lib/types';
 import { withVersion } from '$lib/imageCodes';
+import { imgSrc } from '$lib/imageBase';
 
 export interface OAuthProfile {
 	provider: string; // 'google'
@@ -32,7 +33,7 @@ export interface PublicProfile {
 
 /** avatar_url 컬럼에는 R2 오브젝트 키를 저장한다. servable URL 로 변환. version 은 캐시 버스팅. */
 function avatarUrlFromKey(key: string | null, version?: number | null): string | null {
-	return key ? withVersion(`/img/${key}`, version) : null;
+	return key ? withVersion(imgSrc(key), version) : null;
 }
 
 /**
