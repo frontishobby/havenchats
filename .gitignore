@@ -7,4 +7,5 @@ node_modules
 .dev.vars
 .wrangler
 .DS_Store
-charx
+charx.vercel
+.vercel
