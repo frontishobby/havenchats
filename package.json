@@ -5,14 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
+    "dev:worker": "wrangler dev",
     "build": "vite build",
-    "preview": "wrangler pages dev .svelte-kit/cloudflare",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p worker/tsconfig.json",
+    "deploy": "npm run build && wrangler deploy",
+    "preview": "npm run build && wrangler dev"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260603.1",
-    "@sveltejs/adapter-cloudflare": "^7.2.8",
-    "@sveltejs/adapter-vercel": "^6.3.4",
+    "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.62.0",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@types/node": "^25.9.1",
@@ -25,10 +26,10 @@
   "dependencies": {
     "@adobe/css-tools": "^4.5.0",
     "@ai-sdk/gateway": "^3.0.123",
-    "@vercel/functions": "^3.7.1",
     "ai": "^6.0.195",
     "arctic": "^3.7.0",
     "dompurify": "^3.4.8",
-    "fflate": "^0.8.3"
+    "fflate": "^0.8.3",
+    "hono": "^4.12.26"
   }
 }

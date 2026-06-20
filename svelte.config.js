@@ -1,26 +1,20 @@
-import adapterCloudflare from '@sveltejs/adapter-cloudflare';
-import adapterVercel from '@sveltejs/adapter-vercel';
+import adapterStatic from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
-// 호스팅 분기: Vercel 빌드(process.env.VERCEL)면 adapter-vercel, 아니면 adapter-cloudflare.
-// 로컬 dev(VERCEL 미설정)는 cloudflare 어댑터 → platformProxy 로 D1/R2 바인딩 로컬 에뮬레이트.
-const onVercel = !!process.env.VERCEL;
-
+// 정적 SPA 빌드 → build/ (Cloudflare Worker 의 ASSETS 로 서빙).
+// 서버 로직은 전부 worker/(Hono) 로 분리됐고, 프론트는 클라 렌더 SPA.
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	preprocess: vitePreprocess(),
 	kit: {
-		adapter: onVercel
-			? adapterVercel({
-					// D1·R2 가 APAC(서울) 이라 같은 리전으로 고정해 프록시 왕복 지연 최소화.
-					// Hobby 는 단일 리전. maxDuration 은 Hobby 상한(60s).
-					runtime: 'nodejs22.x',
-					regions: ['icn1'],
-					maxDuration: 60
-				})
-			: adapterCloudflare({
-					platformProxy: { persist: true }
-				})
+		adapter: adapterStatic({
+			// 모든 라우트를 클라에서 렌더(SPA). fallback 은 미매칭 경로용 단일 진입.
+			fallback: 'index.html',
+			pages: 'build',
+			assets: 'build',
+			precompress: false,
+			strict: false
+		})
 	}
 };
 

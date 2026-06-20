@@ -1,6 +1,6 @@
 import { Google } from 'arctic';
-import { error } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { HttpError } from '$lib/server/httpError';
 import { ADMIN_EMAIL, isAdmin } from '$lib/admin';
 
 // 관리자 판별은 클라/서버 공용 모듈에 정의. 서버 코드는 기존처럼 '$lib/server/auth' 에서 가져다 쓴다.
@@ -39,7 +39,7 @@ export function isEmailAllowed(email: string): boolean {
  * layout 게이트를 상속받지 못하는 /api 라우트 등에서 한 줄로 막을 때 사용.
  */
 export function requireAdmin(email: string | null | undefined): void {
-	if (!isAdmin(email)) error(404, 'Not Found');
+	if (!isAdmin(email)) throw new HttpError(404, 'Not Found');
 }
 
 /** 요청 origin 기준으로 Google OAuth 클라이언트 생성. (GOOGLE_REDIRECT_URI 로 override 가능) */

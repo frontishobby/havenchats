@@ -1,9 +1,24 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "havenchats",
+	"main": "worker/src/index.ts",
 	"compatibility_date": "2026-06-01",
 	"compatibility_flags": ["nodejs_compat"],
-	"pages_build_output_dir": ".svelte-kit/cloudflare",
+	// 정적 SPA(adapter-static 빌드 결과)를 ASSETS 로 서빙.
+	// /api,/auth,/img 만 Worker 로, 나머지(정적파일·SPA 네비게이션)는 Worker 안 거치고 직접 서빙.
+	"assets": {
+		"directory": "./build",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/api/*", "/auth/*", "/img/*"]
+	},
+	// SvelteKit 별칭을 Worker 빌드(esbuild)에서도 해석.
+	// $env/dynamic/private 는 Worker 용 env shim 으로 치환.
+	"alias": {
+		"$lib": "./src/lib",
+		"$env/dynamic/private": "./src/lib/server/env.ts",
+		"$env/dynamic/public": "./src/lib/server/env.ts"
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -12,11 +27,11 @@
 			"migrations_dir": "./migrations"
 		}
 	],
-	// 캐릭터 썸네일 이미지(webp/avif). 서빙: /img/[...key] 라우트.
 	"r2_buckets": [
 		{
 			"binding": "IMAGES",
 			"bucket_name": "haven-images"
 		}
-	]
+	],
+	"observability": { "enabled": true }
 }

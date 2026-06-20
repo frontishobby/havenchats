@@ -1,7 +1,7 @@
 # 캐릭터 AI 채팅 서비스 — 아키텍처 설계
 
 > babechat / caveduck 류 캐릭터 롤플레이 채팅 서비스
-> Stack: **Cloudflare Pages (SvelteKit) + Vercel AI Gateway + D1**
+> Stack: **단일 Cloudflare Worker (Hono 백엔드 + 정적 SPA) + Vercel AI Gateway + D1·R2**
 > 작성일: 2026-06-03 / 상태: Draft v1
 
 ---
@@ -14,12 +14,12 @@
 ### 1.2 핵심 결정사항 (확정)
 | 항목 | 결정 | 비고 |
 |---|---|---|
-| 호스팅/런타임 | Cloudflare Pages + SvelteKit (Workers 런타임) | `@sveltejs/adapter-cloudflare` |
+| 호스팅/런타임 | **단일 Cloudflare Worker** (Hono 백엔드 + Workers Static Assets) | name `havenchats`, main `worker/src/index.ts` |
+| 프론트 | SvelteKit **정적 SPA** (`@sveltejs/adapter-static`, `ssr=false`) | 빌드 결과 `build/` 를 Static Assets 로 서빙 |
 | LLM 게이트웨이 | Vercel AI Gateway | 멀티 프로바이더 라우팅·폴백·비용추적 |
-| 1차 저장소 | Cloudflare D1 (SQLite) | Repository 추상화로 감쌈 |
-| 확장 저장소 | Neon Postgres 등 | 인터페이스 동일, 구현만 교체 |
-| 세션/캐시 | Cloudflare KV (필요시) | 세션, 레이트리밋 카운터 |
-| 인증 | Google OAuth | Arctic + 자체 세션 |
+| 1차 저장소 | Cloudflare D1 (SQLite) | `DB` 네이티브 바인딩, raw prepared statements |
+| 이미지 저장소 | Cloudflare R2 (`haven-images`) | `IMAGES` 네이티브 바인딩, `/img/[...key]` 서빙 |
+| 인증 | Google OAuth | Arctic + 서명 쿠키(stateless) 세션 |
 | 콘텐츠 수위 | **NSFW 포함 (성인)** | 모델 라우팅 + 연령 게이트 필수 |
 
 ### 1.3 MVP에 들어가는 것 / 빠지는 것
@@ -30,12 +30,12 @@
 
 ## 2. 기술 스택 결정 근거 & 주의점
 
-### 2.1 SvelteKit on Cloudflare (가장 중요한 제약)
-- 서버 코드(`+server.ts`, `+page.server.ts`, `hooks.server.ts`)는 **Workers 런타임**에서 돈다 → **Node.js API 사용 불가**. `fs`, `crypto`(Node판), `Buffer` 등 의존 라이브러리는 쓸 수 없다. **Web 표준 API**(`fetch`, `crypto.subtle`, `ReadableStream`, `TextEncoder`)만 사용.
-- 바인딩(D1/KV/Vectorize)은 `event.platform.env`로 주입된다. 타입은 `app.d.ts`의 `App.Platform`에 선언.
+### 2.1 단일 Cloudflare Worker (가장 중요한 제약)
+- 백엔드는 **Hono** 앱(`worker/src/index.ts`)으로, **Workers 런타임**에서 돈다 → **Node.js API 사용 불가**. `fs`, `crypto`(Node판), `Buffer` 등 의존 라이브러리는 쓸 수 없다. **Web 표준 API**(`fetch`, `crypto.subtle`, `ReadableStream`, `TextEncoder`)만 사용.
+- 라우팅: wrangler `assets.run_worker_first` 에 등록된 `/api/*`·`/auth/*`·`/img/*` 만 Worker(Hono)로 가고, 그 외(정적 파일·SPA 네비게이션)는 **Workers Static Assets**(`build/`)가 직접 서빙(`not_found_handling: "single-page-application"`).
+- 바인딩(D1 `DB`, R2 `IMAGES`, `ASSETS`)·secret·var 는 모두 Worker fetch 핸들러의 단일 `env` 객체로 들어온다. 진입 시 `setRuntime(env, ctx)` 로 요청 컨텍스트에 연결하고, 기존 server 코드가 쓰던 `$env/dynamic/private`·`$env/dynamic/public` 는 wrangler `alias` 로 **`src/lib/server/env.ts`(shim)** 에 매핑돼 무수정 동작한다.
 - 라이브러리 선택 기준: "edge / Workers 호환" 여부를 항상 먼저 확인.
   - OAuth: **Arctic** (edge 호환, Node 비의존)
-  - ORM: **Drizzle** (D1·Postgres 둘 다 지원, 런타임 가벼움)
   - 비번 해싱(이메일 인증을 추후 추가할 경우): `crypto.subtle` 기반 또는 `@oslojs/crypto` (Workers 호환). bcrypt(native) ❌
 
 ### 2.2 Vercel AI Gateway
@@ -49,41 +49,43 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Browser (Svelte)                       │
+│                  Browser (정적 SPA, Svelte)                   │
 │   - 채팅 UI / 캐릭터 빌더 / 탐색                               │
-│   - SSE(또는 fetch stream)로 토큰 스트리밍 수신               │
+│   - +page.ts/+layout.ts 클라 로더가 /api/* 를 fetch          │
+│   - 토큰 스트리밍 수신(fetch stream)                          │
 └───────────────┬─────────────────────────────┬────────────────┘
-                │ HTTPS                         │
+                │ HTTPS                         │ /api·/auth·/img
                 ▼                               ▼
 ┌──────────────────────────────────────────────────────────────┐
-│            SvelteKit on Cloudflare (Workers 런타임)            │
+│           단일 Cloudflare Worker `havenchats`                  │
 │                                                                │
-│  hooks.server.ts ── 세션 검증(쿠키→KV/D1) → event.locals.user  │
+│  [run_worker_first 밖] Static Assets(build/) ─ SPA·정적파일 서빙│
 │                                                                │
-│  routes/                                                       │
-│   ├─ /auth/google      OAuth 시작/콜백 (Arctic)               │
-│   ├─ /api/chat         POST: 메시지 → 프롬프트 빌드 → 스트림   │
-│   ├─ /api/characters   CRUD                                    │
-│   └─ /api/conversations 히스토리                               │
+│  [run_worker_first: /api,/auth,/img] Hono 앱                  │
+│   미들웨어 ── 세션 검증(쿠키→D1) → c.var.user, 차단유저 차단  │
+│   onError ── HttpError→JSON, Redirect→{redirect} JSON         │
 │                                                                │
-│  lib/server/                                                   │
-│   ├─ repositories/   (인터페이스 + D1 구현)  ← 추상화 경계     │
-│   ├─ ai/             (AI Gateway 클라이언트, 모델 라우터)     │
-│   ├─ chat/           (프롬프트 빌더, 기억 관리)               │
-│   └─ auth/           (OAuth, 세션)                            │
-└───────┬───────────────┬───────────────┬──────────────────────┘
-        │               │               │
-        ▼               ▼               ▼
-   ┌─────────┐    ┌──────────┐    ┌──────────────────┐
-   │ D1 (SQL)│    │ KV       │    │ Vercel AI Gateway │
-   │ 영속데이터│   │세션/카운터│    │  → LLM providers  │
-   └─────────┘    └──────────┘    └──────────────────┘
+│  worker/src/routes/                                           │
+│   ├─ /auth/*    OAuth 시작/콜백/로그아웃 (Arctic)            │
+│   ├─ /img/*     R2 오브젝트 서빙(엣지캐시+etag)              │
+│   └─ /api/*     chat(스트림)·characters·styles·keys·profile  │
+│                 ·import·admin·pages(/me,/home,/user)         │
+│                                                                │
+│  src/lib/server/  auth · db(raw D1) · imageStore(R2) · ai     │
+│  src/lib/api/     요청/응답 공용 타입(Worker↔SPA 공유)       │
+└───────┬───────────────────────────────┬──────────────────────┘
+        │ env.DB / env.IMAGES (네이티브)  │
+        ▼                                ▼
+   ┌──────────────────┐          ┌──────────────────┐
+   │ D1 `haven` (SQL) │          │ Vercel AI Gateway │
+   │ R2 `haven-images`│          │  → LLM providers  │
+   └──────────────────┘          └──────────────────┘
 ```
 
 ### 3.1 채팅 요청 시퀀스
 ```
 1. Client → POST /api/chat { conversationId, content }
-2. hooks.server.ts 가 세션 검증 → locals.user 확정 (미인증 401)
+2. Hono 미들웨어가 세션 검증 → c.var.user 확정 (미인증 401)
 3. 연령 게이트 확인: user.age_verified == true 인지 (NSFW 캐릭터인 경우 필수)
 4. 메시지 저장 (role=user) → D1
 5. 프롬프트 빌더:
@@ -98,7 +100,7 @@
      - 턴 수가 임계치 넘으면 비동기 요약 트리거 (ctx.waitUntil)
 ```
 
-> Workers는 응답 후에도 `ctx.waitUntil(promise)` 로 백그라운드 작업(요약/usage flush)을 안전하게 끝낼 수 있다. SvelteKit에서는 `event.platform.context.waitUntil` 사용.
+> Workers는 응답 후에도 `ctx.waitUntil(promise)` 로 백그라운드 작업(요약/usage flush)을 안전하게 끝낼 수 있다. 코드에선 `getWaitUntil()`(`src/lib/server/waitUntil.ts`)이 진입 시 연결된 `ExecutionContext.waitUntil` 을 감싸 호출한다.
 
 ---
 
@@ -400,81 +402,93 @@ export function routeModel(rating: Tier, user: User) {
 ## 10. 디렉토리 구조
 
 ```
-character-ai-chat/
+havenchats.com/
 ├─ docs/
 │  └─ ARCHITECTURE.md
-├─ drizzle/
-│  ├─ sqlite/                 # D1 마이그레이션
-│  └─ pg/                     # (추후) Postgres
+├─ migrations/               # D1 마이그레이션 (0001~)
+├─ worker/
+│  ├─ tsconfig.json
+│  └─ src/
+│     ├─ index.ts            # Hono 앱: setRuntime, 세션 미들웨어, 라우터 마운트, onError, ASSETS 폴백
+│     ├─ context.ts          # AppEnv 타입(c.env 바인딩 / c.var.user), requireUser
+│     └─ routes/
+│        ├─ auth.ts          # /auth/* (arctic google, 로그인/콜백/로그아웃)
+│        ├─ img.ts           # /img/* (R2 서빙 + 엣지캐시/etag)
+│        ├─ api.ts           # /api/* 라우터 조합
+│        └─ api/             # chat·characters·styles·keys·profile·import·admin·pages
 ├─ src/
-│  ├─ app.d.ts                # App.Platform(바인딩), App.Locals(user, repos) 타입
-│  ├─ hooks.server.ts         # 세션 검증 + repos 주입
 │  ├─ lib/
+│  │  ├─ api/                # 요청/응답 공용 타입 + load.ts(loadJson) — Worker↔SPA 공유
 │  │  ├─ server/
-│  │  │  ├─ auth/             # arctic google, session
-│  │  │  ├─ repositories/
-│  │  │  │  ├─ types.ts       # 인터페이스(계약)
-│  │  │  │  ├─ d1/            # 현재 구현 (Drizzle sqlite)
-│  │  │  │  └─ pg/            # 추후
-│  │  │  ├─ ai/               # gateway client, models registry, router
-│  │  │  ├─ chat/             # prompt builder, memory/summarizer
-│  │  │  └─ db/               # drizzle schema(sqlite), 공통 유틸
-│  │  └─ components/          # 채팅 UI, 캐릭터 카드 등
+│  │  │  ├─ env.ts           # $env/dynamic/* shim(alias 매핑), setRuntime/getRuntimeEnv
+│  │  │  ├─ waitUntil.ts     # getWaitUntil → ExecutionContext.waitUntil
+│  │  │  ├─ auth.ts          # arctic google, 세션 토큰 sign/verify
+│  │  │  ├─ db/              # raw D1 (users/characters/chats/styles/userKeys/admin) + remote.ts(getDB)
+│  │  │  ├─ images.ts        # getImages → env.IMAGES
+│  │  │  └─ ...              # crypto, novelai, imageStore, characterForm 등
+│  │  └─ components/         # 채팅 UI, 캐릭터 카드 등
 │  └─ routes/
-│     ├─ +layout.svelte
-│     ├─ +page.svelte                 # 홈/탐색
-│     ├─ auth/google/+server.ts
-│     ├─ auth/google/callback/+server.ts
-│     ├─ auth/logout/+server.ts
-│     ├─ characters/                  # 목록/상세/빌더
-│     ├─ chat/[conversationId]/+page.svelte
-│     └─ api/
-│        ├─ chat/+server.ts           # 스트리밍 채팅
-│        ├─ characters/+server.ts     # CRUD
-│        └─ conversations/+server.ts
-├─ wrangler.jsonc            # 바인딩(D1/KV) 정의
-├─ svelte.config.js          # adapter-cloudflare
-├─ drizzle.config.ts
-├─ package.json
-└─ .dev.vars                 # 로컬 시크릿 (gitignore)
+│     ├─ +layout.{svelte,ts}          # ts=universal 로더(loadJson '/api/me'), ssr=false
+│     ├─ +page.{svelte,ts}            # 홈/탐색 (로더가 /api/home 호출)
+│     ├─ chat/[id]/...                # 채팅(클라 로더)
+│     └─ ...                          # create·characters·user·styles 등 (모두 +page.ts)
+├─ wrangler.jsonc            # name, main(worker), assets(Static), alias, D1/R2 바인딩
+├─ svelte.config.js          # @sveltejs/adapter-static (fallback index.html)
+├─ vite.config.ts            # SPA dev 서버 + /api·/auth·/img → :8787 프록시
+└─ package.json
 ```
 
 ---
 
 ## 11. 환경/바인딩 설정
 
-### 11.1 wrangler.jsonc (개념)
+### 11.1 wrangler.jsonc (실제)
 ```jsonc
 {
-  "name": "character-ai-chat",
-  "compatibility_date": "2026-01-01",
-  "compatibility_flags": ["nodejs_compat"],   // 필요한 라이브러리에 한해
+  "name": "havenchats",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // 정적 SPA(adapter-static 빌드 결과)를 ASSETS 로 서빙.
+  // /api,/auth,/img 만 Worker 로, 나머지는 Static Assets 직접 서빙.
+  "assets": {
+    "directory": "./build",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*", "/img/*"]
+  },
+  // SvelteKit 별칭을 Worker 빌드(esbuild)에서도 해석. $env/dynamic/* → env shim.
+  "alias": {
+    "$lib": "./src/lib",
+    "$env/dynamic/private": "./src/lib/server/env.ts",
+    "$env/dynamic/public": "./src/lib/server/env.ts"
+  },
   "d1_databases": [
-    { "binding": "DB", "database_name": "chat", "database_id": "<id>" }
+    { "binding": "DB", "database_name": "haven", "database_id": "<id>", "migrations_dir": "./migrations" }
   ],
-  "kv_namespaces": [
-    { "binding": "SESSIONS", "id": "<id>" }   // 세션을 KV로 둘 경우
-  ]
+  "r2_buckets": [
+    { "binding": "IMAGES", "bucket_name": "haven-images" }
+  ],
+  "observability": { "enabled": true }
 }
 ```
 
 ### 11.2 시크릿/환경변수
-- `AI_GATEWAY_API_KEY` — Vercel AI Gateway 키
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
-- `SESSION_SECRET` — 토큰 해싱 솔트(선택)
-- 로컬은 `.dev.vars`, 배포는 Pages 프로젝트 환경변수/secret으로.
+- `AI_GATEWAY_API_KEY` — Vercel AI Gateway 키 (없으면 mock 스트리머 폴백)
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`(선택)
+- `AUTH_SECRET` — 세션 서명. `KEY_SECRET` — 외부 API 키 암호화(미설정 시 `AUTH_SECRET` 폴백)
+- `ALLOWED_EMAILS` — 로그인 허용 이메일(테스트용 화이트리스트)
+- `PUBLIC_IMAGE_BASE`(선택) — 이미지 서빙 베이스(비면 `/img` 라우트)
+- 로컬은 `.env`(또는 wrangler `.dev.vars`), 배포는 `wrangler secret put`. 바인딩·secret·var 가 모두 단일 `env` 객체로 들어와 `env.ts` shim 으로 읽힌다.
 
-### 11.3 app.d.ts
+### 11.3 런타임 타입
+`worker/src/context.ts` 의 `AppEnv` 가 Hono 앱 타입(바인딩 `c.env` + 요청변수 `c.var.user`)을 정의한다. 바인딩 형태는 `src/lib/server/env.ts` 의 `WorkerEnv`(`DB`, `IMAGES`, `ASSETS`, …)에 선언.
 ```ts
-declare global {
-  namespace App {
-    interface Platform {
-      env: { DB: D1Database; SESSIONS?: KVNamespace; AI_GATEWAY_API_KEY: string; /* ... */ };
-      context: { waitUntil(p: Promise<unknown>): void };
-    }
-    interface Locals { user: User | null; repos: Repositories; }
-  }
-}
+// worker/src/context.ts
+export type AppEnv = {
+  Bindings: WorkerEnv;                       // DB / IMAGES / ASSETS / secrets / vars
+  Variables: { user: UserProfile | null };   // 세션 미들웨어가 채움
+};
 ```
 
 ---
@@ -496,10 +510,10 @@ declare global {
 ---
 
 ## 14. 배포 / CI
-- Cloudflare Pages 연결(Git) → push 시 자동 빌드/배포. `adapter-cloudflare`.
-- D1 마이그레이션: `wrangler d1 migrations apply` (CI 단계 또는 수동).
-- 환경 분리: preview(브랜치) / production. 시크릿은 환경별로.
-- 로컬 개발: `wrangler pages dev` 또는 SvelteKit dev + 바인딩 emulation.
+- 빌드: `npm run build`(vite → adapter-static → `build/`). 배포: `npm run deploy`(= build 후 `wrangler deploy` — Worker 번들 + Static Assets 업로드).
+- D1 마이그레이션: `wrangler d1 migrations apply haven --local|--remote` (수동).
+- 시크릿: `wrangler secret put <KEY>`.
+- 로컬 개발(터미널 2개): `npm run dev:worker`(wrangler dev :8787, 로컬 D1/R2 + Hono) + `npm run dev`(vite :5173 SPA, `/api`·`/auth`·`/img` 를 :8787 로 프록시). 검증은 `npm run check`(svelte-check + `tsc -p worker/tsconfig.json`).
 
 ---
 
@@ -507,7 +521,7 @@ declare global {
 
 | 단계 | 내용 | 산출물 |
 |---|---|---|
-| **0. 스캐폴드** | SvelteKit + adapter-cloudflare, wrangler 바인딩, app.d.ts | 빈 앱 배포 확인 |
+| **0. 스캐폴드** | SvelteKit(adapter-static SPA) + Hono Worker, wrangler 바인딩/assets | 빈 앱 배포 확인 |
 | **1. 인증** | Google OAuth + 세션 + hooks | 로그인/로그아웃 동작 |
 | **2. 데이터 레이어** | Drizzle(sqlite) 스키마 + Repository 인터페이스/구현 + 마이그레이션 | D1에 CRUD |
 | **3. 캐릭터** | 캐릭터 생성/탐색/상세 | 캐릭터 빌더 |
@@ -529,10 +543,10 @@ declare global {
 
 ---
 
-## 부록 A. 의존성 후보 (모두 edge/Workers 호환 확인 대상)
-- `@sveltejs/adapter-cloudflare`
+## 부록 A. 의존성 (모두 edge/Workers 호환)
+- `hono` (Worker 백엔드 라우터)
+- `@sveltejs/adapter-static` (정적 SPA 빌드)
 - `arctic` (OAuth)
-- `drizzle-orm` + `drizzle-kit`
-- `ai` (Vercel AI SDK) + AI Gateway provider
-- `@oslojs/crypto`, `@oslojs/encoding` (토큰/해시, 필요시)
-- 검증: `zod` (입력 스키마)
+- `ai` + `@ai-sdk/gateway` (Vercel AI SDK v6 + AI Gateway)
+- `fflate` (NovelAI ZIP 해제), `dompurify` (출력 sanitize)
+- D1 접근은 raw prepared statements(ORM 미사용)

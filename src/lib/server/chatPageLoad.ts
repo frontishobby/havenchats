@@ -1,27 +1,17 @@
-import { getDB } from '$lib/server/db/remote';
-import { error, redirect } from '@sveltejs/kit';
+import { HttpError, Redirect } from '$lib/server/httpError';
 import { findCharacter } from '$lib/server/characters';
 import { canSeeNsfw } from '$lib/nsfw';
 import { getCharacterOwnership } from '$lib/server/db/characters';
 import { getSession, getMessagePage } from '$lib/server/db/chats';
 import { getStyle } from '$lib/server/db/styles';
-import type { ArtStyle, Character, ChatMessage } from '$lib/types';
+import type { ArtStyle, ChatMessage } from '$lib/types';
+import type { UserProfile } from '$lib/server/db/users';
+import type { ChatPageLoadData } from '$lib/api/chat';
+
+export type { ChatPageLoadData };
 
 /** 최초 진입 시 가져올 최근 메시지 수. 더 위로 올리면 같은 크기로 페이징. */
 const PAGE_SIZE = 20;
-
-/** ChatView 가 받는 페이지 데이터(메인·디버그 라우트 공용 형태). */
-export interface ChatPageLoadData {
-	character: Character;
-	user: App.Locals['user'];
-	openingIndex: number;
-	sessionId: string | null;
-	resumed: ChatMessage[] | null;
-	oldestSeq: number;
-	hasMore: boolean;
-	/** 캐릭터 제작자가 지정한 추천 그림체(없으면 null). 이미지 모달에 '추천'으로 노출. */
-	recommendedStyle: ArtStyle | null;
-}
 
 /**
  * 채팅 페이지 로더(메인·디버그·세션 라우트 공용).
@@ -33,32 +23,31 @@ export interface ChatPageLoadData {
  */
 export async function loadChatPage(opts: {
 	params: { id: string; sessionId?: string };
-	locals: App.Locals;
-	platform: Readonly<App.Platform> | undefined;
+	user: UserProfile | null;
+	db: D1Database | undefined;
 	url: URL;
 }): Promise<ChatPageLoadData> {
-	const { params, locals, platform, url } = opts;
-	const db = getDB(platform);
+	const { params, user, db, url } = opts;
 	const character = await findCharacter(db, params.id);
 	if (!character) {
-		throw error(404, '캐릭터를 찾을 수 없어요.');
+		throw new HttpError(404, '캐릭터를 찾을 수 없어요.');
 	}
 
 	// 비공개 캐릭터는 제작자 본인만 접근 가능 (URL 직접 접근 차단).
 	if (character.visibility === 'private') {
 		const owner = db ? await getCharacterOwnership(db, params.id) : null;
-		if (owner && owner.creatorId !== locals.user?.id) {
-			throw error(404, '캐릭터를 찾을 수 없어요.');
+		if (owner && owner.creatorId !== user?.id) {
+			throw new HttpError(404, '캐릭터를 찾을 수 없어요.');
 		}
 	}
 
 	// NSFW 캐릭터는 파라과이(country=PY) 유저만 접근. 단 제작자 본인은 항상 자기 캐릭터 접근 가능.
 	if (
 		character.contentRating === 'nsfw' &&
-		!canSeeNsfw(locals.user) &&
-		character.creator.id !== locals.user?.id
+		!canSeeNsfw(user) &&
+		character.creator.id !== user?.id
 	) {
-		redirect(302, '/');
+		throw new Redirect('/');
 	}
 
 	// 첫 상황(오프닝) 선택 — 메인 상세 모달에서 ?o=<index> 로 전달. 범위 밖이면 기본(0).
@@ -71,8 +60,8 @@ export async function loadChatPage(opts: {
 	let sessionId: string | null = null;
 	let oldestSeq = 0;
 	let hasMore = false;
-	if (locals.user && db && sessionParam) {
-		const s = await getSession(db, sessionParam, locals.user.id);
+	if (user && db && sessionParam) {
+		const s = await getSession(db, sessionParam, user.id);
 		if (s && s.characterId === character.id) {
 			sessionId = s.id;
 			const page = await getMessagePage(db, sessionId, PAGE_SIZE);
@@ -95,13 +84,13 @@ export async function loadChatPage(opts: {
 			.bind(params.id)
 			.first<{ recommended_style_id: string | null }>();
 		if (row?.recommended_style_id) {
-			recommendedStyle = await getStyle(db, row.recommended_style_id, locals.user?.id ?? null);
+			recommendedStyle = await getStyle(db, row.recommended_style_id, user?.id ?? null);
 		}
 	}
 
 	return {
 		character,
-		user: locals.user,
+		user,
 		openingIndex,
 		sessionId,
 		resumed,
