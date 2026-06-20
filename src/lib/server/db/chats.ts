@@ -150,40 +150,62 @@ interface RecentSessionRow {
 	last_content: string | null;
 }
 
+/** 사이드바 페이징 커서 — (last_message_at, sessionId) 복합. 이 지점 '이후'(더 오래된)부터 잇는다. */
+export interface RecentSessionCursor {
+	lastMessageAt: number;
+	sessionId: string;
+}
+
+export interface RecentSessionItem {
+	sessionId: string;
+	characterId: string;
+	lastMessageAt: number;
+	lastContent: string | null;
+}
+
 /**
- * 유저의 최근 세션(캐릭터 무관, 전역 최근순). 사이드바 목록용.
+ * 유저의 최근 세션(캐릭터 무관, 전역 최근순). 사이드바 목록용. 커서 기반 페이징.
  * 각 행에 그 세션의 마지막 메시지 본문(last_content)을 함께 가져온다.
  * 메시지가 한 건도 없는 세션은 last_content=null 로 나오며 호출부에서 거른다.
+ *
+ * 정렬은 (last_message_at DESC, id DESC) — id(uuid)로 안정적 tiebreak 하여 커서가 흔들리지 않게 한다.
+ * `last_message_at IS NOT NULL` 로 빈 세션(메시지/오프닝 없음)을 애초에 제외한다(어차피 호출부에서 거름).
+ * cursor 가 있으면 (last_message_at, id) 가 그보다 '작은'(더 오래된) 행만 — keyset 페이징.
  */
 export async function listRecentSessions(
 	db: D1Database,
 	userId: string,
-	limit = 30
-): Promise<
-	Array<{
-		sessionId: string;
-		characterId: string;
-		lastMessageAt: number | null;
-		lastContent: string | null;
-	}>
-> {
-	const { results } = await db
-		.prepare(
-			`SELECT s.id, s.character_id, s.last_message_at,
-			        (SELECT m.content FROM chat_messages m
-			           WHERE m.session_id = s.id AND m.role != 'image_generation'
-			           ORDER BY m.seq DESC LIMIT 1) AS last_content
-			 FROM chat_sessions s
-			 WHERE s.user_id = ?
-			 ORDER BY s.last_message_at DESC NULLS LAST, s.created_at DESC
-			 LIMIT ?`
-		)
-		.bind(userId, limit)
-		.all<RecentSessionRow>();
+	limit = 30,
+	cursor?: RecentSessionCursor | null
+): Promise<RecentSessionItem[]> {
+	const sub = `(SELECT m.content FROM chat_messages m
+	               WHERE m.session_id = s.id AND m.role != 'image_generation'
+	               ORDER BY m.seq DESC LIMIT 1) AS last_content`;
+	const stmt = cursor
+		? db
+				.prepare(
+					`SELECT s.id, s.character_id, s.last_message_at, ${sub}
+					 FROM chat_sessions s
+					 WHERE s.user_id = ? AND s.last_message_at IS NOT NULL
+					   AND (s.last_message_at < ? OR (s.last_message_at = ? AND s.id < ?))
+					 ORDER BY s.last_message_at DESC, s.id DESC
+					 LIMIT ?`
+				)
+				.bind(userId, cursor.lastMessageAt, cursor.lastMessageAt, cursor.sessionId, limit)
+		: db
+				.prepare(
+					`SELECT s.id, s.character_id, s.last_message_at, ${sub}
+					 FROM chat_sessions s
+					 WHERE s.user_id = ? AND s.last_message_at IS NOT NULL
+					 ORDER BY s.last_message_at DESC, s.id DESC
+					 LIMIT ?`
+				)
+				.bind(userId, limit);
+	const { results } = await stmt.all<RecentSessionRow>();
 	return (results ?? []).map((r) => ({
 		sessionId: r.id,
 		characterId: r.character_id,
-		lastMessageAt: r.last_message_at,
+		lastMessageAt: r.last_message_at as number,
 		lastContent: r.last_content
 	}));
 }

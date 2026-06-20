@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import type { RecentChat } from '$lib/types';
 	import { resized } from '$lib/imageUrl';
@@ -6,14 +7,73 @@
 	let {
 		open = false,
 		chats = [],
+		initialCursor = null,
+		initialHasMore = false,
 		onClose,
 		onDelete
 	}: {
 		open: boolean;
 		chats: RecentChat[];
+		/** 첫 페이지의 다음 커서(서버 layout load). 없으면 더 없음. */
+		initialCursor?: string | null;
+		initialHasMore?: boolean;
 		onClose: () => void;
-		onDelete: (sessionId: string) => Promise<void>;
+		/** 세션 삭제(서버). 성공 시 true → 로컬 목록에서 제거. */
+		onDelete: (sessionId: string) => Promise<boolean>;
 	} = $props();
+
+	// 화면에 누적되는 목록(첫 페이지 + 무한스크롤 추가분). 첫 페이지(chats)가 갱신되면 리셋.
+	// chats 자체를 직접 렌더하지 않고 로컬에 복제 — 추가 로드/로컬 삭제를 반영하기 위함.
+	let items = $state<RecentChat[]>([]);
+	let cursor = $state<string | null>(null);
+	let hasMore = $state(false);
+	let loadingMore = $state(false);
+	let listEl = $state<HTMLElement | null>(null);
+
+	// 서버 첫 페이지(layout data)가 바뀔 때마다(새 채팅 전송 등 invalidate) 누적 목록을 첫 페이지로 리셋.
+	// 로컬 삭제는 chats 를 바꾸지 않으므로 이 effect 를 재실행시키지 않음 → 스크롤/추가분 보존.
+	$effect(() => {
+		items = [...chats];
+		cursor = initialCursor;
+		hasMore = initialHasMore;
+	});
+
+	/** 바닥 근처 스크롤 시 다음 페이지 로드. */
+	async function loadMore() {
+		if (loadingMore || !hasMore || !cursor) return;
+		loadingMore = true;
+		try {
+			const res = await fetch(`/api/chat/recent?cursor=${encodeURIComponent(cursor)}`);
+			if (!res.ok) return;
+			const page = (await res.json()) as {
+				chats: RecentChat[];
+				nextCursor: string | null;
+				hasMore: boolean;
+			};
+			const seen = new Set(items.map((i) => i.sessionId));
+			for (const c of page.chats) if (!seen.has(c.sessionId)) items.push(c);
+			cursor = page.nextCursor;
+			hasMore = page.hasMore;
+		} finally {
+			loadingMore = false;
+		}
+		// 필터링(삭제된 캐릭터의 고아 세션 등)으로 목록이 viewport 를 못 채우면 스크롤이 안 생겨
+		// 다음 로드 트리거가 영영 안 옴 → 채워질 때까지 이어서 로드.
+		if (hasMore && listEl && listEl.scrollHeight <= listEl.clientHeight) {
+			await tick();
+			await loadMore();
+		}
+	}
+
+	function onScroll(e: Event) {
+		const el = e.currentTarget as HTMLElement;
+		if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) loadMore();
+	}
+
+	// 사이드바가 열린 직후, 첫 페이지가 viewport 를 못 채우면 자동으로 추가 로드.
+	$effect(() => {
+		if (open && hasMore && listEl && listEl.scrollHeight <= listEl.clientHeight) loadMore();
+	});
 
 	// 삭제는 2단계: 휴지통 클릭 → 같은 항목 확인 버튼 노출 → 다시 클릭 시 삭제.
 	let confirmId = $state<string | null>(null);
@@ -30,7 +90,8 @@
 		e.stopPropagation();
 		deletingId = sessionId;
 		try {
-			await onDelete(sessionId);
+			const ok = await onDelete(sessionId);
+			if (ok) items = items.filter((i) => i.sessionId !== sessionId);
 		} finally {
 			deletingId = null;
 			confirmId = null;
@@ -74,11 +135,11 @@
 			<button class="close" onclick={onClose} aria-label="닫기">✕</button>
 		</header>
 
-		{#if chats.length === 0}
+		{#if items.length === 0}
 			<div class="empty">아직 시작한 대화가 없어요.</div>
 		{:else}
-			<nav class="list">
-				{#each chats as c (c.sessionId)}
+			<nav class="list" bind:this={listEl} onscroll={onScroll}>
+				{#each items as c (c.sessionId)}
 					<div class="row" class:confirming={confirmId === c.sessionId}>
 						<a
 							class="item"
@@ -117,6 +178,9 @@
 						{/if}
 					</div>
 				{/each}
+				{#if loadingMore}
+					<div class="loading">불러오는 중…</div>
+				{/if}
 			</nav>
 		{/if}
 	</aside>
@@ -173,6 +237,12 @@
 		padding: 32px 20px;
 		color: var(--text-faint);
 		font-size: 0.88rem;
+		text-align: center;
+	}
+	.loading {
+		padding: 14px 20px;
+		color: var(--text-faint);
+		font-size: 0.82rem;
 		text-align: center;
 	}
 	.list {
