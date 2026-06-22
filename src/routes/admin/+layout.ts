@@ -7,7 +7,7 @@ import type { LayoutLoad } from './$types';
  * 하위 모든 라우트가 이 게이트를 상속한다.
  */
 export const load: LayoutLoad = async ({ parent }) => {
-	const { user } = await parent();
+	const { user } = await (await parent()).me;
 	if (!isAdmin(user?.email)) redirect(302, '/');
 	return { user };
 };

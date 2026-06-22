@@ -4,9 +4,23 @@
 	import StyleWorkshopModal from '$lib/components/StyleWorkshopModal.svelte';
 	import { resized } from '$lib/imageUrl';
 	import type { ArtStyle } from '$lib/types';
+	import type { MeData } from '$lib/api/pages';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	// 유저 정보는 layout 이 promise(data.me)로 흘려보내므로 여기서 풀어서 쓴다(로그인 게이팅용).
+	let me = $state<MeData | null>(null);
+	$effect(() => {
+		const p = data.me;
+		let cancelled = false;
+		p.then((m) => {
+			if (!cancelled) me = m;
+		}).catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	type Tab = 'shared' | 'favorites' | 'saved';
 	let tab = $state<Tab>('shared');
@@ -45,7 +59,7 @@
 	}
 
 	function openWorkshop() {
-		if (!data.user) {
+		if (!me?.user) {
 			openLogin();
 			return;
 		}
@@ -54,7 +68,7 @@
 
 	async function toggleFav(s: ArtStyle, e?: Event) {
 		e?.stopPropagation();
-		if (!data.user) {
+		if (!me?.user) {
 			openLogin();
 			return;
 		}
@@ -94,7 +108,7 @@
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Escape' && selected) selected = null;
 	}
-	const isOwner = (s: ArtStyle) => !!data.user && data.user.id === s.creatorId;
+	const isOwner = (s: ArtStyle) => !!me?.user && me?.user.id === s.creatorId;
 	const emptyText = $derived(
 		tab === 'favorites'
 			? '즐겨찾기한 그림체가 없어요. 카드의 ★ 를 눌러 추가하세요.'
@@ -120,7 +134,7 @@
 		<button class="tab" class:active={tab === 'shared'} role="tab" onclick={() => (tab = 'shared')}>
 			공유됨
 		</button>
-		{#if data.user}
+		{#if me?.user}
 			<button
 				class="tab"
 				class:active={tab === 'favorites'}

@@ -12,7 +12,22 @@
 	import { isAdmin } from '$lib/admin';
 	import { resized } from '$lib/imageUrl';
 	import type { LayoutData } from './$types';
+	import type { MeData } from '$lib/api/pages';
 	let { children, data }: { children: import('svelte').Snippet; data: LayoutData } = $props();
+
+	// /api/me 는 layout load 에서 await 하지 않고 promise(data.me) 로 흘러온다 → 셸은 즉시 렌더되고
+	// 여기서 도착하면 me 에 채운다. 재검증(invalidate) 시 새 promise 가 와도 이전 값을 유지(깜빡임 방지).
+	let me = $state<MeData | null>(null);
+	$effect(() => {
+		const p = data.me;
+		let cancelled = false;
+		p.then((m) => {
+			if (!cancelled) me = m;
+		}).catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	// 사이드바에서 세션 삭제(서버). 성공 시 Sidebar 가 로컬 목록에서 제거(무한스크롤 위치 보존 —
 	// invalidate 로 첫 페이지를 다시 받으면 스크롤이 맨 위로 튀므로 여기선 새로고침하지 않는다).
@@ -27,8 +42,7 @@
 
 	// 최초 로그인(프로필 미완성) 시 프로필 설정 모달 자동 노출
 	$effect(() => {
-		if (data.user && !data.user.profileComplete && !data.user.blockedReason)
-			profileModal.open = true;
+		if (me?.user && !me.user.profileComplete && !me.user.blockedReason) profileModal.open = true;
 	});
 
 	// 브라우저 기록 숨김(로컬 옵션): 켜져 있으면 어떤 페이지든 탭 제목을 "Haven" 으로 강제.
@@ -48,7 +62,7 @@
 	let sidebarOpen = $state(false);
 
 	// 관리자 여부(메뉴에 /admin 노출용). 공용 isAdmin(클라/서버 공유)로 판별 — 하드코딩 제거.
-	const isAdminUser = $derived(isAdmin(data.user?.email));
+	const isAdminUser = $derived(isAdmin(me?.user?.email));
 
 	// 우상단 유저 메뉴(드롭다운)
 	let menuOpen = $state(false);
@@ -75,7 +89,7 @@
 <div class="app">
 	<header class="topbar">
 		<div class="left">
-			{#if data.user}
+			{#if me?.user}
 				<button
 					class="hamburger"
 					onclick={() => (sidebarOpen = true)}
@@ -90,17 +104,17 @@
 				<span class="wordmark">Haven<span class="dim">chats</span></span>
 			</a>
 		</div>
-		{#if data.credits}
-			<span class="credits-badge" title={`총 사용 $${data.credits.totalUsed.toFixed(2)}`}>
+		{#if me?.credits}
+			<span class="credits-badge" title={`총 사용 $${me.credits.totalUsed.toFixed(2)}`}>
 				<span class="credits-k">Vercel 크레딧</span>
-				<span class="credits-v" class:low={data.credits.balance < 5}>
-					${data.credits.balance.toFixed(2)}
+				<span class="credits-v" class:low={me.credits.balance < 5}>
+					${me.credits.balance.toFixed(2)}
 				</span>
 			</span>
 		{/if}
 		<nav>
 			<a class="hub-link" href="/styles">그림체 Hub</a>
-			{#if data.user}
+			{#if me?.user}
 				<div class="user-menu" bind:this={menuRef}>
 					<button
 						class="user-name-btn"
@@ -110,14 +124,14 @@
 						aria-expanded={menuOpen}
 						title="메뉴"
 					>
-						{#if data.user.avatarUrl}
-							<img class="user-avatar" src={resized(data.user.avatarUrl, 64)} alt="" />
+						{#if me.user.avatarUrl}
+							<img class="user-avatar" src={resized(me.user.avatarUrl, 64)} alt="" />
 						{:else}
 							<span class="user-fallback">
-								{(data.user.name ?? data.user.email).charAt(0).toUpperCase()}
+								{(me.user.name ?? me.user.email).charAt(0).toUpperCase()}
 							</span>
 						{/if}
-						<span class="user-name">{data.user.name ?? '프로필 설정'}</span>
+						<span class="user-name">{me.user.name ?? '프로필 설정'}</span>
 						<span class="chev">▾</span>
 					</button>
 					{#if menuOpen}
@@ -125,7 +139,7 @@
 							<a
 								class="menu-item"
 								role="menuitem"
-								href="/user/{data.user.id}"
+								href="/user/{me.user.id}"
 								onclick={() => (menuOpen = false)}
 							>
 								내 캐릭터
@@ -171,21 +185,21 @@
 
 <Sidebar
 	open={sidebarOpen}
-	chats={data.recentChats}
-	initialCursor={data.recentChatsCursor}
-	initialHasMore={data.recentChatsHasMore}
+	chats={me?.recentChats ?? []}
+	initialCursor={me?.recentChatsCursor ?? null}
+	initialHasMore={me?.recentChatsHasMore ?? false}
 	onClose={() => (sidebarOpen = false)}
 	onDelete={deleteChat}
 />
 <LoginModal />
-<ProfileModal user={data.user} />
-{#if data.user}
+<ProfileModal user={me?.user ?? null} />
+{#if me?.user}
 	<ApiKeyModal />
 {/if}
 
 <!-- 차단된 유저: 종료 불가 모달로 모든 동작 차단. 다른 모든 모달/UI 위에 렌더. -->
-{#if data.user?.blockedReason}
-	<BlockedModal reason={data.user.blockedReason} />
+{#if me?.user?.blockedReason}
+	<BlockedModal reason={me.user.blockedReason} />
 {/if}
 
 <style>
