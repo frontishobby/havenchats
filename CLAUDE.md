@@ -126,7 +126,7 @@ static/favicon.svg, static/models/*.avif
 - `KEY_SECRET` — 유저 외부 API 키 **양방향 암호화** 키(AES-GCM). **미설정 시 `AUTH_SECRET`로 폴백**. 생성: `openssl rand -base64 48`.
 - `ALLOWED_EMAILS` — 로그인 허용 이메일(쉼표). 미설정 시 기본 `owner@example.com`만 허용, 빈 문자열=전체 허용. **테스트 종료 시 해제**.
 - `PUBLIC_IMAGE_BASE`(선택) — 이미지 공개 도메인. 미설정 시 `/img` 라우트로 R2 서빙.
-- `DISCORD_WEBHOOK_URL`(선택), `NSFW_UNLOCK_CODE`(선택, 기본 'arca'), `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`(admin infra 탭 + wrangler 인증)
+- `DISCORD_WEBHOOK_URL`(선택), `NSFW_UNLOCK_CODE`(선택, 기본 'arca'), `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`(**Worker 시크릿으로만**, admin infra 탭용. 로컬 .env 에는 두지 않음 — wrangler 계정 오인 방지)
 - (NovelAI 키는 env 가 아니라 유저별 `user_keys` 테이블에 암호화 저장)
 
 ## 명령어
@@ -139,11 +139,11 @@ npm run dev            # ② vite (:5173) — SPA HMR, /api·/auth·/img 를 :87
 npm run check          # svelte-check + tsc(worker) (커밋/배포 전 필수)
 npm run build          # vite build → adapter-static → build/ (정적 SPA)
 
-# wrangler 명령은 .env의 CF 토큰 export 후 실행:
-export $(grep -E '^CLOUDFLARE_(API_TOKEN|ACCOUNT_ID)=' .env | xargs)
+# wrangler 인증 = `wrangler login` OAuth(frontishobby 계정). 프로젝트 루트의 .env 에 CLOUDFLARE_API_TOKEN 이 있으면
+# wrangler 가 자동 로드해 그쪽 계정으로 붙으니, .env 에는 CF 토큰을 두지 않는다(구 무료 계정 토큰은 제거).
 npx wrangler d1 migrations apply haven --local    # 로컬 스키마
 npx wrangler d1 migrations apply haven --remote   # 원격 스키마
-npm run deploy                                     # build 후 wrangler deploy (worker 번들 + 정적 assets)
+npm run deploy                                     # 수동 배포(build 후 wrangler deploy). 평시 배포는 main 푸시 → CF Workers Builds(대시보드 Git 연결)
 npx wrangler secret put <KEY>                      # prod 시크릿
 npx wrangler deploy --dry-run --outdir=/tmp/x      # 번들/바인딩 검증(업로드 안 함)
 ```
@@ -151,10 +151,11 @@ npx wrangler deploy --dry-run --outdir=/tmp/x      # 번들/바인딩 검증(업
 ## 인프라
 
 - **Worker**: `havenchats` (`main: worker/src/index.ts`). 정적 SPA(`build/`)를 ASSETS 로 서빙 + Hono API. (구 Pages 프로젝트·Vercel·d1-worker 프록시는 폐기)
-- D1: `haven` (id `b8c2b1a3-78e8-4527-aefa-461bcd3486b7`, region APAC) — `DB` 바인딩(네이티브 직결)
+- **Cloudflare 계정**: `frontishobby`(id `91e905352aff208653b16dd55b3f7e60`, **Workers Paid**). 2026-09-05 에 무료 계정 `HavenChats`(`130cd789…`)에서 도메인(Registrar 이동)·Worker·D1·R2 를 전부 이전. 무료 플랜 CPU 10ms 한도에 채팅 스트리밍(요청당 CPU 170~975ms)이 걸려 응답 끊김·이미지 commit 실패가 났던 것이 이전 사유.
+- D1: `haven` (id `4ddf590a-9ef2-45c6-bb07-a293fefdd239`, region APAC) — `DB` 바인딩(네이티브 직결). (구 계정 id `b8c2b1a3…` 는 폐기)
 - R2: `haven-images` — `IMAGES` 바인딩. 키 규칙: 썸네일 `char/<id>.<ext>`, 장면 `charimg/<charId>/<entryId>.<ext>`, 아바타 `avatar/<...>`, 실시간 생성 `chatimg/<sessionId>/<msgId>.<ext>`, 그림체 `style/<id>.<ext>`. 서빙 `/img/[...key]`(Hono)
-- 커스텀 도메인 `havenchats.com` 은 **이 Worker 에 연결**(배포 후 대시보드에서 Pages→Worker 로 이전 필요). **Google 콘솔 리디렉트 URI**: `https://havenchats.com/auth/google/callback` (+ `http://localhost:5173/auth/google/callback`)
-- **남은 원격 정리**: 구 `d1-worker`(d1-worker.havenchats.com)·구 Pages 프로젝트·Vercel 프로젝트는 배포 전환 확인 후 대시보드에서 삭제.
+- 커스텀 도메인 `havenchats.com` 은 `wrangler.jsonc` `routes`(custom_domain) 로 **이 Worker 에 연결**. 배포는 **CF Workers Builds**(대시보드에서 GitHub 레포 연결, main 푸시 시 `npm run build` → `wrangler deploy`). 구 GitHub Actions 워크플로는 제거. **Google 콘솔 리디렉트 URI**: `https://havenchats.com/auth/google/callback` (+ `http://localhost:5173/auth/google/callback`)
+- **남은 원격 정리**: 구 무료 계정(`HavenChats`)의 Worker `havenchats`·D1 `haven`·R2 `haven-images` 는 이전 검증 후 삭제. (구 `d1-worker`·Pages·Vercel 도 동일)
 
 ## 아직 안 된 것 / 다음 단계
 
