@@ -613,6 +613,10 @@
 				}
 			}
 
+			// 최종 이미지를 commit(업로드·R2 왕복) 전에 프리뷰 자리에 먼저 깐다 → 사용자는 즉시 완성본을
+			// 보고, 이후 /img 교체는 픽셀이 같아 눈에 띄지 않는다(마지막 중간 프레임→최종 전환 깜빡임 제거).
+			setPreview(result.blob);
+
 			// 3) commit — 바이너리 그대로 업로드(base64 없음). 메타는 쿼리.
 			const q = new URLSearchParams({ sessionId: sid });
 			if (replaceId) q.set('replaceId', replaceId);
@@ -660,6 +664,19 @@
 			}
 			invalidate('app:recentChats');
 		}
+	}
+
+	/**
+	 * 최종 /img 이미지 onload → 디코드가 끝난 뒤에 placeholder 를 걷는다. load 직후엔 아직 디코드 전이라
+	 * 그 프레임에 바로 걷으면 빈 박스가 한 번 비친다(깜빡임). decode 미지원/실패면 그냥 걷는다.
+	 */
+	async function onFinalSceneLoad(img: HTMLImageElement, m: ChatMessage) {
+		try {
+			if (typeof img.decode === 'function') await img.decode();
+		} catch {
+			/* 무시 */
+		}
+		clearScenePreview(m);
 	}
 
 	/** 최종 /img 이미지가 로드된 뒤 placeholder 로 쓰던 프리뷰 blob URL 을 정리. */
@@ -716,7 +733,7 @@
 
 		// 생성 중 플레이스홀더(프록시로 감싸지므로 messages[idx] 로 수정).
 		const tempId = crypto.randomUUID();
-		messages.push({ id: tempId, role: 'image_generation', content: '', pending: true });
+		messages.push({ id: tempId, clientKey: tempId, role: 'image_generation', content: '', pending: true });
 		await runSceneImage({ sid, text, msgId: tempId, assistantMsgId, recent });
 	}
 
@@ -1771,7 +1788,7 @@
 			<div class="load-more">이전 대화를 불러오는 중…</div>
 		{/if}
 		<article class="novel">
-			{#each messages as m (m.id)}
+			{#each messages as m (m.clientKey ?? m.id)}
 				{#if m.content || m.errorReason || m.role === 'image_generation' || (streaming && m === lastMessage)}
 					<div class="para {m.role}" data-mid={m.id}>
 						{#if !(streaming && m === lastMessage) && !m.pending}
@@ -1842,7 +1859,7 @@
 											src={imgSrc(m.content)}
 											alt="생성된 장면 이미지"
 											loading="lazy"
-											onload={() => clearScenePreview(m)}
+											onload={(e) => onFinalSceneLoad(e.currentTarget as HTMLImageElement, m)}
 											onerror={() => clearScenePreview(m)}
 										/>
 									{/if}

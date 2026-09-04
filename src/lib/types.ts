@@ -244,6 +244,11 @@ export interface ChatMessage {
 	pending?: boolean;
 	/** 스트리밍 중간 프레임 프리뷰(클라 임시 object URL — image_generation). 영속 X. */
 	previewUrl?: string;
+	/**
+	 * 렌더 키(클라 임시). 실시간 이미지는 commit 시 id 가 임시→서버 id 로 바뀌는데, 목록을 id 로 키잉하면
+	 * 그 순간 DOM 이 통째로 재생성돼 이미지가 깜빡인다 → 생성 시 부여한 이 키로 키잉해 엘리먼트를 유지.
+	 */
+	clientKey?: string;
 }
 
 /** DB 영속 메시지 — ChatMessage + 세션 내 순번(seq). */
