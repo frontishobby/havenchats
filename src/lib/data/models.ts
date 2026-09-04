@@ -43,13 +43,26 @@ export const ASSIST_MODEL_IDS: Set<string> = new Set(ASSIST_MODELS.map((m) => m.
 export const DEFAULT_ASSIST_MODEL_ID = 'google/gemini-3.8-flash';
 
 /**
- * 실시간 이미지 상황 프롬프트(generateObject 구조화 출력)에 허용하는 모델 — assist 와 동일하게
- * 구조화 출력이 안정적인 Gemini 계열만. (다른 모델은 JSON 출력이 불안정)
+ * 실시간 이미지 상황 프롬프트(generateObject 구조화 출력)에 허용하는 모델.
+ * 조건: ① 구조화 출력이 안정적 ② 노골적 성행위 장면도 거부하지 않음 ③ 빠르고 저렴.
+ * Gemini Flash 계열은 safetySettings BLOCK_NONE 을 줘도 노골적 장면을 content-filter 로
+ * 빈 응답 처리해 제외(2026-09 실측 0/4). DeepSeek V4 Flash 는 거부는 안 하지만 30~45s 지연·
+ * length 실패가 잦아 제외. 채팅 모델 목록(MODELS)과 별개 목록이므로 getModel 로 조회하지 말고
+ * findImagePromptModel 을 쓴다.
  */
-export const IMAGE_PROMPT_MODELS: ModelOption[] = ASSIST_MODELS;
+export const IMAGE_PROMPT_MODELS: ModelOption[] = [
+	// $0.15 / $0.50 — 2~3s, char/user 분리·인원수 태그 정확(실측 4/4)
+	{ id: 'zai/glm-5.3-flash', label: 'GLM 5.3 Flash', icon: '/models/zai.avif', contextLimit: 1_000_000, reasoning: true },
+	// $0.30 / $1.20 — 2~3s(실측 4/4)
+	{ id: 'minimax/minimax-m3', label: 'MiniMax M3', icon: '/models/minimax.avif', contextLimit: 512_000, reasoning: true }
+];
 export const IMAGE_PROMPT_MODEL_IDS: Set<string> = new Set(IMAGE_PROMPT_MODELS.map((m) => m.id));
-/** 이미지 상황 프롬프트 기본 모델 — 빠른 Gemini Flash. */
-export const DEFAULT_IMAGE_PROMPT_MODEL_ID = 'google/gemini-3.8-flash';
+/** 이미지 상황 프롬프트 기본 모델 — GLM 5.3 Flash. */
+export const DEFAULT_IMAGE_PROMPT_MODEL_ID = 'zai/glm-5.3-flash';
+
+export function findImagePromptModel(id: string): ModelOption | undefined {
+	return IMAGE_PROMPT_MODELS.find((m) => m.id === id);
+}
 
 /** 알 수 없는 모델의 보수적 기본 컨텍스트 상한. */
 const FALLBACK_CONTEXT_LIMIT = 128_000;
@@ -68,5 +81,5 @@ export function getContextLimit(id: string): number {
 
 /** 기본적으로 thinking/reasoning 토큰을 쓰는 모델인지(출력 예산 보정용). */
 export function isReasoningModel(id: string): boolean {
-	return getModel(id)?.reasoning === true;
+	return (getModel(id) ?? findImagePromptModel(id))?.reasoning === true;
 }

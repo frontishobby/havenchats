@@ -7,7 +7,8 @@
 		getModel,
 		IMAGE_PROMPT_MODELS,
 		IMAGE_PROMPT_MODEL_IDS,
-		DEFAULT_IMAGE_PROMPT_MODEL_ID
+		DEFAULT_IMAGE_PROMPT_MODEL_ID,
+		findImagePromptModel
 	} from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
@@ -410,7 +411,7 @@
 	let naiKeyRegistered = $state<boolean | null>(null); // null=미확인, false=미등록, true=등록됨
 	let naiStatusLoading = $state(false);
 
-	const currentImgModel = $derived(getModel(imagePromptModel) ?? IMAGE_PROMPT_MODELS[0]);
+	const currentImgModel = $derived(findImagePromptModel(imagePromptModel) ?? IMAGE_PROMPT_MODELS[0]);
 
 	const currentModel = $derived(getModel(model) ?? MODELS[0]);
 
