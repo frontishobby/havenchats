@@ -1143,6 +1143,55 @@
 		}
 	}
 
+	/**
+	 * 마지막 턴 되돌리기(↻): 마지막 user 메시지부터 끝까지(assistant 응답·그 뒤 생성 이미지 포함)를
+	 * DB·화면에서 지우고, 그 user 입력을 입력창에 채워 바로 고쳐서 다시 보낼 수 있게 한다.
+	 * 마지막 메시지 문단에만 버튼 노출. 입력은 되살아나므로 confirm 없이 즉시 실행.
+	 */
+	const retryStartIdx = $derived.by(() => {
+		for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === 'user') return i;
+		return -1;
+	});
+	let retrying = $state(false);
+	async function retryLastTurn() {
+		if (streaming || deleting || retrying || regenerating) return;
+		const start = retryStartIdx;
+		if (start < 0) return;
+		const removed = messages.slice(start);
+		const userText = removed[0].content;
+		retrying = true;
+		try {
+			if (sessionId) {
+				// 뒤에서부터 지운다(중간 실패 시 앞쪽 user 입력이 남아 이어가기 쉬움). 404 = DB 에 없음 → 무시.
+				for (let i = removed.length - 1; i >= 0; i--) {
+					const res = await fetch('/api/chat/messages', {
+						method: 'DELETE',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({ messageId: removed[i].id })
+					});
+					if (!res.ok && res.status !== 404) {
+						console.error('[haven] 턴 되돌리기 실패', res.status);
+						sendError = '메시지를 되돌리지 못했어요. 다시 시도해 주세요.';
+						// 이미 지운 뒤쪽 메시지는 화면에서도 제거해 DB 와 맞춘다.
+						messages = messages.slice(0, start + i + 1);
+						return;
+					}
+				}
+			}
+			for (const m of removed) clearScenePreview(m);
+			messages = messages.slice(0, start);
+			input = userText;
+			await tick();
+			autoGrow();
+			textarea?.focus();
+			invalidate('app:recentChats');
+		} catch (e) {
+			console.error(e);
+		} finally {
+			retrying = false;
+		}
+	}
+
 	function onKeydown(e: KeyboardEvent) {
 		// 모바일(터치)에서는 Enter 를 전송으로 가로채지 않고 기본 개행 동작에 맡긴다.
 		if (isTouch) return;
@@ -1817,6 +1866,31 @@
 									>
 										<path d="M21 12a9 9 0 1 1-2.64-6.36" />
 										<path d="M21 3v5h-5" />
+									</svg>
+								</button>
+							{/if}
+							{#if m === lastMessage && retryStartIdx >= 0}
+								<button
+									class="msg-retry"
+									class:spinning={retrying}
+									onclick={retryLastTurn}
+									disabled={retrying || !!regenerating || streaming || !!deleting}
+									aria-label="마지막 턴 되돌리기"
+									title="되돌리기 — 마지막 입력·응답을 지우고 입력을 다시 편집"
+								>
+									<svg
+										viewBox="0 0 24 24"
+										width="14"
+										height="14"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path d="M3 12a9 9 0 1 0 2.64-6.36" />
+										<path d="M3 3v5h5" />
 									</svg>
 								</button>
 							{/if}
@@ -2676,8 +2750,13 @@
 			opacity: 0.55;
 		}
 	}
-	/* 이미지 재생성(🔄) 버튼 — 삭제 버튼 좌측. msg-del 과 동일한 노출 규칙. */
-	.msg-regen {
+	/* 이미지 재생성(🔄)·마지막 턴 되돌리기(↻) 버튼 — 삭제 버튼 좌측. msg-del 과 동일한 노출 규칙.
+	   이미지 문단에 둘 다 있으면 되돌리기를 한 칸 더 왼쪽으로. */
+	.para.image_generation .msg-retry {
+		right: 46px;
+	}
+	.msg-regen,
+	.msg-retry {
 		position: absolute;
 		bottom: -6px;
 		right: 26px;
@@ -2698,21 +2777,27 @@
 		z-index: 2;
 	}
 	.para:hover .msg-regen,
-	.msg-regen:focus-visible {
+	.msg-regen:focus-visible,
+	.para:hover .msg-retry,
+	.msg-retry:focus-visible {
 		opacity: 1;
 	}
-	.msg-regen:hover {
+	.msg-regen:hover,
+	.msg-retry:hover {
 		color: var(--accent, #8b5cf6);
 		border-color: var(--accent, #8b5cf6);
 	}
-	.msg-regen:disabled {
+	.msg-regen:disabled,
+	.msg-retry:disabled {
 		opacity: 0.4;
 		cursor: default;
 	}
-	.msg-regen.spinning {
+	.msg-regen.spinning,
+	.msg-retry.spinning {
 		opacity: 1;
 	}
-	.msg-regen.spinning svg {
+	.msg-regen.spinning svg,
+	.msg-retry.spinning svg {
 		animation: msg-regen-spin 0.8s linear infinite;
 	}
 	@keyframes msg-regen-spin {
@@ -2721,7 +2806,8 @@
 		}
 	}
 	@media (hover: none) {
-		.msg-regen {
+		.msg-regen,
+		.msg-retry {
 			opacity: 0.55;
 		}
 	}
