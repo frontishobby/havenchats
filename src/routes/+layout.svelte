@@ -10,11 +10,16 @@
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { privacyMode } from '$lib/state/privacyMode.svelte';
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import { isAdmin } from '$lib/admin';
 	import { resized } from '$lib/imageUrl';
 	import type { LayoutData } from './$types';
 	import type { MeData } from '$lib/api/pages';
 	let { children, data }: { children: import('svelte').Snippet; data: LayoutData } = $props();
+
+	// /chat/* 에선 모바일에서 상단 네비바를 숨긴다(채팅 헤더가 이미 뒤로가기·설정을 제공, 세로 공간 확보).
+	// 자식(ChatView)은 --topbar-h 로 실제 상단바 높이를 읽어 자기 높이를 계산한다.
+	const isChatRoute = $derived(page.url.pathname.startsWith('/chat/'));
 
 	// /api/me 는 layout load 에서 await 하지 않고 promise(data.me) 로 흘러온다 → 셸은 즉시 렌더되고
 	// 여기서 도착하면 me 에 채운다. 재검증(invalidate) 시 새 promise 가 와도 이전 값을 유지(깜빡임 방지).
@@ -96,7 +101,7 @@
 
 <svelte:window onclick={onWindowClick} onkeydown={onWindowKey} />
 
-<div class="app">
+<div class="app" class:chat-route={isChatRoute}>
 	<header class="topbar">
 		<div class="left">
 			{#if me?.user}
@@ -214,10 +219,20 @@
 
 <style>
 	.app {
+		--topbar-h: 60px;
 		min-height: 100vh;
 		min-height: 100dvh; /* 모바일: 실제 보이는 높이 기준 → body 넘침/헤더 가려짐 방지 */
 		display: flex;
 		flex-direction: column;
+	}
+	/* 모바일 채팅 화면: 상단 네비바 숨김(채팅 헤더의 ← 로 돌아감). */
+	@media (max-width: 640px) {
+		.app.chat-route {
+			--topbar-h: 0px;
+		}
+		.app.chat-route .topbar {
+			display: none;
+		}
 	}
 	.topbar {
 		position: sticky;
@@ -227,7 +242,7 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0 20px;
-		height: 60px;
+		height: var(--topbar-h);
 		background: color-mix(in srgb, var(--bg) 80%, transparent);
 		backdrop-filter: blur(12px);
 		border-bottom: 1px solid var(--border);

@@ -172,6 +172,12 @@
 			#boot .card .body .sk {
 				background: #23233a;
 			}
+			/* 모바일 채팅 화면: 레이아웃이 상단 네비바를 숨기므로 스켈레톤도 동일하게. */
+			@media (max-width: 640px) {
+				#boot[data-v='chat'] .top {
+					display: none;
+				}
+			}
 			@media (max-width: 640px) {
 				#boot .grid,
 				#boot .grid.small {
