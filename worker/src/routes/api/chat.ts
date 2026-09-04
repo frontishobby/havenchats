@@ -943,7 +943,13 @@ function isTransientGatewayError(e: unknown): boolean {
 function describeError(e: unknown): string {
 	if (!(e instanceof Error)) return String(e);
 	const parts = [`${e.name}: ${e.message}`];
-	const x = e as Error & { statusCode?: number; responseBody?: string; cause?: unknown };
+	const x = e as Error & {
+		statusCode?: number;
+		responseBody?: string;
+		finishReason?: string;
+		cause?: unknown;
+	};
+	if (x.finishReason) parts.push(`finish=${x.finishReason}`);
 	if (x.statusCode) parts.push(`status=${x.statusCode}`);
 	if (x.responseBody) parts.push(`body=${String(x.responseBody).slice(0, 500)}`);
 	if (x.cause instanceof Error) parts.push(`cause=${x.cause.name}: ${x.cause.message}`);

@@ -96,9 +96,12 @@ export function buildProviderOptions(
 	if (modelId.startsWith('google/')) {
 		// Gemini 는 Vertex AI·AI Studio 두 공급자에 모두 있다. AI Gateway 는 일시적 503/500
 		// (GatewayInternalServerError "Service temporarily unavailable")을 자동 재시도하지 않고
-		// 공급자 1회만 시도하므로, order 로 vertex→google 공급자 페일오버를 켜 가용성을 높인다.
+		// 공급자 1회만 시도하므로, order 로 공급자 페일오버를 켜 가용성을 높인다.
 		// (vercel/ai#14148 — 같은 모델을 여러 공급자로 순서대로 시도한다.)
-		out.gateway = { caching: 'auto', order: ['vertex', 'google'] };
+		// 순서는 google(AI Studio) 우선: Vertex 는 Gemini 3.8 부터 성인 롤플레이 지시가 든 프롬프트를
+		// 입력 단계에서 content-filter 로 차단(빈 응답, inputTokens 0)하는데 이건 에러가 아니라
+		// 페일오버도 안 탄다(2026-09 실측). AI Studio 는 같은 프롬프트를 정상 처리.
+		out.gateway = { caching: 'auto', order: ['google', 'vertex'] };
 		out.google = {
 			thinkingConfig: {
 				thinkingBudget: noThink ? 0 : GOOGLE_THINKING_BUDGET,
