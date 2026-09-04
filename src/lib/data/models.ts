@@ -15,6 +15,7 @@ export interface ModelOption {
 
 // contextLimit = Vercel AI Gateway 표시 max context(input+output 합산 총 컨텍스트).
 export const MODELS: ModelOption[] = [
+	{ id: 'deepseek/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true },
 	{ id: 'deepseek/deepseek-v4-pro-0813', label: 'DeepSeek V4 Pro', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true },
 	{ id: 'zai/glm-5.3-flash', label: 'GLM 5.3 Flash', icon: '/models/zai.avif', contextLimit: 1_000_000, reasoning: true },
 	{ id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true }

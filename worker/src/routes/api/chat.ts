@@ -938,6 +938,18 @@ function isTransientGatewayError(e: unknown): boolean {
 	return /temporarily unavailable|service unavailable|overloaded|try again|rate limit|timeout/.test(msg);
 }
 
+
+/** 에러를 로그용 한 줄로: `Name: message` + cause·statusCode·responseBody(있으면). */
+function describeError(e: unknown): string {
+	if (!(e instanceof Error)) return String(e);
+	const parts = [`${e.name}: ${e.message}`];
+	const x = e as Error & { statusCode?: number; responseBody?: string; cause?: unknown };
+	if (x.statusCode) parts.push(`status=${x.statusCode}`);
+	if (x.responseBody) parts.push(`body=${String(x.responseBody).slice(0, 500)}`);
+	if (x.cause instanceof Error) parts.push(`cause=${x.cause.name}: ${x.cause.message}`);
+	return parts.join(' | ');
+}
+
 /** generateObject 를 일시적 에러에 한해 백오프 재시도한다(기본 2회 추가 시도). */
 async function generateObjectWithRetry(
 	opts: Parameters<typeof generateObject>[0],
@@ -950,7 +962,7 @@ async function generateObjectWithRetry(
 		} catch (e) {
 			lastErr = e;
 			if (i < retries && isTransientGatewayError(e)) {
-				console.warn(`[chat/image] 상황 프롬프트 일시적 에러 — 재시도 ${i + 1}/${retries}:`, String(e));
+				console.warn(`[chat/image] 상황 프롬프트 일시적 에러 — 재시도 ${i + 1}/${retries}:`, describeError(e));
 				await new Promise((r) => setTimeout(r, 500 * (i + 1)));
 				continue;
 			}
@@ -1155,8 +1167,9 @@ chatRouter.post('/image', async (c) => {
 		cost = parseGatewayCost(result.providerMetadata);
 		// 상황프롬프트 비용을 유저 일일 카운터에 가산(NovelAI 실패해도 Gemini 비용은 발생).
 	} catch (e) {
-		console.error('[chat/image] situation prompt error:', e);
-		llmError = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+		// Workers 로그는 Error 객체를 스택만 남기고 직렬화하므로 name/message/cause 를 문자열로 남긴다.
+		llmError = describeError(e);
+		console.error('[chat/image] situation prompt error:', llmError);
 		notifyServerError({
 			context: 'generateObject /api/chat/image',
 			error: e,
