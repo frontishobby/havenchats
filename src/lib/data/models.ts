@@ -15,40 +15,30 @@ export interface ModelOption {
 
 // contextLimit = Vercel AI Gateway 표시 max context(input+output 합산 총 컨텍스트).
 export const MODELS: ModelOption[] = [
-	{ id: 'alibaba/qwen3.7-plus', label: 'Qwen 3.7 Plus', icon: '/models/qwen.avif', contextLimit: 1_000_000 },
-	{ id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true },
-	{ id: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true },
-	{ id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true },
-	{ id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', icon: '/models/claude.avif', contextLimit: 1_000_000 },
-	{ id: 'openai/gpt-5.4', label: 'GPT-5.4', icon: '/models/openai.avif', contextLimit: 1_100_000, reasoning: true },
-	{ id: 'xai/grok-4.3', label: 'Grok 4.3', icon: '/models/xai.avif', contextLimit: 1_000_000, reasoning: true },
-	{ id: 'minimax/minimax-m3', label: 'MiniMax M3', icon: '/models/minimax.avif', contextLimit: 1_000_000, reasoning: true },
-	{ id: 'moonshotai/kimi-k2.6', label: 'Kimi K2.6', icon: '/models/moonshotai.avif', contextLimit: 256_000, reasoning: true },
-	{ id: 'zai/glm-5.1', label: 'GLM 5.1', icon: '/models/zai.avif', contextLimit: 200_000, reasoning: true },
-	{ id: 'nvidia/nemotron-3-ultra-550b-a55b', label: 'Nemotron 3 Ultra', icon: '/models/nvidia.avif', contextLimit: 1_000_000, reasoning: true }
+	{ id: 'deepseek/deepseek-v4-pro-0813', label: 'DeepSeek V4 Pro', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true },
+	{ id: 'zai/glm-5.3-flash', label: 'GLM 5.3 Flash', icon: '/models/zai.avif', contextLimit: 1_000_000, reasoning: true },
+	{ id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true }
 ];
 
 export const DEFAULT_MODEL_ID = MODELS[0].id;
 
 /**
  * 캐릭터 제작 보조(assist)에 허용하는 모델 — 구조화 출력(generateObject)이 안정적인
- * Gemini 계열 + Claude Opus 만. (다른 모델은 JSON 출력이 불안정해 제외)
+ * Gemini 계열만. (다른 모델은 JSON 출력이 불안정해 제외)
  */
-export const ASSIST_MODELS: ModelOption[] = MODELS.filter(
-	(m) => m.id.startsWith('google/gemini') || m.id === 'anthropic/claude-opus-4.8'
-);
+export const ASSIST_MODELS: ModelOption[] = MODELS.filter((m) => m.id.startsWith('google/gemini'));
 export const ASSIST_MODEL_IDS: Set<string> = new Set(ASSIST_MODELS.map((m) => m.id));
 /** assist 기본 모델(허용목록에 있어야 함). */
-export const DEFAULT_ASSIST_MODEL_ID = 'google/gemini-3.1-pro-preview';
+export const DEFAULT_ASSIST_MODEL_ID = 'google/gemini-3.8-flash';
 
 /**
  * 실시간 이미지 상황 프롬프트(generateObject 구조화 출력)에 허용하는 모델 — assist 와 동일하게
- * 구조화 출력이 안정적인 Gemini 계열 + Claude Opus 만. (다른 모델은 JSON 출력이 불안정)
+ * 구조화 출력이 안정적인 Gemini 계열만. (다른 모델은 JSON 출력이 불안정)
  */
 export const IMAGE_PROMPT_MODELS: ModelOption[] = ASSIST_MODELS;
 export const IMAGE_PROMPT_MODEL_IDS: Set<string> = new Set(IMAGE_PROMPT_MODELS.map((m) => m.id));
 /** 이미지 상황 프롬프트 기본 모델 — 빠른 Gemini Flash. */
-export const DEFAULT_IMAGE_PROMPT_MODEL_ID = 'google/gemini-3.5-flash';
+export const DEFAULT_IMAGE_PROMPT_MODEL_ID = 'google/gemini-3.8-flash';
 
 /** 알 수 없는 모델의 보수적 기본 컨텍스트 상한. */
 const FALLBACK_CONTEXT_LIMIT = 128_000;

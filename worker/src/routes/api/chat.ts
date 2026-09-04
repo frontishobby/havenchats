@@ -765,7 +765,7 @@ chatRouter.post('/vars', async (c) => {
  *
  * 흐름:
  *  1) 세션 소유권 확인 + 유저 NovelAI 키 복호화.
- *  2) 선택된 LLM(기본 google/gemini-3.5-flash)으로 마지막 assistant 응답 → "상황 프롬프트"
+ *  2) 선택된 LLM(기본 google/gemini-3.8-flash)으로 마지막 assistant 응답 → "상황 프롬프트"
  *     (best-effort danbooru 태그 + 필요 시 자연어). 이 비용(USD)은 메시지 cost 로 표시된다.
  *  3) 그림체 + 상황 + 퀄리티 → NovelAI 생성(고정 네거티브/파라미터). ZIP→이미지 바이트.
  *  4) R2(chatimg/<sessionId>/<msgId>.<ext>) 저장 + role=image_generation 메시지 영속.
@@ -785,7 +785,7 @@ const MAX_LEDGER_ENTRIES = 16;
 /** 원장에 박는 고정 외형 태그 최대 길이(자). */
 const MAX_APPEARANCE_CHARS = 300;
 
-/** 요청의 상황 프롬프트 모델 검증 — 구조화 출력 안정 모델(Gemini 계열+Opus)만. 미허용이면 기본 모델. */
+/** 요청의 상황 프롬프트 모델 검증 — 구조화 출력 안정 모델(Gemini 계열)만. 미허용이면 기본 모델. */
 function pickPromptModel(requested?: string): string {
 	return requested && IMAGE_PROMPT_MODEL_IDS.has(requested)
 		? requested

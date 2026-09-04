@@ -206,7 +206,7 @@ importRouter.post('/charx/:id/finalize', async (c) => {
  */
 
 /** 분석 모델 — 빠르고 저렴한 Gemini Flash 고정(사용자 선택 아님). */
-const ANALYZE_MODEL = 'google/gemini-3.5-flash';
+const ANALYZE_MODEL = 'google/gemini-3.8-flash';
 
 /** 입력 가드: 스크립트 1개당·전체 문자 상한(과금·지연·컨텍스트 보호). */
 const PER_SCRIPT_CHARS = 12_000;

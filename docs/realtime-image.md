@@ -37,8 +37,8 @@ CFG rescale 0.28
 상황 프롬프트 생성을 단일 문자열(`generateText`)에서 **구조화 출력(`generateObject`)** 으로 전환하고,
 NovelAI V4.5 **멀티 캐릭터 기능**(`char_captions`)을 사용하도록 변경.
 
-- **모델 한정**: 상황 프롬프트 모델을 구조화 출력이 안정적인 **Gemini 계열 + Claude Opus** 로만 허용
-  (`IMAGE_PROMPT_MODELS`/`IMAGE_PROMPT_MODEL_IDS`, 기본 `google/gemini-3.5-flash`). 다른 모델은 JSON 불안정.
+- **모델 한정**: 상황 프롬프트 모델을 구조화 출력이 안정적인 **Gemini 계열** 로만 허용
+  (`IMAGE_PROMPT_MODELS`/`IMAGE_PROMPT_MODEL_IDS`, 기본 `google/gemini-3.8-flash`). 다른 모델은 JSON 불안정.
 - **구조화 스키마**: `{ base, characters: [{ caption }] }`
   - `base` = 배경·구도·**인원수 태그**(`1girl`/`1boy, 1girl`/`2girls`)·상호작용 태그(`source#`/`target#`/`mutual#`).
   - `characters[]` = 화면에 보이는 인물별 캡션(번호 없는 `girl`/`boy` + 외형(레퍼런스 고정) + 현재 복장 + 표정/포즈).
