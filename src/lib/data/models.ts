@@ -14,14 +14,24 @@ export interface ModelOption {
 }
 
 // contextLimit = Vercel AI Gateway 표시 max context(input+output 합산 총 컨텍스트).
+// 순서 = 가격 내림차순(게이트웨이 표준 단가, input/output $ per 1M tokens, 2026-09 기준).
 export const MODELS: ModelOption[] = [
-	{ id: 'deepseek/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true },
+	// $5 / $25
+	{ id: 'anthropic/claude-opus-5', label: 'Claude Opus 5', icon: '/models/claude.avif', contextLimit: 1_000_000 },
+	// $2 / $10 — GPT-5.6 시리즈 플래그십
+	{ id: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol', icon: '/models/openai.avif', contextLimit: 1_050_000, reasoning: true },
+	// $0.75 / $3.75
+	{ id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true },
+	// $0.66 / $1.98
 	{ id: 'deepseek/deepseek-v4-pro-0813', label: 'DeepSeek V4 Pro', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true },
+	// $0.15 / $0.50
 	{ id: 'zai/glm-5.3-flash', label: 'GLM 5.3 Flash', icon: '/models/zai.avif', contextLimit: 1_000_000, reasoning: true },
-	{ id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true }
+	// $0.076 / $0.153
+	{ id: 'deepseek/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true }
 ];
 
-export const DEFAULT_MODEL_ID = MODELS[0].id;
+/** 채팅 기본 모델 — 가장 저렴한 DeepSeek V4 Flash(목록 순서와 무관하게 고정). */
+export const DEFAULT_MODEL_ID = 'deepseek/deepseek-v4-flash-0731';
 
 /**
  * 캐릭터 제작 보조(assist)에 허용하는 모델 — 구조화 출력(generateObject)이 안정적인

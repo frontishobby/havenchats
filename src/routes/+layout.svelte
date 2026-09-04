@@ -9,6 +9,7 @@
 	import { profileModal } from '$lib/state/profileModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { privacyMode } from '$lib/state/privacyMode.svelte';
+	import { onMount } from 'svelte';
 	import { isAdmin } from '$lib/admin';
 	import { resized } from '$lib/imageUrl';
 	import type { LayoutData } from './$types';
@@ -27,6 +28,15 @@
 		return () => {
 			cancelled = true;
 		};
+	});
+
+	// app.html 의 부트 스켈레톤(#boot): 앱 셸이 마운트되면 페이드아웃 후 제거.
+	// (SPA 라 JS 번들 + 페이지 load 가 끝나기 전까진 아무것도 렌더되지 않으므로 그동안 대신 보여준다)
+	onMount(() => {
+		const boot = document.getElementById('boot');
+		if (!boot) return;
+		boot.classList.add('out');
+		setTimeout(() => boot.remove(), 180);
 	});
 
 	// 사이드바에서 세션 삭제(서버). 성공 시 Sidebar 가 로컬 목록에서 제거(무한스크롤 위치 보존 —
