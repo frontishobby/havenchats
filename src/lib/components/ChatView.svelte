@@ -146,9 +146,13 @@
 		}
 	}
 
-	// 비용(USD)을 소수점 2자리로 올림 표시. 예: 0.0270609 → "$0.03", 0.0001 → "$0.01".
+	// 비용 표시: $1 미만은 센트(¢)로 유효숫자 2자리, $1 이상은 달러 소수 2자리.
+	// 예: 0.0003 → "0.03¢", 0.0271 → "2.71¢", 0.154 → "15.4¢", 1.2345 → "$1.23".
 	function formatCost(cost: number): string {
-		return `$${(Math.ceil(cost * 100) / 100).toFixed(2)}`;
+		if (cost >= 1) return `$${cost.toFixed(2)}`;
+		const c = cost * 100;
+		const s = c >= 10 ? c.toFixed(1) : c >= 1 ? c.toFixed(2) : String(Number(c.toPrecision(2)));
+		return `${s}¢`;
 	}
 
 	let { data, debug = false }: { data: ChatPageData; debug?: boolean } = $props();
@@ -1789,7 +1793,7 @@
 					<div class="para {m.role}" data-mid={m.id}>
 						{#if !(streaming && m === lastMessage) && !m.pending}
 							{#if (m.role === 'assistant' || m.role === 'image_generation') && m.cost != null && Number.isFinite(m.cost) && m.cost > 0}
-								<span class="msg-cost" title="이 응답 생성 비용(USD)">{formatCost(m.cost)}</span>
+								<span class="msg-cost" title="이 응답 생성 비용">{formatCost(m.cost)}</span>
 							{/if}
 							{#if m.role === 'image_generation'}
 								<button
@@ -2624,15 +2628,14 @@
 	.msg-del:focus-visible {
 		opacity: 1;
 	}
-	/* 응답 비용(USD) — 삭제 버튼 좌측에 작게. 평소 옅게, 문단 hover 시 또렷하게. */
+	/* 응답 비용 — 문단 아래 여백(margin 1.5em)의 좌하단에 작게. 본문·이미지·우측 버튼과 안 겹친다.
+	   평소 옅게, 문단 hover 시 또렷하게. */
 	.msg-cost {
 		position: absolute;
-		bottom: -6px;
-		right: 28px;
-		height: 28px;
-		display: grid;
-		place-items: center;
-		padding: 0 2px;
+		top: 100%;
+		left: 0;
+		margin-top: 3px;
+		padding: 0;
 		font-family: 'Pretendard', system-ui, sans-serif;
 		font-size: 0.72rem;
 		line-height: 1;
@@ -2716,10 +2719,6 @@
 		to {
 			transform: rotate(360deg);
 		}
-	}
-	/* 이미지 메시지는 재생성 버튼이 끼므로 비용 표시를 더 왼쪽으로. */
-	.para.image_generation .msg-cost {
-		right: 60px;
 	}
 	@media (hover: none) {
 		.msg-regen {
