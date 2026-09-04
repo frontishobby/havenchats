@@ -1173,7 +1173,7 @@ chatRouter.post('/image/prepare', async (c) => {
 	} catch (e) {
 		// Workers 로그는 Error 객체를 스택만 남기고 직렬화하므로 name/message/cause 를 문자열로 남긴다.
 		llmError = describeError(e);
-		console.error('[chat/image] situation prompt error:', llmError);
+		console.error(`[chat/image] situation prompt error (model=${promptModel}):`, llmError);
 		notifyServerError({
 			context: 'generateObject /api/chat/image/prepare',
 			error: e,

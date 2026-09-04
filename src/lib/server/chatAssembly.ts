@@ -82,6 +82,14 @@ function userActsLine(level: number): string {
 	}
 }
 
+/** Gemini 설정형 안전 필터 전부 해제(`safetySettings`). */
+const GOOGLE_SAFETY_OFF = [
+	'HARM_CATEGORY_HARASSMENT',
+	'HARM_CATEGORY_HATE_SPEECH',
+	'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+	'HARM_CATEGORY_DANGEROUS_CONTENT'
+].map((category) => ({ category, threshold: 'BLOCK_NONE' as const }));
+
 /**
  * 게이트웨이 캐싱 + (모델별) thinking 예산 제한.
  * 무제한 추론은 output 예산을 잠식해 본문을 자르고 비용·지연을 키우므로 소량만 허용한다.
@@ -106,7 +114,11 @@ export function buildProviderOptions(
 			thinkingConfig: {
 				thinkingBudget: noThink ? 0 : GOOGLE_THINKING_BUDGET,
 				includeThoughts: false
-			}
+			},
+			// 설정형 안전 필터 4종을 전부 끈다. 기본값(중간 확률 이상 차단)은 성인 롤플레이 본문·상황
+			// 프롬프트를 출력 단계에서 finishReason=content-filter 로 잘라 빈 응답을 만든다(2026-09 로그).
+			// 비설정형 필터(아동 성착취 등 PROHIBITED_CONTENT)는 이 옵션과 무관하게 항상 동작한다.
+			safetySettings: GOOGLE_SAFETY_OFF
 		};
 	} else if (modelId.startsWith('openai/')) {
 		out.openai = { reasoningEffort: noThink ? 'none' : OPENAI_REASONING_EFFORT };
