@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
+	import { clearNovelaiToken } from '$lib/novelaiClient';
 
 	interface KeyStatus {
 		registered: boolean;
@@ -127,6 +128,7 @@
 			if (res.ok) {
 				keyInput = '';
 				saved = true;
+				clearNovelaiToken(); // 새 키 → 클라 캐시 폐기
 				await loadStatus();
 			} else {
 				error = d.message ?? '등록에 실패했습니다.';
@@ -147,6 +149,7 @@
 			const res = await fetch('/api/keys/novelai', { method: 'DELETE' });
 			if (res.ok) {
 				saved = false;
+				clearNovelaiToken();
 				await loadStatus();
 			}
 		} catch (e) {

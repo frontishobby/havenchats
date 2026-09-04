@@ -139,7 +139,7 @@ const AUTO_CENTER = [{ x: 0, y: 0 }];
  * 을 막는다. 위치는 항상 AUTO(use_coords:false) — 순서(use_order)+상호작용 태그로만 제어한다.
  * 음수 프롬프트의 char_captions 는 양수와 **개수를 맞춰**(빈 캡션) 안정성을 확보한다.
  */
-function buildPayload(positive: string, charCaptions: string[], resolution: ResolutionKey) {
+export function buildGeneratePayload(positive: string, charCaptions: string[], resolution: ResolutionKey) {
 	const { width, height } = RESOLUTIONS[resolution];
 	// 0 ~ 2^32-1 시드(Workers: crypto.getRandomValues).
 	const seed = crypto.getRandomValues(new Uint32Array(1))[0];
@@ -189,7 +189,7 @@ export async function generateImage(
 	token: string,
 	opts: { positive: string; charCaptions?: string[]; resolution: ResolutionKey }
 ): Promise<GenerateResult> {
-	const payload = buildPayload(opts.positive, opts.charCaptions ?? [], opts.resolution);
+	const payload = buildGeneratePayload(opts.positive, opts.charCaptions ?? [], opts.resolution);
 
 	let res: Response;
 	try {
@@ -309,7 +309,7 @@ export async function* generateImageStream(
 	token: string,
 	opts: { positive: string; charCaptions?: string[]; resolution: ResolutionKey }
 ): AsyncGenerator<string, void, unknown> {
-	const payload = buildPayload(opts.positive, opts.charCaptions ?? [], opts.resolution);
+	const payload = buildGeneratePayload(opts.positive, opts.charCaptions ?? [], opts.resolution);
 	const res = await fetch(STREAM_URL, {
 		method: 'POST',
 		headers: {

@@ -62,7 +62,7 @@ export interface ChatDebugSnapshot {
 }
 
 /**
- * 실시간 이미지 생성 디버그 정보 — 디버그 모드에서 `/api/chat/image` 가 응답에 동봉.
+ * 실시간 이미지 생성 디버그 정보 — 디버그 모드에서 `/api/chat/image/prepare` 가 응답에 동봉.
  * 디버그 패널이 "어떤 프롬프트/파라미터로 NovelAI 에 요청했는지" 표시하는 데 쓴다.
  */
 export interface ImageDebug {

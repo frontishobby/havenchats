@@ -45,10 +45,10 @@ worker/               # ⭐ Cloudflare Worker(Hono) — 백엔드 API + 정적 S
       img.ts          # /img/* R2 서빙(엣지 caches.default, ?v= 캐싱)
       api.ts          # /api 하위 라우터 마운트
       api/
-        chat.ts       # /api/chat 전체: POST '/'(스트리밍)·recent·session·messages·memory·summary·vars·image(NDJSON)·inspect·page(채팅페이지 데이터)
+        chat.ts       # /api/chat 전체: POST '/'(스트리밍)·recent·session·messages·memory·summary·vars·image/prepare·image/commit·inspect·page(채팅페이지 데이터)
         characters.ts # 생성/수정/삭제/promote/assist/thumbnail + GET edit-data·assets-data(구 로더)
         styles.ts     # 그림체 Hub API + GET page(구 로더)
-        keys.ts       # /api/keys/gateway·/novelai (GET/POST/DELETE)
+        keys.ts       # /api/keys/gateway·/novelai (GET/POST/DELETE) + /novelai/token(클라 직접 호출용 평문 수령)
         profile.ts    # /api/profile (POST)
         import.ts     # charx import(관리자)
         admin.ts      # overview·infra·stats·users/:id·users/:id/block (관리자)
@@ -60,6 +60,7 @@ src/                  # SvelteKit 정적 SPA(프론트엔드 only)
     types.ts          # Character, Opening, ImageAxis/Entry/Set, ChatMessage, ChatSession, RecentChat 등
     imageCodes.ts     # 장면 이미지 코드 유틸. 클라·서버 공용 순수함수
     imageBase.ts      # imgSrc/IMAGE_BASE (PUBLIC_IMAGE_BASE — $env/dynamic/public)
+    novelaiClient.ts  # 클라 전용: NovelAI 직접 호출(msgpack 스트림·ZIP 폴백·webp 변환·토큰 캐시)
     api/              # ⭐ Worker↔SPA 공용 (alias 로 worker 도 import)
       load.ts         # loadJson(fetch,path) — 클라 로더 공용 GET(401/error·{redirect} 처리)
       pages·chat·characters·styles·keys·profile·admin·import.ts  # 요청·응답 공용 타입
@@ -110,7 +111,7 @@ static/favicon.svg, static/models/*.avif
 - **대화 영속화**: 세션+메시지 D1 저장. 유저 메시지는 즉시 저장(스트림 끊겨도 유실 방지), assistant는 `onFinish`에 저장. **사이드바 최근 채팅**(`listRecentSessions`, 마지막 대사 미리보기). `/chat/[id]/session/[sessionId]` 경로로 이어가기(구버전 `?s=`도 하위호환). 새 세션은 첫 전송 시 lazy 생성 후 `replaceState`로 세션 URL로 교체(기본은 항상 새 세션).
 - **장기 맥락**: sliding window + rolling summary(백그라운드 갱신). 요약은 모달에서 조회/수동 수정 가능(`/api/chat/summary`).
 - **채팅 설정 모달**: **모델 선택**(아이콘 드롭다운, 4개: DeepSeek V4 Flash 0731(기본)·DeepSeek V4 Pro 0813·GLM 5.3 Flash·Gemini 3.8 Flash), **답변 길이**(5~30문장 슬라이더), **'나' 행동·대사 생성**(0금지/1적정/2풍부). localStorage 저장.
-- **실시간 이미지 생성(NovelAI)**: 채팅 헤더 🖼 버튼으로 켜면(localStorage) 매 assistant 턴 직후 클라가 `/api/chat/image` 호출 → ① LLM(`generateObject` **구조화 출력**)이 마지막 응답을 `{ base, characters[] }` 로 분해(이 비용이 메시지 cost 로 표시) → ② NAI V4.5 **멀티 캐릭터 기능**(`char_captions` 인물별 분리 → 속성 누출 방지)으로 그림체+base+고정 퀄리티/네거티브 합쳐 **NovelAI(nai-diffusion-4-5-full)** 생성(응답 ZIP→매직바이트로 webp/png 판별) → ③ R2(`chatimg/<sessionId>/<msgId>.<ext>`) 저장 + `role=image_generation` 메시지 영속. 위치는 AUTO(`use_coords:false`+`use_order`), 인물 최대 6명, {{나}}는 프레임에 보일 때만 별도 엔트리. **상황 프롬프트 모델은 구조화 출력 안정 모델(Gemini 계열)로 한정**(`IMAGE_PROMPT_MODELS`, 기본 `google/gemini-3.8-flash`). 해상도(832×1216/1024×1024)·**그림체(즐겨찾기에서 택1)**·상황프롬프트 모델·'빠른 생성 우선'은 헤더 모달에서 설정. NSFW 캐릭터면 base_caption 앞에 `rating:nsfw`. 미성년 하드차단은 base+모든 인물 캡션 합본 검사. 캐릭터 description 통짜를 외형 레퍼런스로 LLM 에 주입. 키는 **프로필 메뉴 > API 키 관리**에서 등록(NovelAI **Opus 등급** 검증 후 암호화 저장). 고정 프롬프트/파라미터·검증·ZIP 해제는 `lib/server/novelai.ts`. Gemini 는 `gateway.order:['google','vertex']` 페일오버 — **google(AI Studio) 우선**: Vertex 는 Gemini 3.8+ 에서 NSFW 허용 지시가 든 프롬프트를 입력 단계에서 content-filter 차단(빈 응답, 페일오버 안 탐).
+- **실시간 이미지 생성(NovelAI)**: 채팅 헤더 🖼 버튼으로 켜면(localStorage) 매 assistant 턴 직후 클라가 ① `POST /api/chat/image/prepare` → 서버가 LLM(`generateObject` **구조화 출력**)으로 마지막 응답을 `{ base, characters[] }` 로 분해(이 비용이 메시지 cost)·미성년 하드차단·**NovelAI 요청 바디**(`buildGeneratePayload`) 반환 → ② **브라우저가 `image.novelai.net` 을 직접 호출**(`lib/novelaiClient.ts`: `/ai/generate-image-stream` + `parameters.stream='msgpack'` → 4B 길이 프리픽스 + msgpack, intermediate=JPEG 프리뷰·final=PNG. 실패 시 `/ai/generate-image` ZIP 폴백(fflate). 토큰은 `GET /api/keys/novelai/token` 으로 받아 메모리에만) → 최종 PNG 를 canvas 로 **webp 변환** → ③ `POST /api/chat/image/commit?sessionId&replaceId&assistantMsgId&cost` 에 바이너리 업로드 → R2(`chatimg/<sessionId>/<id>.<ext>`) 저장 + `role=image_generation` 메시지 영속. **Worker 는 NovelAI 프레임을 만지지 않는다**(무료 플랜 CPU 10ms 대응 — 예전 서버 SSE→NDJSON 재전송은 요청당 CPU 0.4~1.2s). NAI V4.5 **멀티 캐릭터 기능**(`char_captions` 인물별 분리 → 속성 누출 방지), 위치는 AUTO(`use_coords:false`+`use_order`), 인물 최대 6명, {{나}}는 프레임에 보일 때만 별도 엔트리. **상황 프롬프트 모델은 구조화 출력 안정 모델(Gemini 계열)로 한정**(`IMAGE_PROMPT_MODELS`, 기본 `google/gemini-3.8-flash`). 해상도(832×1216/1024×1024)·**그림체(즐겨찾기에서 택1)**·상황프롬프트 모델·'빠른 생성 우선'은 헤더 모달에서 설정. NSFW 캐릭터면 base_caption 앞에 `rating:nsfw`. 미성년 하드차단은 base+모든 인물 캡션 합본 검사. 캐릭터 description 통짜를 외형 레퍼런스로 LLM 에 주입. 키는 **프로필 메뉴 > API 키 관리**에서 등록(NovelAI **Opus 등급** 검증(`api.novelai.net` 은 CORS 불가 → 서버) 후 암호화 저장). 고정 프롬프트/파라미터·검증·서버측 ZIP 해제는 `lib/server/novelai.ts`. 썸네일(`characters/thumbnail`)·그림체(`styles/generate`)는 아직 서버 NDJSON 스트림 경로(`generateImageStream`). Gemini 는 `gateway.order:['google','vertex']` 페일오버 — **google(AI Studio) 우선**: Vertex 는 Gemini 3.8+ 에서 NSFW 허용 지시가 든 프롬프트를 입력 단계에서 content-filter 차단(빈 응답, 페일오버 안 탐).
 - **그림체 Hub**(`/styles`): 유저가 화풍(스타일) 프롬프트를 만들어 공유·즐겨찾기. **깎기 워크숍**(`StyleWorkshopModal`)에서 화풍+상황(테스트)으로 자기 NovelAI 키로 미리보기 생성 → 공유 시 제목·메모 + **고정 표준 장면**(`THUMBNAIL_SITUATION`, SFW)으로 일관 썸네일 리롤·결정 → R2 저장. 카드(썸네일+제목+작성자) 클릭 시 상세(프롬프트+즐겨찾기). 채팅 이미지 모달은 즐겨찾기 그림체 중 택1(캐릭터 추천 그림체 상단). 캐릭터 제작 폼에서 추천 그림체 지정 가능. API: `/api/styles*`(목록·생성·상세·삭제·즐겨찾기·`mine`·`generate`).
 - **인증**: Google 로그인 → **이메일 화이트리스트(테스트용)** → 프로필 모달(이름/페르소나/취향/아바타) → DB 저장. 네비바 이름 클릭 시 재편집.
 - **게이팅**: 채팅 전송·`/api/chat`·캐릭터 생성/수정은 **로그인 필수(서버 검증)**, NSFW는 비로그인 접근 차단.

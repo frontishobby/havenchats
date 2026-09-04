@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { createGateway } from '@ai-sdk/gateway';
-import { getKeyStatus, setKey, deleteKey } from '$lib/server/db/userKeys';
+import { getKeyStatus, getDecryptedKey, setKey, deleteKey } from '$lib/server/db/userKeys';
 import { verifySubscription } from '$lib/server/novelai';
 import type { AppEnv } from '../../context';
 import { requireUser } from '../../context';
@@ -121,6 +121,21 @@ keysRouter.post('/novelai', async (c) => {
 	};
 	await setKey(db, user.id, NOVELAI_PROVIDER, key, meta);
 	return c.json({ registered: true, isOpus: true, tier: result.info.tier });
+});
+
+/**
+ * 평문 토큰 수령 — 브라우저가 NovelAI(image.novelai.net)를 직접 호출하기 위해 사용한다.
+ * 본인 키(BYOK)만 돌려주며 캐시 금지. 클라는 메모리에만 들고 있는다(localStorage 저장 금지).
+ */
+keysRouter.get('/novelai/token', async (c) => {
+	const user = requireUser(c);
+	const db = c.env.DB;
+	if (!db) return c.json({ error: 'db unavailable' }, 500);
+
+	const token = await getDecryptedKey(db, user.id, NOVELAI_PROVIDER);
+	if (!token) return c.json({ error: 'no_key', message: 'NovelAI 키가 없습니다.' }, 404);
+	c.header('cache-control', 'no-store');
+	return c.json({ token });
 });
 
 keysRouter.delete('/novelai', async (c) => {

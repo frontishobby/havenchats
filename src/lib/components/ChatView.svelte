@@ -11,7 +11,8 @@
 	} from '$lib/data/models';
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
-	import { base64ToBlob } from '$lib/imagePreview';
+	import { generateImageDirect, getNovelaiToken, NovelaiError } from '$lib/novelaiClient';
+	import type { ImagePrepareResponse, ImageCommitResponse } from '$lib/api/chat';
 	import { resized } from '$lib/imageUrl';
 	import { imgSrc } from '$lib/imageBase';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
@@ -532,8 +533,11 @@
 	}
 
 	/**
-	 * NovelAI 장면 이미지 생성 코어. NDJSON 스트림(중간 프리뷰→done/error)을 받아 대상
-	 * image_generation 메시지를 갱신한다. replaceId 가 있으면 서버가 같은 행/R2 키를 덮어쓴다.
+	 * NovelAI 장면 이미지 생성 코어(클라 직접 호출).
+	 *  1) /api/chat/image/prepare → 상황 프롬프트 + NovelAI 요청 바디(+cost/debug)
+	 *  2) 브라우저가 image.novelai.net 을 직접 호출(msgpack 스트림, 중간 프레임 프리뷰) → 최종 PNG → webp
+	 *  3) /api/chat/image/commit 에 바이너리 업로드 → R2 저장 + image_generation 행 영속
+	 * replaceId 가 있으면 commit 이 같은 행/순서를 유지하며 content 를 새 키로 갱신한다.
 	 * 대상 메시지는 id 로 매번 동적 조회($state 프록시로 수정해야 반응성 유지).
 	 */
 	async function runSceneImage(opts: {
@@ -546,22 +550,30 @@
 		recent?: { role: 'user' | 'assistant'; content: string }[];
 	}) {
 		const { sid, text, replaceId, assistantMsgId, recent } = opts;
-		let currentId = opts.msgId; // 신규 생성은 done 에서 서버 id 로 교체됨
+		let currentId = opts.msgId; // 신규 생성은 commit 응답의 서버 id 로 교체됨
 		const at = () => messages.findIndex((x) => x.id === currentId);
 		let lastPreview: string | null = null;
-		const setPreview = (b64: string) => {
+		const setPreview = (frame: Blob) => {
 			try {
-				const url = URL.createObjectURL(base64ToBlob(b64));
+				const url = URL.createObjectURL(frame);
 				if (lastPreview) URL.revokeObjectURL(lastPreview);
 				lastPreview = url;
 				const i = at();
 				if (i >= 0) messages[i].previewUrl = url;
 			} catch {
-				/* 무시 — 프리뷰 디코드 실패는 무해 */
+				/* 무시 — 프리뷰 표시 실패는 무해 */
+			}
+		};
+		const fail = (reason: string) => {
+			const i = at();
+			if (i >= 0) {
+				messages[i].pending = false;
+				messages[i].errorReason = reason;
 			}
 		};
 		try {
-			const res = await fetch('/api/chat/image', {
+			// 1) prepare — 상황 프롬프트 + NovelAI 요청 바디. 실패는 JSON 에러.
+			const prep = await fetch('/api/chat/image/prepare', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
@@ -572,100 +584,71 @@
 					stylePrompt: selectedStylePrompt,
 					promptModel: imagePromptModel,
 					replaceId: replaceId || undefined,
-					assistantMsgId: assistantMsgId || undefined,
 					debug: debug || undefined
 				})
 			});
-
-			// 상황 프롬프트 실패 등은 JSON 에러로 옴(스트림 아님).
-			const ctype = res.headers.get('content-type') ?? '';
-			if (!res.ok || !res.body || !ctype.includes('ndjson')) {
-				const d = (await res.json().catch(() => ({}))) as {
+			if (!prep.ok) {
+				const d = (await prep.json().catch(() => ({}))) as {
 					error?: string;
 					message?: string;
 					debug?: ImageDebug;
 				};
 				if (debug && d.debug) imageDebug = d.debug;
-				const i = at();
-				if (i >= 0) {
-					messages[i].pending = false;
-					messages[i].errorReason = d.message ?? '이미지 생성에 실패했습니다.';
-				}
+				fail(d.message ?? '이미지 생성에 실패했습니다.');
 				if (d.error === 'no_key') naiKeyRegistered = false;
 				return;
 			}
+			const prepared = (await prep.json()) as ImagePrepareResponse;
+			if (debug && prepared.debug) imageDebug = prepared.debug;
 
-			// NDJSON 스트림: t:frame(중간 프리뷰) → t:done/t:error.
-			const handle = (obj: Record<string, unknown>) => {
-				if (obj.t === 'frame' && typeof obj.img === 'string') {
-					setPreview(obj.img);
-				} else if (obj.t === 'done') {
-					const i = at();
-					if (i >= 0) {
-						messages[i].content = String(obj.key ?? '');
-						if (obj.id) {
-							messages[i].id = String(obj.id);
-							currentId = String(obj.id);
-						}
-						if (obj.cost != null) messages[i].cost = Number(obj.cost);
-						messages[i].pending = false;
-						messages[i].errorReason = undefined; // 재생성 성공 시 이전 에러 사유 제거
-						// previewUrl 은 일부러 유지 → 최종 /img 이미지가 load 될 때까지 placeholder 로 깔아
-						// 레이아웃 붕괴(높이 0)·스크롤 점프 방지. blob 소유권을 메시지로 이양(아래 onload 에서 revoke).
-						lastPreview = null;
-					} else if (lastPreview) {
-						URL.revokeObjectURL(lastPreview);
-						lastPreview = null;
-					}
-					if (debug && obj.debug) imageDebug = obj.debug as ImageDebug;
-				} else if (obj.t === 'error') {
-					const i = at();
-					if (i >= 0) {
-						messages[i].pending = false;
-						messages[i].errorReason = (obj.message as string) ?? '이미지 생성에 실패했습니다.';
-					}
-					if (debug && obj.debug) imageDebug = obj.debug as ImageDebug;
-					if (obj.error === 'no_key') naiKeyRegistered = false;
+			// 2) NovelAI 직접 호출(스트림 프리뷰 → 최종 → webp). 401 이면 토큰을 한 번 재수령해 재시도.
+			let result: Awaited<ReturnType<typeof generateImageDirect>>;
+			try {
+				result = await generateImageDirect(await getNovelaiToken(), prepared.payload, { onPreview: setPreview });
+			} catch (e) {
+				if (e instanceof NovelaiError && e.code === 'auth' && e.status === 401) {
+					result = await generateImageDirect(await getNovelaiToken(true), prepared.payload, { onPreview: setPreview });
+				} else {
+					throw e;
 				}
-			};
-			const reader = res.body.getReader();
-			const decoder = new TextDecoder();
-			let buf = '';
-			const drain = (flush = false) => {
-				let nl: number;
-				while ((nl = buf.indexOf('\n')) >= 0) {
-					const ln = buf.slice(0, nl).trim();
-					buf = buf.slice(nl + 1);
-					if (ln) {
-						try {
-							handle(JSON.parse(ln));
-						} catch {
-							/* 무시 */
-						}
-					}
-				}
-				if (flush && buf.trim()) {
-					try {
-						handle(JSON.parse(buf.trim()));
-					} catch {
-						/* 무시 */
-					}
-					buf = '';
-				}
-			};
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				buf += decoder.decode(value, { stream: true });
-				drain();
 			}
-			drain(true);
-		} catch (e) {
+
+			// 3) commit — 바이너리 그대로 업로드(base64 없음). 메타는 쿼리.
+			const q = new URLSearchParams({ sessionId: sid });
+			if (replaceId) q.set('replaceId', replaceId);
+			if (assistantMsgId) q.set('assistantMsgId', assistantMsgId);
+			if (prepared.cost != null) q.set('cost', String(prepared.cost));
+			const commit = await fetch(`/api/chat/image/commit?${q}`, {
+				method: 'POST',
+				headers: { 'content-type': result.blob.type },
+				body: result.blob
+			});
+			if (!commit.ok) {
+				const d = (await commit.json().catch(() => ({}))) as { message?: string };
+				fail(d.message ?? '이미지 저장에 실패했습니다.');
+				return;
+			}
+			const done = (await commit.json()) as ImageCommitResponse;
 			const i = at();
 			if (i >= 0) {
+				messages[i].content = done.key;
+				if (done.id) {
+					messages[i].id = done.id;
+					currentId = done.id;
+				}
+				if (done.cost != null) messages[i].cost = done.cost;
 				messages[i].pending = false;
-				messages[i].errorReason = e instanceof Error ? e.message : '이미지 생성에 실패했습니다.';
+				messages[i].errorReason = undefined; // 재생성 성공 시 이전 에러 사유 제거
+				// previewUrl 은 일부러 유지 → 최종 /img 이미지가 load 될 때까지 placeholder 로 깔아
+				// 레이아웃 붕괴(높이 0)·스크롤 점프 방지. blob 소유권을 메시지로 이양(아래 onload 에서 revoke).
+				lastPreview = null;
+			} else if (lastPreview) {
+				URL.revokeObjectURL(lastPreview);
+				lastPreview = null;
 			}
+		} catch (e) {
+			fail(e instanceof Error ? e.message : '이미지 생성에 실패했습니다.');
+			if (e instanceof NovelaiError && e.status === 404) naiKeyRegistered = false;
 		} finally {
 			// 성공 시엔 lastPreview=null(소유권 이양) → 최종 img onload 의 clearScenePreview 가 정리.
 			// 에러 등으로 최종 이미지가 안 들어온 경우엔 여기서 남은 프리뷰 blob 을 정리.
@@ -742,7 +725,7 @@
 
 	/**
 	 * 기존 생성 이미지를 같은 자리에서 다시 생성한다(🔄 버튼). 직전 assistant 응답을 소스로
-	 * /api/chat/image 에 replaceId 와 함께 보내 같은 행/R2 키를 덮어쓴다(순서·DB 행 유지).
+	 * /api/chat/image/prepare·commit 에 replaceId 와 함께 보내 같은 행을 새 R2 키로 갱신한다(순서·DB 행 유지).
 	 */
 	async function regenerateSceneImage(m: ChatMessage) {
 		if (streaming || regenerating || deleting) return;

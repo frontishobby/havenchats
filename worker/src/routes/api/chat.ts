@@ -32,7 +32,7 @@ import type { AppearanceLedger, Character, ChatSession, StoredMessage } from '$l
 import { pinSceneCodes } from '$lib/imageCodes';
 import { personalize } from '$lib/placeholders';
 import { notifyServerError } from '$lib/server/notify';
-import { getDecryptedKey } from '$lib/server/db/userKeys';
+import { getDecryptedKey, getKeyStatus } from '$lib/server/db/userKeys';
 import {
 	assembleTurn,
 	buildSnapshot,
@@ -51,9 +51,7 @@ import { loadRecentChats, parseRecentCursor, RECENT_PAGE_SIZE } from '$lib/serve
 import { containsMinorTerms } from '$lib/server/minorSafety';
 import {
 	buildPositivePrompt,
-	generateImage,
-	generateImageStream,
-	b64ToImage,
+	buildGeneratePayload,
 	isResolutionKey,
 	DEFAULT_RESOLUTION,
 	NEGATIVE_PROMPT,
@@ -64,7 +62,7 @@ import {
 import { IMAGE_PROMPT_MODEL_IDS, DEFAULT_IMAGE_PROMPT_MODEL_ID } from '$lib/data/models';
 import type { ImageDebug } from '$lib/chatDebug';
 import { loadChatPage } from '$lib/server/chatPageLoad';
-import type { ChatRequestBody } from '$lib/api/chat';
+import type { ChatRequestBody, ImagePrepareResponse, ImageCommitResponse } from '$lib/api/chat';
 import type { AppEnv } from '../../context';
 import { requireUser } from '../../context';
 
@@ -756,19 +754,22 @@ chatRouter.post('/vars', async (c) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// POST '/image'  — 실시간 이미지 생성 (NDJSON 스트리밍, 구 chat/image/+server.ts)
+// POST '/image/prepare' · '/image/commit'  — 실시간 이미지 생성(클라가 NovelAI 직접 호출)
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
  * 실시간 이미지 생성(로그인 필수). 채팅에서 "실시간 이미지"가 켜져 있을 때 매 assistant 턴
- * 직후 클라이언트가 호출한다.
+ * 직후 클라이언트가 호출한다. NovelAI 호출 자체는 **브라우저가 직접**(image.novelai.net 은
+ * CORS `*`) 한다 — 수 MB 의 프레임을 Worker 가 파싱/재인코딩하던 CPU 비용을 없애기 위해.
  *
  * 흐름:
- *  1) 세션 소유권 확인 + 유저 NovelAI 키 복호화.
- *  2) 선택된 LLM(기본 google/gemini-3.8-flash)으로 마지막 assistant 응답 → "상황 프롬프트"
- *     (best-effort danbooru 태그 + 필요 시 자연어). 이 비용(USD)은 메시지 cost 로 표시된다.
- *  3) 그림체 + 상황 + 퀄리티 → NovelAI 생성(고정 네거티브/파라미터). ZIP→이미지 바이트.
- *  4) R2(chatimg/<sessionId>/<msgId>.<ext>) 저장 + role=image_generation 메시지 영속.
+ *  1) prepare: 세션 소유권 확인 → 선택된 LLM(기본 google/gemini-3.8-flash)으로 마지막 assistant
+ *     응답 → "상황 프롬프트"(구조화 출력, 외형 원장 반영) → 미성년 하드차단 → NovelAI 요청 바디
+ *     (positive/char_captions/네거티브/파라미터)를 조립해 반환. 이 LLM 비용(USD)이 메시지 cost.
+ *  2) 클라: /api/keys/novelai/token 으로 받은 토큰으로 generate-image-stream(msgpack) 직접 호출,
+ *     중간 JPEG 프리뷰 표시, 최종 PNG 를 canvas 로 webp 변환.
+ *  3) commit: 이미지 바이너리를 그대로 R2(chatimg/<sessionId>/<id>.<ext>) 저장 + role=image_generation
+ *     메시지 영속(재생성이면 같은 행 content 갱신).
  */
 
 const MAX_ASSISTANT_CHARS = 6000;
@@ -978,11 +979,15 @@ async function generateObjectWithRetry(
 	throw lastErr;
 }
 
-chatRouter.post('/image', async (c) => {
+
+/**
+ * prepare 응답 — 클라가 NovelAI 를 직접 호출하는 데 필요한 것만 돌려준다.
+ * (NovelAI 요청 바디는 서버가 조립: 네거티브·파라미터·NSFW 판정 정책을 서버에 둔다)
+ */
+chatRouter.post('/image/prepare', async (c) => {
 	const user = requireUser(c);
 	const db = c.env.DB;
-	const bucket = c.env.IMAGES;
-	if (!db || !bucket) return c.json({ error: 'storage unavailable' }, 500);
+	if (!db) return c.json({ error: 'storage unavailable' }, 500);
 
 	const body = (await c.req.json().catch(() => null)) as ImageRequestBody | null;
 	const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : '';
@@ -991,17 +996,13 @@ chatRouter.post('/image', async (c) => {
 	const session = await getSession(db, sessionId, user.id);
 	if (!session) return c.json({ error: 'session not found' }, 404);
 
-	// 재생성 대상(있으면): 소유·세션·역할 검증. 통과 시 같은 행/R2 키를 덮어쓴다.
-	let replaceMsgId: string | null = null;
-	let oldImageKey: string | null = null;
+	// 재생성 대상(있으면): 소유·세션·역할 검증(commit 에서 다시 검증하지만 여기서 빨리 거른다).
 	const replaceId = typeof body?.replaceId === 'string' ? body.replaceId : '';
 	if (replaceId) {
 		const target = await getOwnedMessage(db, replaceId, user.id);
 		if (!target || target.sessionId !== sessionId || target.role !== 'image_generation') {
 			return c.json({ error: 'message not found' }, 404);
 		}
-		replaceMsgId = target.id;
-		oldImageKey = target.content || null;
 	}
 
 	// 캐릭터가 NSFW 면 positive 프롬프트 맨 앞에 rating:nsfw 를 붙인다(서버에서 판별 — 클라 위조 방지).
@@ -1018,7 +1019,6 @@ chatRouter.post('/image', async (c) => {
 
 	const assistantText = (body?.assistantText ?? '').trim().slice(0, MAX_ASSISTANT_CHARS);
 	if (!assistantText) return c.json({ error: 'empty assistant text' }, 400);
-	const assistantMsgId = typeof body?.assistantMsgId === 'string' ? body.assistantMsgId : '';
 
 	// 최근 대화 블록(유저 입력 포함) — 그릴 순간의 맥락. 화자 라벨은 유저=페르소나/이름, 캐릭터=이름.
 	const userLabel = user.personaName?.trim() || user.name?.trim() || '나';
@@ -1037,9 +1037,8 @@ chatRouter.post('/image', async (c) => {
 	const stylePrompt = (body?.stylePrompt ?? '').slice(0, MAX_STYLE_CHARS);
 	const promptModel = pickPromptModel(body?.promptModel);
 
-	// NovelAI 키 — 없으면 안내(클라가 등록 유도).
-	const naiKey = await getDecryptedKey(db, user.id, 'novelai');
-	if (!naiKey) {
+	// NovelAI 키 등록 여부만 확인(평문은 /api/keys/novelai/token 으로 클라가 별도 수령).
+	if (!(await getKeyStatus(db, user.id, 'novelai')).registered) {
 		return c.json(
 			{ error: 'no_key', message: 'NovelAI 키가 없습니다. 프로필 메뉴 > API 키 관리에서 등록하세요.' },
 			400
@@ -1057,7 +1056,7 @@ chatRouter.post('/image', async (c) => {
 		);
 	}
 
-	// 외형 원장(세션 누적) — 동적 NPC 외형 고정용. 작업 사본으로 변이 후, 변경 시 NovelAI 전에 영속.
+	// 외형 원장(세션 누적) — 동적 NPC 외형 고정용. 작업 사본으로 변이 후, 변경 시 응답 전에 영속.
 	const ledger: AppearanceLedger = { ...(session.appearances ?? {}) };
 	let ledgerDirty = false;
 	const knownBlock = buildKnownBlock(ledger); // LLM 주입용 [Known characters] 블록
@@ -1171,13 +1170,12 @@ chatRouter.post('/image', async (c) => {
 		finishReason = (result.finishReason as string | undefined) ?? null;
 		warnings = result.warnings ?? [];
 		cost = parseGatewayCost(result.providerMetadata);
-		// 상황프롬프트 비용을 유저 일일 카운터에 가산(NovelAI 실패해도 Gemini 비용은 발생).
 	} catch (e) {
 		// Workers 로그는 Error 객체를 스택만 남기고 직렬화하므로 name/message/cause 를 문자열로 남긴다.
 		llmError = describeError(e);
 		console.error('[chat/image] situation prompt error:', llmError);
 		notifyServerError({
-			context: 'generateObject /api/chat/image',
+			context: 'generateObject /api/chat/image/prepare',
 			error: e,
 			extra: { session: sessionId, user: user.id, model: promptModel },
 			waitUntil: getWaitUntil()
@@ -1216,7 +1214,7 @@ chatRouter.post('/image', async (c) => {
 	if (containsMinorTerms([positive, ...charCaptions].join(', '))) {
 		console.warn(`[chat/image] minor-term hard block (user=${user.id}, session=${sessionId})`);
 		notifyServerError({
-			context: 'minor-term hard block /api/chat/image',
+			context: 'minor-term hard block /api/chat/image/prepare',
 			error: new Error('blocked: minor term in image prompt'),
 			extra: { session: sessionId, user: user.id },
 			waitUntil: getWaitUntil()
@@ -1227,7 +1225,7 @@ chatRouter.post('/image', async (c) => {
 		);
 	}
 
-	// 외형 원장 변경분 영속 — 다음 턴 일관성. NovelAI 전에 inline 저장(빠른 재요청 레이스 방지).
+	// 외형 원장 변경분 영속 — 다음 턴 일관성. 응답 전에 inline 저장(빠른 재요청 레이스 방지).
 	if (ledgerDirty) {
 		try {
 			await updateAppearances(db, sessionId, ledger);
@@ -1236,92 +1234,100 @@ chatRouter.post('/image', async (c) => {
 		}
 	}
 
-	// ── 2) NovelAI 생성(스트리밍) ──
-	// NDJSON 스트림으로 중간 프레임(t:frame)을 흘려보내 진행 상황을 보여주고, 끝에 R2 저장 후
-	// t:done(또는 t:error). 스트리밍 미지원/실패 시 비스트리밍 generateImage 로 폴백한다.
-	const sid = sessionId; // 클로저에서 non-null 보장
-	const enc = new TextEncoder();
-	const line = (obj: unknown) => enc.encode(JSON.stringify(obj) + '\n');
+	const res: ImagePrepareResponse = {
+		payload: buildGeneratePayload(positive, charCaptions, resolution),
+		cost: cost ?? null,
+		debug: makeDebug(positive)
+	};
+	return c.json(res);
+});
 
-	const stream = new ReadableStream({
-		async start(controller) {
-			// 2-1) 스트리밍 시도(프레임 emit, 마지막 프레임 = 최종 후보).
-			let finalB64: string | null = null;
-			try {
-				for await (const b64 of generateImageStream(naiKey, { positive, charCaptions, resolution })) {
-					finalB64 = b64;
-					controller.enqueue(line({ t: 'frame', img: b64 }));
-				}
-			} catch (e) {
-				console.warn('[chat/image] 스트리밍 실패 → 비스트리밍 폴백:', String(e));
-				finalB64 = null;
-			}
+/** commit 이 받는 이미지 MIME → R2 확장자. 그 외는 거부. */
+const COMMIT_EXT: Record<string, 'webp' | 'png' | 'jpg'> = {
+	'image/webp': 'webp',
+	'image/png': 'png',
+	'image/jpeg': 'jpg'
+};
+/** commit 바디 상한(bytes). 1024×1024 PNG 도 넉넉히 들어오는 크기. */
+const COMMIT_MAX_BYTES = 12 * 1024 * 1024;
 
-			// 2-2) 최종 이미지 확정(스트림 성공 시 마지막 프레임, 실패 시 비스트리밍 재생성).
-			let image: { bytes: Uint8Array; ext: string; contentType: string } | null = null;
-			if (finalB64) {
-				try {
-					image = b64ToImage(finalB64);
-				} catch {
-					image = null;
-				}
-			}
-			if (!image) {
-				const gen = await generateImage(naiKey, { positive, charCaptions, resolution });
-				if (!gen.ok) {
-					controller.enqueue(line({ t: 'error', error: 'novelai', message: gen.message, debug: makeDebug(positive) }));
-					controller.close();
-					return;
-				}
-				image = gen.image;
-			}
+/**
+ * 최종 이미지 바이트를 R2 에 저장하고 image_generation 메시지를 영속한다.
+ * 메타는 쿼리(sessionId·replaceId·assistantMsgId·cost), 바디는 이미지 바이너리 그대로(JSON/base64 없음).
+ */
+chatRouter.post('/image/commit', async (c) => {
+	const user = requireUser(c);
+	const db = c.env.DB;
+	const bucket = c.env.IMAGES;
+	if (!db || !bucket) return c.json({ error: 'storage unavailable' }, 500);
 
-			// 2-3) R2 저장 + 메시지 영속.
-			// R2 키는 항상 새 무작위 id 로 만든다 — 재생성 때 같은 키를 덮어쓰면 /img 의 1일 캐시·엣지
-			// 캐시가 옛 이미지를 계속 서빙하므로(URL 동일), 새 키로 만들어 캐시 충돌을 피한다.
-			const keyId = crypto.randomUUID();
-			const key = `chatimg/${sid}/${keyId}.${image.ext}`;
-			try {
-				await bucket.put(key, image.bytes, { httpMetadata: { contentType: image.contentType } });
-			} catch (e) {
-				console.error('[chat/image] R2 put 실패:', e);
-				controller.enqueue(line({ t: 'error', error: 'storage', message: '이미지 저장에 실패했습니다.' }));
-				controller.close();
-				return;
-			}
-			if (replaceMsgId) {
-				// 같은 메시지 행(순서 유지)의 content 만 새 키로 갱신하고 이전 오브젝트는 정리.
-				await updateMessageContentCost(db, replaceMsgId, key, cost);
-				if (oldImageKey && oldImageKey !== key) {
-					try {
-						await bucket.delete(oldImageKey);
-					} catch {
-						/* 무시 — 정리 실패는 무해 */
-					}
-				}
-			} else {
-				// assistant 영속(비동기 onFinish/waitUntil)이 아직이면 이미지가 먼저 append 돼 seq 가
-				// 역전된다(새로고침 시 유저→이미지→응답 순서로 뒤바뀜). 특히 '빠른 생성 우선'은 응답 중간
-				// (600자)에 발사하므로, 긴 응답이 계속 스트리밍되는 동안 NovelAI(빠르면 ~7s)가 먼저 끝나
-				// 이미지가 앞설 수 있다. 그 assistant 행이 박힐 때까지 기다린 뒤 append → 항상 응답 다음 seq.
-				// 한도(~30s, 긴 응답 스트리밍 시간 커버)를 넘기면(응답 에러로 영속이 스킵된 경우 등) 그냥 진행.
-				if (assistantMsgId) {
-					for (let i = 0; i < 120 && !(await messageExists(db, assistantMsgId, sid)); i++) {
-						await new Promise((r) => setTimeout(r, 250));
-					}
-				}
-				await appendMessage(db, sid, 'image_generation', key, undefined, undefined, cost, keyId);
-			}
-			// done.id = 클라가 매칭할 메시지 행 id (재생성이면 기존 행, 신규면 키 id 와 동일).
-			const rowId = replaceMsgId ?? keyId;
-			controller.enqueue(line({ t: 'done', id: rowId, key, cost: cost ?? null, debug: makeDebug(positive) }));
-			controller.close();
+	const sessionId = c.req.query('sessionId') ?? '';
+	if (!sessionId) return c.json({ error: 'session required' }, 400);
+	const session = await getSession(db, sessionId, user.id);
+	if (!session) return c.json({ error: 'session not found' }, 404);
+
+	const contentType = (c.req.header('content-type') ?? '').split(';')[0].trim().toLowerCase();
+	const ext = COMMIT_EXT[contentType];
+	if (!ext) return c.json({ error: 'unsupported image type' }, 415);
+	const declared = Number(c.req.header('content-length') ?? '0');
+	if (declared > COMMIT_MAX_BYTES) return c.json({ error: 'image too large' }, 413);
+	const bytes = await c.req.raw.arrayBuffer();
+	if (bytes.byteLength === 0) return c.json({ error: 'empty body' }, 400);
+	if (bytes.byteLength > COMMIT_MAX_BYTES) return c.json({ error: 'image too large' }, 413);
+
+	// 재생성 대상(있으면): 소유·세션·역할 검증. 통과 시 같은 행의 content 만 새 키로 갱신한다.
+	let replaceMsgId: string | null = null;
+	let oldImageKey: string | null = null;
+	const replaceId = c.req.query('replaceId') ?? '';
+	if (replaceId) {
+		const target = await getOwnedMessage(db, replaceId, user.id);
+		if (!target || target.sessionId !== sessionId || target.role !== 'image_generation') {
+			return c.json({ error: 'message not found' }, 404);
 		}
-	});
+		replaceMsgId = target.id;
+		oldImageKey = target.content || null;
+	}
+	const assistantMsgId = c.req.query('assistantMsgId') ?? '';
+	const costRaw = Number(c.req.query('cost') ?? '');
+	const cost = Number.isFinite(costRaw) && costRaw >= 0 ? costRaw : undefined;
 
-	return new Response(stream, {
-		headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' }
-	});
+	// R2 키는 항상 새 무작위 id 로 만든다 — 재생성 때 같은 키를 덮어쓰면 /img 의 1일 캐시·엣지
+	// 캐시가 옛 이미지를 계속 서빙하므로(URL 동일), 새 키로 만들어 캐시 충돌을 피한다.
+	const keyId = crypto.randomUUID();
+	const key = `chatimg/${sessionId}/${keyId}.${ext}`;
+	try {
+		await bucket.put(key, bytes, { httpMetadata: { contentType } });
+	} catch (e) {
+		console.error('[chat/image] R2 put 실패:', e);
+		return c.json({ error: 'storage', message: '이미지 저장에 실패했습니다.' }, 500);
+	}
+
+	if (replaceMsgId) {
+		// 같은 메시지 행(순서 유지)의 content 만 새 키로 갱신하고 이전 오브젝트는 정리.
+		await updateMessageContentCost(db, replaceMsgId, key, cost);
+		if (oldImageKey && oldImageKey !== key) {
+			try {
+				await bucket.delete(oldImageKey);
+			} catch {
+				/* 무시 — 정리 실패는 무해 */
+			}
+		}
+	} else {
+		// assistant 영속(비동기 onFinish/waitUntil)이 아직이면 이미지가 먼저 append 돼 seq 가
+		// 역전된다(새로고침 시 유저→이미지→응답 순서로 뒤바뀜). 특히 '빠른 생성 우선'은 응답 중간
+		// (600자)에 발사하므로, 긴 응답이 계속 스트리밍되는 동안 NovelAI(빠르면 ~7s)가 먼저 끝나
+		// 이미지가 앞설 수 있다. 그 assistant 행이 박힐 때까지 기다린 뒤 append → 항상 응답 다음 seq.
+		// 한도(~30s, 긴 응답 스트리밍 시간 커버)를 넘기면(응답 에러로 영속이 스킵된 경우 등) 그냥 진행.
+		if (assistantMsgId) {
+			for (let i = 0; i < 120 && !(await messageExists(db, assistantMsgId, sessionId)); i++) {
+				await new Promise((r) => setTimeout(r, 250));
+			}
+		}
+		await appendMessage(db, sessionId, 'image_generation', key, undefined, undefined, cost, keyId);
+	}
+	// id = 클라가 매칭할 메시지 행 id (재생성이면 기존 행, 신규면 키 id 와 동일).
+	const res: ImageCommitResponse = { id: replaceMsgId ?? keyId, key, cost: cost ?? null };
+	return c.json(res);
 });
 
 // ════════════════════════════════════════════════════════════════════════════

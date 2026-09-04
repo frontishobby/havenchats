@@ -50,3 +50,20 @@ NovelAI V4.5 **멀티 캐릭터 기능**(`char_captions`)을 사용하도록 변
 - **안전**: base+모든 인물 캡션을 합쳐 미성년 하드차단(`containsMinorTerms`) 검사. 한글/잡음은 필드별 sanitize.
 - 썸네일(`characters/thumbnail`)·그림체(`styles/generate`)는 단일 표준 장면이라 기존 flat 경로 유지
   (`generateImage`/`generateImageStream` 의 `charCaptions` 는 옵셔널 — 미전달 시 char_captions:[]).
+---
+
+## 업데이트: 클라 직접 호출(msgpack) + webp 커밋 (2026-09)
+
+Worker 가 NovelAI SSE(base64) 프레임을 파싱해 NDJSON 으로 재전송하던 구조는 요청당 CPU 400~1,200ms 로
+Workers 무료 플랜(10ms)에서 잘렸다. 채팅 이미지 경로를 **브라우저 직접 호출**로 바꿨다.
+
+- `POST /api/chat/image/prepare` — 세션 검증 → 상황 프롬프트(LLM, 외형 원장) → 미성년 하드차단 →
+  **NovelAI 요청 바디**(`buildGeneratePayload`) + `cost`(+debug) 반환. NovelAI 호출 없음.
+- `GET /api/keys/novelai/token` — 본인 토큰 평문 수령(`cache-control: no-store`). 클라는 모듈 메모리에만 캐시.
+- 클라(`lib/novelaiClient.ts`): `image.novelai.net/ai/generate-image-stream` 에 `parameters.stream='msgpack'`
+  으로 직접 요청 → 4B BE 길이 프리픽스 + msgpack(`event_type`, `image` bin). intermediate(JPEG)=프리뷰,
+  final(PNG)=결과. 스트림 실패 시 `/ai/generate-image`(ZIP, fflate) 폴백. 401/402/429 는 폴백 없이 에러.
+  최종 PNG 는 canvas `toBlob('image/webp', 0.9)` 로 변환(미지원 브라우저면 PNG 유지).
+- `POST /api/chat/image/commit?sessionId&replaceId&assistantMsgId&cost` — 바디=이미지 바이너리
+  (webp/png/jpeg, 12MB 상한) → R2 `chatimg/<sessionId>/<id>.<ext>` + `image_generation` 행(assistant seq 대기 로직 유지).
+- 썸네일(`characters/thumbnail`)·그림체(`styles/generate`)는 아직 서버 NDJSON 경로(`generateImageStream`) — 후속.
