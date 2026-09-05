@@ -3,6 +3,8 @@
  * 서버가 NDJSON 으로 흘려보내는 base64 프레임을 Blob/object URL 로 바꿔 <img> 에 띄운다.
  */
 
+import type { WebpEncodeRequest, WebpEncodeResponse } from './webpEncode.worker';
+
 /** base64(또는 data URL) → Uint8Array. */
 export function base64ToBytes(b64: string): Uint8Array {
 	const clean = (b64.includes(',') ? b64.slice(b64.indexOf(',') + 1) : b64).replace(/\s/g, '');
@@ -48,11 +50,15 @@ export async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * 이미지 Blob → webp Blob(canvas 변환, 클라 전용).
- * NovelAI 생성 결과(보통 PNG)를 썸네일 업로드용 webp 로 바꾼다(폼은 webp/avif 만 허용).
- * 해상도는 보존한다(832×1216 등). canvas 미지원/디코드 실패 시 throw.
+ * 이미지 Blob → webp Blob(클라 전용). 항상 image/webp 를 돌려주거나 throw 한다.
+ * NovelAI 생성 결과(보통 PNG)를 업로드용 webp 로 바꾼다. 해상도는 보존(832×1216 등).
+ *
+ * 1) canvas.toBlob('image/webp') — Blink/Gecko(데스크톱·안드로이드 크롬 등)는 네이티브 인코딩.
+ * 2) WebKit(사파리·iOS 의 모든 브라우저 — iOS 크롬 포함)은 webp 인코딩 미지원이라 PNG 를 돌려준다
+ *    → libwebp WASM 워커(`webpEncode.worker.ts`)로 인코딩. WASM 은 이 경로에서만 로드된다.
  */
 export async function blobToWebp(blob: Blob, quality = 0.9): Promise<Blob> {
+	if (blob.type === 'image/webp') return blob;
 	const bitmap = await createImageBitmap(blob);
 	try {
 		const canvas = document.createElement('canvas');
@@ -61,14 +67,60 @@ export async function blobToWebp(blob: Blob, quality = 0.9): Promise<Blob> {
 		const ctx = canvas.getContext('2d');
 		if (!ctx) throw new Error('canvas 컨텍스트를 만들 수 없습니다.');
 		ctx.drawImage(bitmap, 0, 0);
-		return await new Promise<Blob>((resolve, reject) => {
-			canvas.toBlob(
-				(b) => (b ? resolve(b) : reject(new Error('webp 변환에 실패했습니다.'))),
-				'image/webp',
-				quality
-			);
-		});
+		const native = await new Promise<Blob | null>((resolve) =>
+			canvas.toBlob(resolve, 'image/webp', quality)
+		);
+		if (native && native.type === 'image/webp' && native.size > 0) return native;
+
+		// WebKit 폴백 — 픽셀을 워커로 넘겨 libwebp WASM 인코딩.
+		const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+		const buf = await encodeWebpInWorker(img, Math.round(quality * 100));
+		if (buf.byteLength === 0) throw new Error('webp 변환에 실패했습니다.');
+		return new Blob([buf], { type: 'image/webp' });
 	} finally {
 		bitmap.close?.();
 	}
+}
+
+// ── WASM webp 워커(지연 생성 싱글턴) ────────────────────────────────────────
+let webpWorker: Worker | null = null;
+let webpReqSeq = 0;
+const webpPending = new Map<number, { resolve: (b: ArrayBuffer) => void; reject: (e: Error) => void }>();
+
+function getWebpWorker(): Worker {
+	if (webpWorker) return webpWorker;
+	const w = new Worker(new URL('./webpEncode.worker.ts', import.meta.url), { type: 'module' });
+	w.onmessage = (e: MessageEvent<WebpEncodeResponse>) => {
+		const p = webpPending.get(e.data.id);
+		if (!p) return;
+		webpPending.delete(e.data.id);
+		if ('error' in e.data) p.reject(new Error(e.data.error));
+		else p.resolve(e.data.buf);
+	};
+	w.onerror = (ev) => {
+		// 워커 자체가 죽으면 대기 중인 요청을 전부 실패 처리하고 다음 호출에서 새로 만든다.
+		const err = new Error(ev.message || 'webp 워커 오류');
+		for (const p of webpPending.values()) p.reject(err);
+		webpPending.clear();
+		w.terminate();
+		if (webpWorker === w) webpWorker = null;
+	};
+	webpWorker = w;
+	return w;
+}
+
+function encodeWebpInWorker(img: ImageData, quality: number): Promise<ArrayBuffer> {
+	const id = ++webpReqSeq;
+	const worker = getWebpWorker();
+	return new Promise<ArrayBuffer>((resolve, reject) => {
+		webpPending.set(id, { resolve, reject });
+		const req: WebpEncodeRequest = {
+			id,
+			data: img.data,
+			width: img.width,
+			height: img.height,
+			quality
+		};
+		worker.postMessage(req, [img.data.buffer as ArrayBuffer]);
+	});
 }

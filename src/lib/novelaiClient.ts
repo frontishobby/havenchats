@@ -9,7 +9,8 @@
  *    samp_ix, step_ix, gen_id, sigma, image: bin }`. intermediate = JPEG, final = PNG (바이너리 그대로,
  *    base64 없음).
  *  - 폴백: 스트림 실패(엔드포인트 미지원·프레임 없음) 시 `/ai/generate-image` (ZIP) → fflate 로 첫 파일.
- *  - 최종 PNG 는 canvas 로 webp 변환(`blobToWebp`) — 저장량·로딩 절감. webp 인코딩 미지원 브라우저면 PNG 유지.
+ *  - 최종 PNG 는 webp 변환(`blobToWebp`: canvas → WebKit 이면 libwebp WASM 워커 폴백) — 저장량·로딩 절감.
+ *    변환 자체가 실패한 경우에만 원본 PNG 유지.
  */
 
 import { decode } from '@msgpack/msgpack';
@@ -185,7 +186,6 @@ export async function generateImageDirect(
 	let blob = original;
 	try {
 		const webp = await blobToWebp(original, opts.webpQuality ?? 0.9);
-		// Safari 등 webp 인코딩 미지원 브라우저는 다른 타입(png)을 돌려준다 → 원본 유지.
 		if (webp.type === 'image/webp' && webp.size > 0) blob = webp;
 	} catch (e) {
 		console.warn('[novelai] webp 변환 실패 — 원본 업로드:', String(e));

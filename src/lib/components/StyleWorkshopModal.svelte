@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
-	import { base64ToBlob } from '$lib/imagePreview';
+	import { base64ToBlob, blobToWebp } from '$lib/imagePreview';
 	import { NAI_MODELS, DEFAULT_NAI_MODEL, getNaiModel } from '$lib/naiModels';
 
 	let {
@@ -148,10 +148,17 @@
 				thumbUrl = URL.createObjectURL(blob);
 			});
 			if (finalBlob) {
-				thumbBlob = finalBlob;
-				thumbExt = finalBlob.type.includes('png')
+				// 업로드용 webp 변환(채팅·캐릭터 썸네일과 동일). 실패 시 원본(보통 PNG) 그대로.
+				let upload = finalBlob;
+				try {
+					upload = await blobToWebp(finalBlob);
+				} catch (e) {
+					console.warn('[workshop] webp 변환 실패 — 원본 업로드:', String(e));
+				}
+				thumbBlob = upload;
+				thumbExt = upload.type.includes('png')
 					? 'png'
-					: finalBlob.type.includes('jpeg')
+					: upload.type.includes('jpeg')
 						? 'jpg'
 						: 'webp';
 			}

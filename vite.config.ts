@@ -6,6 +6,8 @@ import { defineConfig } from 'vite';
 //   터미널2: npm run dev         (vite — SPA HMR, 아래 프록시로 Worker 연결)
 export default defineConfig({
 	plugins: [sveltekit()],
+	// webp WASM 인코더 워커(src/lib/webpEncode.worker.ts)가 내부에서 동적 import 를 쓰므로 ES 모듈 워커로 번들.
+	worker: { format: 'es' },
 	server: {
 		proxy: {
 			'/api': 'http://localhost:8787',
