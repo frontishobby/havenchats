@@ -13,7 +13,12 @@
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { generateImageDirect, getNovelaiToken, NovelaiError } from '$lib/novelaiClient';
-	import type { ImagePrepareResponse, ImageCommitResponse, RewriteResponse } from '$lib/api/chat';
+	import type {
+		ImagePrepareResponse,
+		ImageCommitResponse,
+		RewriteResponse,
+		SuggestResponse
+	} from '$lib/api/chat';
 	import { resized } from '$lib/imageUrl';
 	import { imgSrc } from '$lib/imageBase';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
@@ -400,6 +405,11 @@
 	let showFilterSettings = $state(false); // 입력 필터 모달
 	let filterModelOpen = $state(false);
 	let rewriting = $state(false); // 변환 요청 진행 중(전송 직전)
+	// ── 입력 제안(말풍선 버튼) ── 지금 장면에서 '나'가 할 법한 입력 후보 3개(/api/chat/suggest, DeepSeek V4 Pro).
+	// 고르면 입력창에 채워지고(바로 전송 X — 고쳐 보낼 수 있게), 제안 비용은 다음 전송의 inputCost 에 합산.
+	let suggesting = $state(false);
+	let suggestions = $state<string[]>([]);
+	let pendingSuggestCost = 0;
 	const filterActive = $derived(filterEnabled && filterPrompt.trim().length > 0);
 	const currentFilterModel = $derived(getModel(filterModel) ?? MODELS[0]);
 	let imageEnabled = $state(false); // 켜져 있으면 매 assistant 턴마다 이미지 생성
@@ -633,6 +643,48 @@
 		const out = (d.text ?? '').trim();
 		if (!out) throw new Error('빈 결과');
 		return { text: out, cost: d.cost ?? null };
+	}
+	/** 말풍선 버튼: 현재 장면 기준 유저 입력 후보를 받아 컴포저 위에 칩으로 띄운다. */
+	async function fetchSuggestions() {
+		if (suggesting || streaming) return;
+		if (!data.user) {
+			openLogin();
+			return;
+		}
+		sendError = null;
+		suggesting = true;
+		try {
+			const res = await fetch('/api/chat/suggest', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					characterId: character.id,
+					sessionId: sessionId ?? undefined,
+					openingIndex: data.openingIndex
+				})
+			});
+			if (!res.ok) {
+				const j = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+				if (j.error === 'no_gateway_key') apiKeyModal.open = true;
+				throw new Error(j.message ?? `HTTP ${res.status}`);
+			}
+			const d = (await res.json()) as SuggestResponse;
+			const list = (d.suggestions ?? []).map((x) => x.trim()).filter(Boolean);
+			if (list.length === 0) throw new Error('빈 결과');
+			suggestions = list;
+			if (d.cost) pendingSuggestCost += d.cost;
+		} catch (e) {
+			sendError = `입력 제안 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`;
+		} finally {
+			suggesting = false;
+		}
+	}
+	async function pickSuggestion(text: string) {
+		input = text;
+		suggestions = [];
+		await tick();
+		autoGrow();
+		textarea?.focus();
 	}
 	function selectImgModel(id: string) {
 		imagePromptModel = id;
@@ -1073,9 +1125,14 @@
 		scroller.scrollTo({ top: target, behavior: 'smooth' });
 	}
 
-	async function send() {
+	/**
+	 * 전송. 입력이 비어 있고 allowContinue 면 **이어가기**(자동 진행): 유저 메시지 없이 서버에
+	 * continue=true 를 보내 캐릭터가 직전 장면을 이어 쓴다(전송 버튼만 — Enter 는 빈 입력이면 무시).
+	 */
+	async function send(opts?: { allowContinue?: boolean }) {
 		const original = input.trim();
-		if (!original || streaming) return;
+		const continueTurn = !original && opts?.allowContinue === true;
+		if ((!original && !continueTurn) || streaming) return;
 
 		// 비로그인 상태에서는 전송 대신 로그인 모달을 띄운다 (입력값은 유지)
 		if (!data.user) {
@@ -1083,12 +1140,18 @@
 			return;
 		}
 
+		// 이어갈 장면(오프닝/응답)이 하나도 없으면 이어가기 불가.
+		if (continueTurn && !messages.some((m) => m.role === 'assistant' && m.content.trim())) {
+			sendError = '이어갈 장면이 없어요. 먼저 한마디 보내 주세요.';
+			return;
+		}
 		// 너무 긴 메시지는 서버가 413 으로 거부하므로 전송 전에 막는다 (입력값 유지)
 		if (original.length > MAX_USER_MSG_CHARS) {
 			sendError = `메시지가 너무 길어요. ${MAX_USER_MSG_CHARS.toLocaleString()}자 이내로 줄여주세요. (현재 ${original.length.toLocaleString()}자)`;
 			return;
 		}
 		sendError = null;
+		suggestions = [];
 
 		input = '';
 		resetTextareaHeight();
@@ -1099,14 +1162,17 @@
 		const assistantMsgId = crypto.randomUUID();
 		const userIdx = messages.length;
 		// 입력 필터가 켜져 있으면 원문을 먼저 버블에 띄우고(pending 표시) 변환 결과로 갈아끼운다.
-		messages.push({ id: userMsgId, role: 'user', content: original, pending: filterActive || undefined });
+		// 이어가기 턴은 유저 버블이 없다.
+		if (!continueTurn) {
+			messages.push({ id: userMsgId, role: 'user', content: original, pending: filterActive || undefined });
+		}
 		streaming = true;
-		await scrollUserToTop(userMsgId);
+		if (!continueTurn) await scrollUserToTop(userMsgId);
 
 		// ── 입력 필터: 전송 직전 원문을 지시 문체로 변환. 실패 시 전송 중단·버블 제거·입력 복원.
 		let text = original;
 		let inputCost: number | undefined;
-		if (filterActive) {
+		if (filterActive && !continueTurn) {
 			rewriting = true;
 			try {
 				const r = await rewriteInput(original);
@@ -1125,6 +1191,11 @@
 			}
 			rewriting = false;
 			messages[userIdx].pending = false;
+		}
+		// 입력 제안(말풍선) 비용은 다음 유저 메시지 행에 합산해 기록(이어가기 턴엔 유저 행이 없어 보류).
+		if (!continueTurn && pendingSuggestCost > 0) {
+			inputCost = (inputCost ?? 0) + pendingSuggestCost;
+			pendingSuggestCost = 0;
 		}
 
 		// assistant placeholder. $state 배열은 push 시 프록시로 감싸므로,
@@ -1149,11 +1220,12 @@
 					characterId: character.id,
 					sessionId: sessionId ?? undefined,
 					text,
+					continue: continueTurn || undefined,
 					openingIndex: data.openingIndex,
 					model,
 					maxSentences,
 					userActs,
-					userMsgId,
+					userMsgId: continueTurn ? undefined : userMsgId,
 					assistantMsgId,
 					memory: newSessionMemory,
 					inputCost,
@@ -2332,6 +2404,17 @@
 				</button>
 			</div>
 		{/if}
+		{#if suggestions.length > 0}
+			<!-- 입력 제안 칩 — 고르면 입력창에 채워진다(고쳐서 보낼 수 있게 바로 전송하진 않음). -->
+			<div class="suggest-bar" role="group" aria-label="입력 제안">
+				{#each suggestions as sug, i (i)}
+					<button class="suggest-chip" onclick={() => pickSuggestion(sug)} title="입력창에 넣기">
+						{sug}
+					</button>
+				{/each}
+				<button class="suggest-close" onclick={() => (suggestions = [])} aria-label="제안 닫기">✕</button>
+			</div>
+		{/if}
 		<div class="composer-inner">
 			<textarea
 				bind:this={textarea}
@@ -2341,12 +2424,44 @@
 					if (sendError) sendError = null;
 				}}
 				onkeydown={onKeydown}
-				placeholder={filterActive ? '행동이나 대사를 입력하세요… (필터로 변환 후 전송)' : '행동이나 대사를 입력하세요…'}
+				placeholder={filterActive
+					? '행동이나 대사를 입력하세요… (필터로 변환 후 전송)'
+					: '행동이나 대사를 입력하세요… (비워두고 전송하면 이어가기)'}
 				maxlength={MAX_USER_MSG_CHARS}
 				rows="1"
 			></textarea>
-			<button class="send" onclick={send} disabled={!input.trim() || streaming} aria-label="전송">
-				↑
+			<button
+				class="suggest"
+				class:busy={suggesting}
+				onclick={fetchSuggestions}
+				disabled={suggesting || streaming}
+				aria-label="입력 제안 받기"
+				title="지금 장면에서 할 법한 입력 3개 제안"
+			>
+				<svg
+					viewBox="0 0 24 24"
+					width="18"
+					height="18"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.6-.8L3 21l1.9-4.6A8.3 8.3 0 0 1 3 11.5a8.4 8.4 0 0 1 9-8.4 8.4 8.4 0 0 1 9 8.4Z" />
+					<path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" />
+				</svg>
+			</button>
+			<button
+				class="send"
+				class:cont={!input.trim()}
+				onclick={() => send({ allowContinue: true })}
+				disabled={streaming}
+				aria-label={input.trim() ? '전송' : '이어서 진행'}
+				title={input.trim() ? '전송' : '입력 없이 이어서 진행'}
+			>
+				{input.trim() ? '↑' : '»'}
 			</button>
 		</div>
 		{#if sendError}
@@ -3428,6 +3543,92 @@
 	}
 	.send:not(:disabled):hover {
 		background: var(--accent-hover);
+	}
+	/* 입력이 비어 있을 때의 전송 버튼 = 이어가기(») — 은은하게 구분 */
+	.send.cont {
+		background: color-mix(in srgb, var(--accent) 55%, var(--bg-card));
+		font-size: 1.35rem;
+		line-height: 1;
+		padding-bottom: 2px;
+	}
+	.send.cont:not(:disabled):hover {
+		background: var(--accent);
+	}
+	/* 입력 제안 버튼(말풍선) — 전송 버튼 왼쪽 */
+	.suggest {
+		width: 38px;
+		height: 38px;
+		flex-shrink: 0;
+		border: none;
+		border-radius: 50%;
+		background: transparent;
+		color: var(--text-dim);
+		display: grid;
+		place-items: center;
+		cursor: pointer;
+		transition:
+			color 0.15s ease,
+			background 0.15s ease;
+	}
+	.suggest:not(:disabled):hover {
+		color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
+	}
+	.suggest:disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+	.suggest.busy svg {
+		animation: suggest-pulse 1s ease-in-out infinite;
+	}
+	@keyframes suggest-pulse {
+		0%,
+		100% {
+			opacity: 0.35;
+		}
+		50% {
+			opacity: 1;
+		}
+	}
+	/* 입력 제안 칩 — 컴포저 위 */
+	.suggest-bar {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin: 0 0 8px;
+		align-items: flex-start;
+	}
+	.suggest-chip {
+		flex: 1 1 100%;
+		text-align: left;
+		border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+		background: color-mix(in srgb, var(--accent) 7%, var(--bg-card));
+		color: var(--text);
+		border-radius: 14px;
+		padding: 8px 12px;
+		font-size: 0.85rem;
+		line-height: 1.45;
+		cursor: pointer;
+		transition:
+			border-color 0.15s ease,
+			background 0.15s ease;
+	}
+	.suggest-chip:hover {
+		border-color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 14%, var(--bg-card));
+	}
+	.suggest-close {
+		flex: 0 0 auto;
+		margin-left: auto;
+		background: none;
+		border: none;
+		color: var(--text-faint);
+		font-size: 0.8rem;
+		padding: 2px 6px;
+		cursor: pointer;
+	}
+	.suggest-close:hover {
+		color: var(--text);
 	}
 	.disclaimer {
 		text-align: center;

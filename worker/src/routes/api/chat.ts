@@ -78,7 +78,9 @@ import type {
 	ImagePrepareResponse,
 	ImageCommitResponse,
 	RewriteRequestBody,
-	RewriteResponse
+	RewriteResponse,
+	SuggestRequestBody,
+	SuggestResponse
 } from '$lib/api/chat';
 import type { AppEnv } from '../../context';
 import { requireUser } from '../../context';
@@ -144,13 +146,16 @@ chatRouter.post('/', async (c) => {
 		characterDefaultVars = await getCharacterDefaultVars(db, character.id);
 	}
 
-	const text = (body.text ?? '').trim();
-	if (!text) {
+	// 이어가기(자동 진행): 유저 메시지 없이 직전 장면을 캐릭터가 이어 쓴다(빈 입력으로 전송 버튼).
+	// text 는 저장하지 않고, 조립(buildMessages)이 마지막 assistant 뒤에 이어가기 지시를 붙인다.
+	const continueTurn = body.continue === true;
+	const text = continueTurn ? '' : (body.text ?? '').trim();
+	if (!text && !continueTurn) {
 		return c.json({ error: 'empty message' }, 400);
 	}
 	// 거대한 단일 메시지는 window trim 으로 못 막으므로(최신 메시지는 항상 유지됨)
 	// 입력 단계에서 직접 거부해 한 턴 input 토큰/비용 상한을 보장한다.
-	if (estimateTokens(text) > MAX_USER_MSG_TOKENS) {
+	if (text && estimateTokens(text) > MAX_USER_MSG_TOKENS) {
 		return c.json({ error: 'message too long' }, 413);
 	}
 
@@ -184,11 +189,18 @@ chatRouter.post('/', async (c) => {
 
 	// 유저 메시지 즉시 영속화 (스트림 끊겨도 유실 방지) + 세션 모델 갱신.
 	// 입력 필터(/rewrite)를 거쳤으면 그 변환 비용을 user 행 cost 로 함께 기록(통계 합산용).
+	// 이어가기 턴은 유저 행이 없다 → 다음 seq 만 계산(ctx.index 용).
 	const inputCost = clampReportedCost(body.inputCost);
-	const userSeq = await appendMessage(db, session.id, 'user', text, modelId, undefined, inputCost, userMsgId);
+	const userSeq = continueTurn
+		? session.messageCount + 1
+		: await appendMessage(db, session.id, 'user', text, modelId, undefined, inputCost, userMsgId);
 
 	// live window(seq > summary_upto_seq) — 방금 넣은 유저 메시지·오프닝 포함
 	const fullWindow = await getWindow(db, session.id, session.summaryUptoSeq);
+	// 이어갈 assistant 응답이 하나도 없으면(오프닝 없는 캐릭터의 새 세션) 이어가기 불가.
+	if (continueTurn && !fullWindow.some((m) => m.role === 'assistant' && m.content.trim() !== '')) {
+		return c.json({ error: 'nothing_to_continue', message: '이어갈 장면이 없어요. 먼저 한마디 보내 주세요.' }, 400);
+	}
 
 	// ── CBS 평가 컨텍스트 ── 세션 변수(=기본 변수 시드 ∪ 누적 상태) + 턴 index + 시드 RNG.
 	// description→lorebook 순서로 같은 ctx 를 공유해 평가(setvar 변이 전파). 턴 종료 후 영속.
@@ -263,7 +275,7 @@ chatRouter.post('/', async (c) => {
 	};
 
 	console.log(
-		`[chat] session=${session.id} character=${character.id} model=${modelId} window=${window.length} inputEst=${inputTokensEst} summarized=${session.summaryUptoSeq > 0}`
+		`[chat] session=${session.id} character=${character.id} model=${modelId} window=${window.length} inputEst=${inputTokensEst} summarized=${session.summaryUptoSeq > 0}${continueTurn ? ' continue=1' : ''}`
 	);
 
 	// AI SDK v6 의 textStream 은 에러를 throw 하지 않고 빈 스트림으로 끝나므로
@@ -1534,6 +1546,171 @@ function stripWrapping(raw: string): string {
 	if (q && !/[「『」』]/.test(q[1])) t = q[1].trim();
 	return t;
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// POST '/suggest' — 입력 제안: 지금 장면에서 유저가 할 법한 행동·대사 후보 N개(말풍선 버튼)
+// ════════════════════════════════════════════════════════════════════════════
+
+/** 제안 생성 모델 — DeepSeek V4 Pro 고정(장면 이해·문체 품질 대비 저렴). */
+const SUGGEST_MODEL_ID = 'deepseek/deepseek-v4-pro-0813';
+/** 후보 개수. */
+const SUGGEST_COUNT = 3;
+/** 후보 출력 상한(각 1~3문장 × 3개면 충분). */
+const SUGGEST_MAX_OUTPUT_TOKENS = 900;
+
+function buildSuggestSystem(args: {
+	character: Character;
+	userLabel: string;
+	userPersona: string | null;
+	summary: string | null;
+	recent: Array<{ role: string; content: string }>;
+}): string {
+	const { character, userLabel, userPersona, summary, recent } = args;
+	const lines: string[] = [
+		`너는 캐릭터 롤플레이 채팅에서 사용자("${userLabel}") 편에 서서, 지금 장면 다음에 ${userLabel}이(가) 할 법한 입력문 후보를 써 주는 조력자다. 상대 캐릭터는 "${character.name}"이다.`,
+		``,
+		`# 규칙`,
+		`- 후보는 정확히 ${SUGGEST_COUNT}개. 각 후보는 ${userLabel}의 행동·대사(또는 둘 다)를 담은 1~3문장의 완결된 입력문이어야 한다. 그대로 전송해도 어색하지 않게.`,
+		`- 세 후보는 서로 뚜렷하게 다른 방향이어야 한다(예: 순응/호응 · 거부/도발/반전 · 질문/관찰/딴짓). 같은 행동의 말투만 바꾼 변형은 금지.`,
+		`- ${userLabel}의 시점에서 쓴다. 상대 캐릭터("${character.name}")의 반응·대사·행동을 대신 쓰지 마라. 장면을 대신 이어 서술하지 마라.`,
+		`- 대사는 큰따옴표("…")로, 행동·서술은 산문으로. 최근 대화에서 ${userLabel}이 쓴 입력의 인칭·문체(1인칭/지시문/*…* 등)가 있으면 그것을 따른다.`,
+		`- 직전 캐릭터 응답의 마지막 상황·질문·요구에 직접 반응하는 내용이어야 한다. 이미 지나간 장면으로 되돌아가지 마라.`,
+		`- 모든 등장인물은 만 18세 이상 성인으로 간주한다. 미성년자에 대한 성적·선정적 표현은 어떤 경우에도 만들지 않는다.`,
+		`- 출력 형식: 한 줄에 후보 하나, "1. ", "2. ", "3. " 번호로 시작. 후보 안에서 줄바꿈 금지. 머리말·설명·코드블록·따옴표로 전체 감싸기 금지.`,
+		``,
+		`# 캐릭터 설정 (참고)`,
+		personalize(character.description, character.name, userLabel).trim().slice(0, REWRITE_MAX_DESC_CHARS) ||
+			'(설정 없음)',
+		``,
+		`# 사용자 정보`,
+		`- 이름: ${userLabel}`
+	];
+	if (userPersona && userPersona.trim()) lines.push(`- 페르소나: ${userPersona.trim()}`);
+	if (summary && summary.trim()) {
+		lines.push(``, `# 지금까지의 이야기 (요약)`, summary.trim());
+	}
+	if (recent.length > 0) {
+		lines.push(``, `# 최근 대화 (오래된 것부터 — 마지막이 직전 장면)`);
+		for (const m of recent) {
+			const who = m.role === 'user' ? userLabel : character.name;
+			const body = m.content.length > REWRITE_RECENT_MSG_CHARS
+				? '…' + m.content.slice(-REWRITE_RECENT_MSG_CHARS)
+				: m.content;
+			lines.push(`[${who}]`, body, ``);
+		}
+	}
+	return lines.join('\n');
+}
+
+/** "1. …" 줄 목록 → 후보 배열. 번호·불릿 제거, 빈 줄 제외, 최대 N개. */
+function parseSuggestions(raw: string, max: number): string[] {
+	let t = raw.trim();
+	const fence = t.match(/^```[a-z]*\n([\s\S]*?)\n```$/i);
+	if (fence) t = fence[1].trim();
+	const out: string[] = [];
+	for (const line of t.split(/\r?\n/)) {
+		const s = line.replace(/^\s*(?:\d+\s*[.)]|[-•*])\s*/, '').trim();
+		if (!s) continue;
+		// 전체가 하나의 따옴표 쌍으로 감싸인 경우만 벗긴다.
+		const q = s.match(/^[「『](.+)[」』]$/s);
+		out.push(q && !/[「『」』]/.test(q[1]) ? q[1].trim() : s);
+		if (out.length >= max) break;
+	}
+	return out;
+}
+
+chatRouter.post('/suggest', async (c) => {
+	const user = requireUser(c);
+	const db = c.env.DB;
+	if (!db) return c.json({ error: 'db unavailable' }, 500);
+
+	const gatewayKey = await getDecryptedKey(db, user.id, 'gateway');
+	if (!gatewayKey) {
+		return c.json(
+			{ error: 'no_gateway_key', message: 'API 키 관리에서 Vercel AI Gateway 키를 먼저 등록해 주세요.' },
+			400
+		);
+	}
+
+	const body = (await c.req.json()) as SuggestRequestBody;
+	const character = await findCharacter(db, body.characterId);
+	if (!character) return c.json({ error: 'character not found' }, 404);
+	if (character.imported) {
+		const raw = await getCharacterPrompt(db, character.id);
+		if (raw != null) character.description = raw;
+	}
+
+	const userLabel = (user.personaName && user.personaName.trim()) || user.name || '나';
+	const modelId = SUGGEST_MODEL_ID;
+
+	// 맥락: 세션이 있으면 live window 꼬리 + 요약, 없으면 오프닝만.
+	let summary: string | null = null;
+	let recent: Array<{ role: string; content: string }> = [];
+	if (body.sessionId) {
+		const session = await getSession(db, body.sessionId, user.id);
+		if (!session) return c.json({ error: 'session not found' }, 404);
+		summary = session.summary;
+		const win = await getWindow(db, session.id, session.summaryUptoSeq);
+		recent = win.slice(-REWRITE_RECENT_MSGS).map((m) => ({ role: m.role, content: m.content }));
+	} else {
+		const opening = personalize(openingContent(character, body.openingIndex), character.name, userLabel);
+		if (opening.trim()) recent = [{ role: 'assistant', content: opening }];
+	}
+	if (recent.length === 0) {
+		return c.json({ error: 'no_context', message: '아직 장면이 없어 제안할 수 없어요.' }, 400);
+	}
+
+	const system = buildSuggestSystem({ character, userLabel, userPersona: user.persona, summary, recent });
+	const gateway = createGateway({ apiKey: gatewayKey });
+
+	try {
+		const result = await generateText({
+			model: gateway(modelId),
+			system,
+			messages: [
+				{
+					role: 'user',
+					content: `직전 장면 다음에 ${userLabel}이(가) 할 법한 입력문 후보 ${SUGGEST_COUNT}개를 규칙대로 번호 목록으로만 출력하라.`
+				}
+			],
+			providerOptions: buildProviderOptions(modelId, { noThinking: true }),
+			temperature: 0.9,
+			maxOutputTokens: SUGGEST_MAX_OUTPUT_TOKENS + reasoningHeadroom(modelId),
+			maxRetries: 1
+		});
+		const suggestions = parseSuggestions(result.text, SUGGEST_COUNT);
+		if (suggestions.length === 0) {
+			console.warn(`[suggest] empty output model=${modelId} finish=${result.finishReason}`);
+			return c.json(
+				{ error: 'empty_output', message: '모델이 제안을 내지 않았어요. 다시 시도해 주세요.' },
+				502
+			);
+		}
+		const cost = parseGatewayCost(result.providerMetadata) ?? null;
+		console.log(
+			`[suggest] model=${modelId} in=${result.usage?.inputTokens ?? 0} out=${result.usage?.outputTokens ?? 0} cost=${cost ?? '-'} n=${suggestions.length}`
+		);
+		const res: SuggestResponse = { suggestions, cost };
+		return c.json(res);
+	} catch (e) {
+		console.error(`[suggest] failed model=${modelId}:`, e);
+		notifyServerError({
+			context: 'generateText /api/chat/suggest',
+			error: e,
+			extra: { model: modelId, character: character.id, user: user.id },
+			waitUntil: getWaitUntil()
+		});
+		return c.json(
+			{
+				error: 'suggest_failed',
+				message: isOverloadError(e)
+					? '제안 모델이 일시적으로 과부하예요. 잠시 후 다시 시도해 주세요.'
+					: '입력 제안에 실패했어요. 잠시 후 다시 시도해 주세요.'
+			},
+			502
+		);
+	}
+});
 
 chatRouter.post('/inspect', async (c) => {
 	const user = requireUser(c);

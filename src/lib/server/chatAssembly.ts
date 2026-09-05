@@ -31,6 +31,16 @@ export const INPUT_SAFETY_MARGIN = 2000;
 /** 마지막 유저 메시지에 덧붙는 응답 지침의 토큰 어림값(가드 계산용). */
 export const DIRECTIVE_EST = 60;
 /**
+ * 이어가기(자동 진행) 지시 — 유저가 빈 입력으로 전송했을 때 마지막 assistant 응답 뒤에 붙는 합성 user 메시지.
+ * 상대(유저)의 새 행동을 지어내 대신 진행하지 말고, 캐릭터·세계 쪽에서 장면을 밀고 나가게 한다.
+ */
+export const CONTINUE_DIRECTIVE = [
+	`[이어가기]`,
+	`상대는 이번 턴에 아무 말도, 아무 행동도 하지 않았다. 직전 응답이 끝난 바로 그 순간부터 장면을 그대로 이어서 서술하라.`,
+	`- 직전 응답을 다시 요약하거나 되풀이하지 말고, 그 다음에 일어나는 일(캐릭터의 다음 행동·말·주변의 변화·시간 경과)로 곧장 진행한다.`,
+	`- 상대가 잠시 말이 없는 상태를 자연스럽게 반영해도 좋다(기다림·재촉·혼자 행동 등). 상대('나')의 행동·대사를 어느 정도 써도 되는지는 아래 [응답 지침]의 '사용자 시점' 규칙을 따른다.`
+].join('\n');
+/**
  * thinking/reasoning 모델용 출력 여유 토큰. 이 모델들은 내부 추론이 output 예산을 잠식해
  * 본문이 잘리므로(finishReason='length'), 본문 예산 위에 이만큼을 더해 보존한다.
  */
@@ -255,10 +265,19 @@ export function buildMessages(
 	memory: string | null,
 	loreBlock: string | null
 ): ModelMessage[] {
-	const out: ModelMessage[] = window
+	const out: ModelMessage[] = [];
+	for (const m of window) {
 		// image_generation 등 비대화 역할은 모델 전송에서 제외(window 쿼리에서도 제외되지만 타입·안전망).
-		.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim() !== '')
-		.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+		if ((m.role !== 'user' && m.role !== 'assistant') || m.content.trim() === '') continue;
+		const prev = out[out.length - 1];
+		// 이어가기(자동 진행) 턴은 유저 메시지 없이 assistant 응답이 연달아 저장된다 →
+		// 모델엔 한 응답으로 합쳐 보낸다(공급자별 연속 같은 역할 처리 차이 회피 + 한 장면으로 읽힘).
+		if (prev && prev.role === 'assistant' && m.role === 'assistant' && typeof prev.content === 'string') {
+			prev.content = `${prev.content}\n\n${m.content}`;
+			continue;
+		}
+		out.push({ role: m.role, content: m.content });
+	}
 
 	if (memory && memory.trim()) {
 		out.unshift({
@@ -268,15 +287,26 @@ export function buildMessages(
 	}
 
 	const last = out[out.length - 1];
+	const directive = [
+		`[응답 지침]`,
+		`- 분량: 최대 ${maxSentences}문장. 상한이지 목표가 아니다 — 새로 일어날 일이 없으면 분량을 채우려 하지 말고 짧게 끝내라.`,
+		`- 반복 금지: 앞선 응답들에 이미 쓴 문장·문단·묘사 표현(표정·숨·목소리 묘사 등)을 그대로 또는 살짝 바꿔 다시 쓰지 마라. 같은 인물이 같은 반응을 되풀이하게 하지 말고, 매 응답은 장면을 한 단계 앞으로 진행시켜라(새 행동·결정·사건·정보).`,
+		userActsLine(userActs)
+	].join('\n');
 	if (last && last.role === 'user') {
 		if (loreBlock) last.content = `${last.content}\n\n${loreBlock}`;
-		const directive = [
-			`[응답 지침]`,
-			`- 분량: 최대 ${maxSentences}문장. 상한이지 목표가 아니다 — 새로 일어날 일이 없으면 분량을 채우려 하지 말고 짧게 끝내라.`,
-			`- 반복 금지: 앞선 응답들에 이미 쓴 문장·문단·묘사 표현(표정·숨·목소리 묘사 등)을 그대로 또는 살짝 바꿔 다시 쓰지 마라. 같은 인물이 같은 반응을 되풀이하게 하지 말고, 매 응답은 장면을 한 단계 앞으로 진행시켜라(새 행동·결정·사건·정보).`,
-			userActsLine(userActs)
-		].join('\n');
 		out.push({ role: 'user', content: directive });
+	} else if (last && last.role === 'assistant') {
+		// 이어가기(자동 진행): 유저 입력 없이 직전 응답 뒤를 캐릭터가 스스로 이어 쓴다.
+		// 지시·로어는 이 합성 user 메시지에만 붙이고 DB 엔 저장하지 않는다(호출부 책임).
+		out.push({
+			role: 'user',
+			content: [
+				CONTINUE_DIRECTIVE,
+				loreBlock ?? '',
+				directive
+			].filter(Boolean).join('\n\n')
+		});
 	}
 	return out;
 }

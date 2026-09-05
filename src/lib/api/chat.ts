@@ -36,6 +36,29 @@ export interface ChatRequestBody {
 	 * (이미지 commit 의 ?cost= 와 같은 클라 보고 방식)
 	 */
 	inputCost?: number;
+	/**
+	 * 이어가기(자동 진행): 유저 메시지 없이 캐릭터가 직전 장면을 이어서 서술한다.
+	 * true 면 text 는 무시(저장 X)되고, 모델엔 마지막 assistant 응답 뒤에 이어가기 지시만 붙는다.
+	 * (입력창이 빈 상태로 전송 버튼을 누르면 클라가 보낸다)
+	 */
+	continue?: boolean;
+}
+
+// ── 입력 제안(말풍선 버튼): 다음에 유저가 할 법한 행동·대사 3개 ─────────────
+
+/** POST /api/chat/suggest 요청 본문. 현재 장면(요약+최근 대화) 기준으로 유저 입력 후보를 만든다. */
+export interface SuggestRequestBody {
+	characterId: string;
+	sessionId?: string;
+	openingIndex?: number;
+}
+
+/** POST /api/chat/suggest 응답. */
+export interface SuggestResponse {
+	/** 유저 입력 후보(보통 3개, 각 1~3문장). 그대로 입력창에 넣어 보낼 수 있는 형태. */
+	suggestions: string[];
+	/** 제안 LLM 비용(USD). 다음 전송의 inputCost 에 합산해 user 행에 기록. */
+	cost: number | null;
 }
 
 // ── 입력 필터(유저 입력을 지정 문체·뉘앙스로 변환) ─────────────────────────
