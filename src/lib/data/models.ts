@@ -18,6 +18,8 @@ export interface ModelOption {
 export const MODELS: ModelOption[] = [
 	// $5 / $25
 	{ id: 'anthropic/claude-opus-5', label: 'Claude Opus 5', icon: '/models/claude.avif', contextLimit: 1_000_000 },
+	// $3 / $15 — Moonshot 플래그십. 창작 글쓰기 벤치 Opus 5 다음(2026-09). 1M 컨텍스트·캐시 입력 90% 할인
+	{ id: 'moonshotai/kimi-k3', label: 'Kimi K3', icon: '/models/moonshotai.avif', contextLimit: 1_000_000, reasoning: true },
 	// $2 / $10 — GPT-5.6 시리즈 플래그십
 	{ id: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol', icon: '/models/openai.avif', contextLimit: 1_050_000, reasoning: true },
 	// $0.75 / $3.75
