@@ -144,12 +144,14 @@ export function buildProviderOptions(
  * 롤플레이 본문 생성용 반복 억제 페널티(OpenAI 호환 샘플링 파라미터).
  * DeepSeek·GLM 은 긴 맥락에서 직전 assistant 턴의 문단·상투 묘사를 그대로 복사하는 경향이 강해
  * (2026-09 실측: 마지막 응답 41문단 중 31문단이 직전 응답과 글자 단위 동일) 약한 페널티를 건다.
- * Anthropic·Google 은 이 파라미터를 지원하지 않아(SDK 경고) 넘기지 않는다.
+ * Anthropic·Google 은 이 파라미터를 지원하지 않아(SDK 경고) 넘기지 않는다. OpenAI 도 GPT-5.x 추론 모델
+ * (Responses API)은 미지원이라 `{type:'unsupported', feature:'frequencyPenalty'}` 경고만 남기고 무시된다
+ * (2026-09 게이트웨이 실측 — reasoningEffort 'none' 이어도 동일) → 제외. temperature 는 'none' 에선 정상.
  */
 export function repetitionPenalties(
 	modelId: string
 ): { frequencyPenalty?: number; presencePenalty?: number } {
-	if (modelId.startsWith('deepseek/') || modelId.startsWith('zai/') || modelId.startsWith('openai/')) {
+	if (modelId.startsWith('deepseek/') || modelId.startsWith('zai/')) {
 		return { frequencyPenalty: 0.4, presencePenalty: 0.3 };
 	}
 	return {};
