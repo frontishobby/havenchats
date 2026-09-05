@@ -74,7 +74,7 @@ src/                  # SvelteKit 정적 SPA(프론트엔드 only)
       waitUntil.ts    # getWaitUntil() → ExecutionContext.waitUntil
       auth.ts crypto.ts novelai.ts characters.ts characterForm.ts imageStore.ts images.ts(getImages→env.IMAGES)
       credits.ts notify.ts recentChats.ts chatPageLoad.ts chatAssembly.ts minorSafety.ts nsfwUnlock.ts cloudflare.ts cfPricing.ts importCharx.ts
-      imagePrompt.ts    # 이미지 상황 프롬프트 공용(구조화 스키마 SCENE_PROMPT_SCHEMA·sanitizeTags/Scene·ADULT_ONLY_RULE) — 채팅 이미지·썸네일 공용
+      imagePrompt.ts    # 이미지 상황 프롬프트 공용(구조화 스키마 SCENE_PROMPT_SCHEMA·sanitizeTags/Scene·ADULT_ONLY_RULE·HIDDEN_FEATURE_RULE/stripHiddenFeatures — 옷 입은 장면이면 유두·음모·배 문신 등 가려지는 특징을 appearance 에서 제거, NAI 가 특징 보여주려 벗기는 것 방지) — 채팅 이미지·썸네일 공용
       db/ users.ts characters.ts chats.ts userKeys.ts styles.ts admin.ts  remote.ts(getDB→env.DB 직결)
   routes/             # 전부 클라 렌더(.svelte) + universal 로더(+page.ts/+layout.ts, ssr=false)
     +layout.{svelte,ts}   # ssr=false + /api/me 로드(유저·사이드바·크레딧)

@@ -35,9 +35,11 @@ import {
 import { containsMinorTerms } from '$lib/server/minorSafety';
 import {
 	ADULT_ONLY_RULE,
+	HIDDEN_FEATURE_RULE,
 	SCENE_PROMPT_SCHEMA,
 	sanitizeScene,
 	sanitizeTags,
+	stripHiddenFeatures,
 	str
 } from '$lib/server/imagePrompt';
 import {
@@ -521,14 +523,15 @@ const THUMB_SYSTEM = [
 	`  "scene": string — ONE or TWO plain-English sentences describing the shot in natural language: who is doing what, where each person stands relative to the others and the setting, where they look, and the mood. Refer to people ONLY by role nouns ("the woman", "the man", "the girl on the left") — NEVER mention hair, eyes, body type, or clothing here. Do not restate the count tag or camera tags.`,
 	`  "characters": array — one entry per person VISIBLE in the frame, ordered left-to-right / front-to-back. Each entry is { "name", "appearance", "state" }:`,
 	`    - "name": a short label for this person (e.g. "main", or their name from the setup).`,
-	`    - "appearance": FIXED physical look as Danbooru tags only, in THIS order — an UNNUMBERED subject word ("girl"/"boy"/"other"), body-type class if any (e.g. "mature female", "petite"), hair color/length/style, eye color, skin, finer body details (e.g. "large breasts", "narrow waist"), distinctive PERMANENT features (horns, tattoos, heterochromia…). NEVER put clothing, expression, or pose here.`,
-	`    - "state": this person's look in THIS shot, in THIS order: outfit (a representative or direction-specified outfit) → framing of this person if notable → pose/action → expression (e.g. "gentle smile, looking at viewer"). Lowercase, comma-separated; a SHORT clause is fine where a tag is awkward.`,
+	`    - "appearance": FIXED physical look as Danbooru tags only, in THIS order — an UNNUMBERED subject word ("girl"/"boy"/"other"), body-type class if any (e.g. "mature female", "petite"), hair color/length/style, eye color, skin, finer body details visible through clothing (e.g. "large breasts", "narrow waist"), distinctive PERMANENT features that show while dressed (horns, face/neck/arm marks, heterochromia…). NEVER put clothing, expression, pose, or covered-by-clothing details here.`,
+	`    - "state": this person's look in THIS shot, in THIS order: outfit (a representative or direction-specified outfit; "fully clothed" first unless the direction asks for undress) → framing of this person if notable → pose/action → expression (e.g. "gentle smile, looking at viewer"). Lowercase, comma-separated; a SHORT clause is fine where a tag is awkward.`,
 	``,
 	`Composition rules:`,
 	`- This is a card thumbnail: subjects must be LARGE and faces clearly visible. Prefer upper body / cowboy shot; never tiny distant figures. With no [Direction], make a flattering single-subject portrait of the main character: looking at viewer, an expression that fits the character, simple or fitting background.`,
 	`- If [Direction] is given, follow it faithfully: depict the scene, mood, pose, background and EXACTLY the people it asks for. If it names other people, take their appearance from the setup text when described there; otherwise invent a plausible appearance that contrasts with the main character (different hair color etc.).`,
 	`- The subject COUNT tag in "base" must match the number of character entries.`,
 	`- Put per-person body/clothes ONLY in "appearance"/"state", never in "base" or "scene". Put the count tag ONLY in "base".`,
+	HIDDEN_FEATURE_RULE,
 	``,
 	`General rules:`,
 	`- English only. "base", "appearance" and "state" are tag lists; "scene" is the only place for full sentences.`,
@@ -634,7 +637,11 @@ charactersRouter.post('/thumbnail', async (c) => {
 				.slice(0, MAX_THUMB_CHARACTERS)
 				.map((cc) => {
 					const e = cc as { appearance?: unknown; state?: unknown };
-					return [sanitizeTags(str(e.appearance)), sanitizeTags(str(e.state))].filter(Boolean).join(', ');
+					const state = sanitizeTags(str(e.state));
+					// 옷 입은 컷이면 가려지는 특징을 뺀다(썸네일도 채팅 이미지와 같은 가드).
+					return [stripHiddenFeatures(sanitizeTags(str(e.appearance)), state), state]
+						.filter(Boolean)
+						.join(', ');
 				});
 			prompt = normalizePrompt({ base: str(obj.base), scene: str(obj.scene), characters });
 		} catch (e) {

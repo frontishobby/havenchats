@@ -83,3 +83,34 @@ export function sanitizeScene(raw: string): string {
 		.replace(/[.,\s]+$/, '')
 		.trim();
 }
+
+/**
+ * 옷에 가려지는 신체 특징 규칙(시스템 프롬프트 공용). 제작자가 description 에 유두·음모·배 문신 같은
+ * 특징을 적어 두면 LLM 이 "고정 외형" 이라며 매 턴 appearance 에 박고, NAI 는 태그를 '보이게' 그리려고
+ * 옷을 벗기거나 들춘다. → 가려지는 특징은 appearance 금지, 실제로 노출된 순간에만 state 에 넣게 한다.
+ */
+export const HIDDEN_FEATURE_RULE = [
+	`- HIDDEN FEATURES: body details that clothing normally covers — nipples, areolae, pubic hair, genitals, abs/toned stomach, tan lines, and any tattoo, scar, mole, birthmark or piercing on the breasts, chest, stomach, back, hips, thighs or buttocks — must NEVER go in "appearance", even if the reference lists them as permanent traits. Mention them ONLY in "state", and ONLY when that body part is actually uncovered at this moment.`,
+	`- Never undress, unbutton, lift or open clothing that the text does not: if the person is dressed, "state" MUST begin with "fully clothed" followed by the garments, and nothing under the clothes may be tagged.`
+].join('\n');
+
+/** 옷을 입은 상태에선 그릴 수 없는(가려지는) 특징 태그 — 세그먼트 단위로 매칭. */
+const HIDDEN_FEATURE_RE =
+	/\b(nipples?|areolae?|pubic|pussy|vagina|vulva|clitoris|clit|labia|penis|cock|testicles|anus|genitals?|abs|six ?pack|toned stomach|tan ?lines?|womb tattoo|(?:stomach|belly|abdomen|abdominal|breast|chest|back|hip|thigh|thighs|butt|buttocks|ass|crotch|groin|pubic|shoulder blade|waist|rib|ribs) (?:tattoo|scar|mole|birthmark|piercing)|(?:tattoo|scar|mole|birthmark|piercing)s? (?:on|across|under|below|between|over) (?:the |her |his |their )?(?:stomach|belly|abdomen|lower abdomen|breasts?|chest|back|lower back|hips?|thighs?|butt|buttocks|ass|crotch|groin|shoulder blades?|waist|ribs?|navel)|navel piercing|belly button piercing|nipple piercings?|genital piercings?)\b/i;
+
+/** state 에 노출 신호가 있는지 — 있으면 가려진 특징도 그대로 둔다(부위별 세분화는 안 함). */
+const EXPOSURE_RE =
+	/\b(naked|nude|nudity|topless|bottomless|braless|pantsless|no bra|no panties|no shirt|no pants|undress(?:ed|ing)?|strip(?:ped|ping)?|breasts? out|exposed|open shirt|open clothes|open jacket|open robe|clothes (?:lift|pull|down)|shirt (?:lift|pull)|skirt (?:lift|pull)|dress (?:lift|pull)|panties (?:aside|pull|down)|clothing aside|see-through|wet (?:shirt|clothes)|cleavage|midriff|navel|crop top|bikini|swimsuit|lingerie|underwear|bra only|panties only|towel|bath(?:ing|tub)?|shower(?:ing)?|onsen|hot spring|sex|vaginal|anal|fellatio|cunnilingus|paizuri|masturbat\w*|cum|after sex|nipples?|pussy|penis|spread legs)\b/i;
+
+/**
+ * 옷을 입은 장면이면 appearance 에서 가려지는 특징 태그를 떼어 낸다(LLM 이 규칙을 어겨도 출력단에서 차단).
+ * 원장(session.appearances)에 이미 박힌 외형에도 매 턴 적용되므로 소급된다.
+ */
+export function stripHiddenFeatures(appearance: string, state: string): string {
+	if (!appearance || EXPOSURE_RE.test(state)) return appearance;
+	return appearance
+		.split(',')
+		.map((s) => s.trim())
+		.filter((s) => s && !HIDDEN_FEATURE_RE.test(s))
+		.join(', ');
+}

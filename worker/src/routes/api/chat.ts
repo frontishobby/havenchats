@@ -51,9 +51,11 @@ import { loadRecentChats, parseRecentCursor, RECENT_PAGE_SIZE } from '$lib/serve
 import { containsMinorTerms } from '$lib/server/minorSafety';
 import {
 	ADULT_ONLY_RULE,
+	HIDDEN_FEATURE_RULE,
 	SCENE_PROMPT_SCHEMA,
 	sanitizeScene,
 	sanitizeTags as sanitizeSituation,
+	stripHiddenFeatures,
 	str
 } from '$lib/server/imagePrompt';
 import {
@@ -829,14 +831,15 @@ const SITUATION_SYSTEM = [
 	`  "scene": string — ONE or TWO plain-English sentences describing the same moment in natural language: who is doing what to whom, where each person is relative to the other and to the setting, where they are looking, and the mood. This complements the tags (the model reads both). Refer to people ONLY by role nouns ("the woman", "the man", "the waitress") — NEVER mention hair, eyes, body type, or clothing here (those belong to the character entries). Do not restate the count tag or camera tags. Example: "The woman straddles the man on the sofa, gripping his collar and staring down at him with a smirk while he leans back against the cushions."`,
 	`  "characters": array — one entry per person VISIBLE in the frame, ordered top-to-bottom / left-to-right. Each entry is { "name", "appearance", "state" }:`,
 	`    - "name": a STABLE identifier for this person, used to keep their look consistent across images. Use the literal "char" for the main roleplay character ({{char}}), and the literal "user" for the user/{{나}}. For anyone else, if they are the SAME person as someone in [Known characters], reuse that EXACT name; otherwise assign a short identifier (their in-story name if any, else a concise descriptor like "waitress").`,
-	`    - "appearance": that person's FIXED physical look as Danbooru tags only, in THIS order — an UNNUMBERED subject word ("girl"/"boy"/"other"), then a body-type class if any (e.g. "mature female", "petite"), then hair color/length/style, eye color, skin, finer body details (e.g. "narrow waist", "large breasts"), and distinctive PERMANENT features. NEVER put clothing, expression, or pose here. For "char" use the [Character] reference. For a person listed in [Known characters], COPY their recorded appearance verbatim. For a brand-new person, invent a plausible consistent appearance.`,
-	`    - "state": that person's CURRENT scene-specific look from the latest moment, in THIS order: clothing or state of undress (e.g. "white blouse, unbuttoned, no bra", "naked, towel") → framing of this person if notable (e.g. "from side") → pose/action from the largest movement to the smallest → expression from the overall emotion to details (e.g. "smile, open mouth, half-closed eyes, looking at viewer"). Mostly tags, but a SHORT clause is fine where a tag is awkward (e.g. "leaning over the desk", "looking back over her shoulder", "one hand on his chest"). This is the only part that changes turn to turn. Lowercase, comma-separated.`,
+	`    - "appearance": that person's FIXED physical look as Danbooru tags only, in THIS order — an UNNUMBERED subject word ("girl"/"boy"/"other"), then a body-type class if any (e.g. "mature female", "petite"), then hair color/length/style, eye color, skin, finer body details visible through clothing (e.g. "narrow waist", "large breasts"), and distinctive PERMANENT features that show while dressed (face/neck/arm/hand marks, horns, heterochromia…). NEVER put clothing, expression, pose, or covered-by-clothing details here. For "char" use the [Character] reference. For a person listed in [Known characters], COPY their recorded appearance verbatim. For a brand-new person, invent a plausible consistent appearance.`,
+	`    - "state": that person's CURRENT scene-specific look from the latest moment, in THIS order: clothing or state of undress exactly as the text has it (e.g. "fully clothed, white blouse, pencil skirt", "white blouse, unbuttoned, no bra", "naked, towel") → framing of this person if notable (e.g. "from side") → pose/action from the largest movement to the smallest → expression from the overall emotion to details (e.g. "smile, open mouth, half-closed eyes, looking at viewer"). Mostly tags, but a SHORT clause is fine where a tag is awkward (e.g. "leaning over the desk", "looking back over her shoulder", "one hand on his chest"). This is the only part that changes turn to turn. Lowercase, comma-separated.`,
 	``,
 	`Character rules:`,
 	`- "appearance" must stay identical for the same person across turns (that is what keeps images consistent); only "state" follows the latest scene.`,
 	`- Include the user ("user") as a SEPARATE entry ONLY if they are physically in the frame in this moment (e.g. the two are embracing, the user's body is shown). For typical 1:1 POV shots where only the character is depicted, output just one entry.`,
 	`- The subject COUNT tag in "base" must match the number of character entries (1 entry → "1girl" or "1boy"; 2 entries → e.g. "1boy, 1girl").`,
 	`- Put per-person body/clothes ONLY in "appearance"/"state", never in "base" or "scene". Put the count tag ONLY in "base", never in a character entry.`,
+	HIDDEN_FEATURE_RULE,
 	``,
 	`General rules:`,
 	`- English only. Focus on the single most recent visual beat, not the whole history.`,
@@ -1132,7 +1135,8 @@ chatRouter.post('/image/prepare', async (c) => {
 					ledgerDirty = true;
 				}
 			}
-			const caption = [appearance, cleanState].filter(Boolean).join(', ');
+			// 옷 입은 장면이면 가려지는 특징(유두·음모·배 문신 등)을 캡션에서 뺀다 — 원장 외형에도 적용.
+			const caption = [stripHiddenFeatures(appearance, cleanState), cleanState].filter(Boolean).join(', ');
 			if (caption) charCaptions.push(caption);
 		}
 
