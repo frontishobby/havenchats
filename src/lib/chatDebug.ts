@@ -72,6 +72,8 @@ export interface ImageDebug {
 	characterRef: string;
 	/** LLM 에 주입한 [Known characters] 블록(원장의 동적 NPC 외형). 비면 ''. */
 	knownCharacters?: string;
+	/** LLM 에 주입한 [Current outfits] 블록(복장 원장 — 이전 이미지 시점의 인물별 복장/노출 상태). 비면 ''. */
+	currentOutfits?: string;
 	/** 정리(trim/공백 압축) 후 상황 프롬프트 — base 와 인물 캡션을 ' | ' 로 합친 표시용(비면 생성 실패). */
 	situation: string;
 	/** 상황 프롬프트 모델의 원문 응답(구조화 객체를 JSON 문자열로). 빈 응답 진단용. */

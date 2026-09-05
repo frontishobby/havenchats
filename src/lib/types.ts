@@ -277,6 +277,20 @@ export interface AppearanceEntry {
 /** 세션별 외형 원장 — 정규화된 인물 name → 고정 외형. 동적 NPC 외형 일관성용. */
 export type AppearanceLedger = Record<string, AppearanceEntry>;
 
+/**
+ * 복장 원장 항목 — 인물별 현재 복장/노출 상태(마지막 이미지 시점). 외형 원장과 달리 주인공·유저도 포함.
+ * 상황 프롬프트 LLM 이 매 턴 "텍스트가 바꾸지 않으면 그대로 복사"해 옷 상태를 턴 간 이어 간다.
+ */
+export interface OutfitEntry {
+	/** 복장/노출 상태 danbooru 태그(예: "topless, skirt pulled up, no panties"). */
+	outfit: string;
+	/** 마지막 등장 턴 기준값(session.messageCount). 상한 초과 시 오래된 것부터 evict. */
+	lastSeen: number;
+}
+
+/** 세션별 복장 원장 — 정규화된 인물 name → 현재 복장. */
+export type OutfitLedger = Record<string, OutfitEntry>;
+
 /** 대화 세션. summary/summary_upto_seq 가 토큰 전략(요약+window)의 상태. */
 export interface ChatSession {
 	id: string;
@@ -291,6 +305,8 @@ export interface ChatSession {
 	scriptState: Record<string, string> | null;
 	/** 외형 원장(실시간 이미지에서 동적 NPC 외형 고정). 없으면 null. */
 	appearances: AppearanceLedger | null;
+	/** 복장 원장(실시간 이미지 — 인물별 현재 복장/노출 상태). 없으면 null. */
+	outfits: OutfitLedger | null;
 	messageCount: number;
 	createdAt: number;
 	updatedAt: number;

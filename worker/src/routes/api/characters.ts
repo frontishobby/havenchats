@@ -522,20 +522,21 @@ const THUMB_SYSTEM = [
 	`Output a JSON object with three keys:`,
 	`  "base": string — Danbooru-style tags for everything that is NOT an individual person's body/clothes: the SUBJECT COUNT tag first (e.g. "1girl", "1boy, 1girl", "2girls", "3girls"), framing/composition (e.g. "upper body", "cowboy shot", "portrait", "from below"), setting/background, lighting and mood, and INTERACTION tags between people using the "source#"/"target#"/"mutual#" prefixes when they touch or act on each other (e.g. "mutual#hug", "source#hand on another's shoulder"). Lowercase, comma-separated.`,
 	`  "scene": string — ONE or TWO plain-English sentences describing the shot in natural language: who is doing what, where each person stands relative to the others and the setting, where they look, and the mood. Refer to people ONLY by role nouns ("the woman", "the man", "the girl on the left") — NEVER mention hair, eyes, body type, or clothing here. Do not restate the count tag or camera tags.`,
-	`  "characters": array — one entry per person VISIBLE in the frame, ordered left-to-right / front-to-back. Each entry is { "name", "appearance", "state" }:`,
+	`  "characters": array — one entry per person VISIBLE in the frame, ordered left-to-right / front-to-back. Each entry is { "name", "appearance", "outfit", "state" }:`,
 	`    - "name": a short label for this person (e.g. "main", or their name from the setup).`,
 	`    - "appearance": FIXED physical look as Danbooru tags only, in THIS order — an UNNUMBERED subject word ("girl"/"boy"/"other"), body-type class if any (e.g. "mature female", "petite"), hair color/length/style, eye color, skin, finer body details visible through clothing (e.g. "large breasts", "narrow waist"), distinctive PERMANENT features that show while dressed (horns, face/neck/arm marks, heterochromia…). NEVER put clothing, expression, pose, or covered-by-clothing details here.`,
-	`    - "state": this person's look in THIS shot, in THIS order: outfit (a representative or direction-specified outfit; "fully clothed" first unless the direction asks for undress) → framing of this person if notable → pose/action → expression (e.g. "gentle smile, looking at viewer"). Lowercase, comma-separated; a SHORT clause is fine where a tag is awkward.`,
+	`    - "outfit": this person's clothing in THIS shot as tags — a representative or direction-specified outfit, starting with "fully clothed" unless the direction asks for undress (then the state of undress exactly as directed). Lowercase, comma-separated.`,
+	`    - "state": this person's pose and expression in THIS shot, in THIS order: framing of this person if notable → pose/action → expression (e.g. "gentle smile, looking at viewer"). NO clothing here (that is "outfit"). Lowercase, comma-separated; a SHORT clause is fine where a tag is awkward.`,
 	``,
 	`Composition rules:`,
 	`- This is a card thumbnail: subjects must be LARGE and faces clearly visible. Prefer upper body / cowboy shot; never tiny distant figures. With no [Direction], make a flattering single-subject portrait of the main character: looking at viewer, an expression that fits the character, simple or fitting background.`,
 	`- If [Direction] is given, follow it faithfully: depict the scene, mood, pose, background and EXACTLY the people it asks for. If it names other people, take their appearance from the setup text when described there; otherwise invent a plausible appearance that contrasts with the main character (different hair color etc.).`,
 	`- The subject COUNT tag in "base" must match the number of character entries.`,
-	`- Put per-person body/clothes ONLY in "appearance"/"state", never in "base" or "scene". Put the count tag ONLY in "base".`,
+	`- Put per-person body/clothes ONLY in "appearance"/"outfit"/"state", never in "base" or "scene". Put the count tag ONLY in "base".`,
 	HIDDEN_FEATURE_RULE,
 	``,
 	`General rules:`,
-	`- English only. "base", "appearance" and "state" are tag lists; "scene" is the only place for full sentences.`,
+	`- English only. "base", "appearance", "outfit" and "state" are tag lists; "scene" is the only place for full sentences.`,
 	`- Do NOT copy the status window, stat block, or any prompt/instruction text from the input — write your own concise tags.`,
 	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, "rating:" tags, or negative terms — those are added separately.`,
 	`- Keep it concise: "base" short, "scene" at most two sentences, each character under ~40 tags.`,
@@ -637,10 +638,15 @@ charactersRouter.post('/thumbnail', async (c) => {
 			const characters = (Array.isArray(obj.characters) ? obj.characters : [])
 				.slice(0, MAX_THUMB_CHARACTERS)
 				.map((cc) => {
-					const e = cc as { appearance?: unknown; state?: unknown };
+					const e = cc as { appearance?: unknown; outfit?: unknown; state?: unknown };
+					const outfit = sanitizeTags(str(e.outfit));
 					const state = sanitizeTags(str(e.state));
-					// 옷 입은 컷이면 가려지는 특징을 뺀다(썸네일도 채팅 이미지와 같은 가드).
-					return [stripHiddenFeatures(sanitizeTags(str(e.appearance)), state), state]
+					// 옷 입은 컷이면 가려지는 특징을 뺀다(썸네일도 채팅 이미지와 같은 가드). 캡션 = 외형 + 복장 + 포즈/표정.
+					return [
+						stripHiddenFeatures(sanitizeTags(str(e.appearance)), `${outfit}, ${state}`),
+						outfit,
+						state
+					]
 						.filter(Boolean)
 						.join(', ');
 				});

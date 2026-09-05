@@ -26,9 +26,9 @@ import {
 	getOwnedMessage,
 	messageExists,
 	updateMessageContentCost,
-	updateAppearances
+	updateImageLedgers
 } from '$lib/server/db/chats';
-import type { AppearanceLedger, Character, ChatSession, StoredMessage } from '$lib/types';
+import type { AppearanceLedger, Character, ChatSession, OutfitLedger, StoredMessage } from '$lib/types';
 import { pinSceneCodes } from '$lib/imageCodes';
 import { personalize } from '$lib/placeholders';
 import { notifyServerError } from '$lib/server/notify';
@@ -818,6 +818,8 @@ const MAX_CHARACTERS = 8;
 const MAX_LEDGER_ENTRIES = 16;
 /** 원장에 박는 고정 외형 태그 최대 길이(자). */
 const MAX_APPEARANCE_CHARS = 300;
+/** 복장 원장에 박는 복장/노출 상태 태그 최대 길이(자). */
+const MAX_OUTFIT_CHARS = 200;
 /** 자연어 장면 문장 최대 길이(자). V5 Curated base 예산(~703 토큰)에 그림체+꼬리와 함께 들어가야 해서 짧게. */
 const MAX_SCENE_CHARS = 400;
 
@@ -850,26 +852,32 @@ function canvasHint(resolution: ResolutionKey): string {
 
 const SITUATION_SYSTEM = [
 	`You convert the latest moment of a Korean roleplay scene into a structured image-generation prompt for NovelAI Diffusion (V4.5/V5, anime illustration), using its MULTI-CHARACTER feature.`,
-	`You are given a [Character] reference sheet for the main roleplay character, an optional [Known characters] roster of people whose fixed appearance was already established earlier in this story, and the [Recent conversation] (the last few turns, oldest to newest, including the user's actions). Depict ONLY the LATEST moment — the final line of the conversation; use the earlier lines purely as context for what is happening right now. Ignore non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
+	`You are given a [Character] reference sheet for the main roleplay character, an optional [Known characters] roster of people whose fixed appearance was already established earlier in this story, an optional [Current outfits] record of what each person was wearing (or not wearing) as of the PREVIOUS image, and the [Recent conversation] (the last few turns, oldest to newest, including the user's actions). Depict ONLY the LATEST moment — the final line of the conversation; use the earlier lines purely as context for what is happening right now. Ignore non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
 	``,
 	`Output a JSON object with three keys:`,
 	`  "base": string  — Danbooru-style tags for everything that is NOT an individual character's body/clothes: the SUBJECT COUNT tag (e.g. "1girl", "1boy, 1girl", "2girls"), framing/composition (e.g. "upper body", "cowboy shot", "full body", "from above", "pov"), setting/background, lighting and mood, and INTERACTION action tags between characters using the "source#"/"target#"/"mutual#" prefixes (e.g. "source#hug" on the initiator's intent, "target#hug", "mutual#kiss"). Lowercase, comma-separated.`,
 	`  "scene": string — ONE or TWO plain-English sentences describing the same moment in natural language: who is doing what to whom, where each person is relative to the other and to the setting, where they are looking, and the mood. This complements the tags (the model reads both). Refer to people ONLY by role nouns ("the woman", "the man", "the waitress") — NEVER mention hair, eyes, body type, or clothing here (those belong to the character entries). Do not restate the count tag or camera tags. Example: "The woman straddles the man on the sofa, gripping his collar and staring down at him with a smirk while he leans back against the cushions."`,
-	`  "characters": array — one entry per person VISIBLE in the frame, ordered top-to-bottom / left-to-right. Each entry is { "name", "appearance", "state" }:`,
+	`  "characters": array — one entry per person VISIBLE in the frame, ordered top-to-bottom / left-to-right. Each entry is { "name", "appearance", "outfit", "state" }:`,
 	`    - "name": a STABLE identifier for this person, used to keep their look consistent across images. Use the literal "char" for the main roleplay character ({{char}}), and the literal "user" for the user/{{나}}. For anyone else, if they are the SAME person as someone in [Known characters], reuse that EXACT name; otherwise assign a short identifier (their in-story name if any, else a concise descriptor like "waitress").`,
 	`    - "appearance": that person's FIXED physical look as Danbooru tags only, in THIS order — an UNNUMBERED subject word ("girl"/"boy"/"other"), then a body-type class if any (e.g. "mature female", "petite"), then hair color/length/style, eye color, skin, finer body details visible through clothing (e.g. "narrow waist", "large breasts"), and distinctive PERMANENT features that show while dressed (face/neck/arm/hand marks, horns, heterochromia…). NEVER put clothing, expression, pose, or covered-by-clothing details here. For "char" use the [Character] reference. For a person listed in [Known characters], COPY their recorded appearance verbatim. For a brand-new person, invent a plausible consistent appearance.`,
-	`    - "state": that person's CURRENT scene-specific look from the latest moment, in THIS order: clothing or state of undress exactly as the text has it (e.g. "fully clothed, white blouse, pencil skirt", "white blouse, unbuttoned, no bra", "naked, towel") → framing of this person if notable (e.g. "from side") → pose/action from the largest movement to the smallest → expression from the overall emotion to details (e.g. "smile, open mouth, half-closed eyes, looking at viewer"). Mostly tags, but a SHORT clause is fine where a tag is awkward (e.g. "leaning over the desk", "looking back over her shoulder", "one hand on his chest"). This is the only part that changes turn to turn. Lowercase, comma-separated.`,
+	`    - "outfit": that person's clothing or state of undress RIGHT NOW as tags (e.g. "fully clothed, white blouse, pencil skirt", "white blouse, unbuttoned, no bra", "naked, towel", "topless, skirt pulled up, no panties"). Follow the Outfit continuity rules below — this carries over between images. Lowercase, comma-separated.`,
+	`    - "state": that person's pose and expression in the latest moment, in THIS order: framing of this person if notable (e.g. "from side") → pose/action from the largest movement to the smallest → expression from the overall emotion to details (e.g. "smile, open mouth, half-closed eyes, looking at viewer"). NO clothing here (that is "outfit"). Mostly tags, but a SHORT clause is fine where a tag is awkward (e.g. "leaning over the desk", "looking back over her shoulder", "one hand on his chest"). Lowercase, comma-separated.`,
 	``,
 	`Character rules:`,
-	`- "appearance" must stay identical for the same person across turns (that is what keeps images consistent); only "state" follows the latest scene.`,
+	`- "appearance" must stay identical for the same person across turns (that is what keeps images consistent); "outfit" changes only when the story changes it; "state" follows the latest scene.`,
 	`- Include the user ("user") as a SEPARATE entry ONLY if they are physically in the frame in this moment (e.g. the two are embracing, the user's body is shown). For typical 1:1 POV shots where only the character is depicted, output just one entry.`,
 	`- The subject COUNT tag in "base" must match the number of character entries (1 entry → "1girl" or "1boy"; 2 entries → e.g. "1boy, 1girl").`,
-	`- Put per-person body/clothes ONLY in "appearance"/"state", never in "base" or "scene". Put the count tag ONLY in "base", never in a character entry.`,
+	`- Put per-person body/clothes ONLY in "appearance"/"outfit"/"state", never in "base" or "scene". Put the count tag ONLY in "base", never in a character entry.`,
 	HIDDEN_FEATURE_RULE,
+	``,
+	`Outfit continuity rules:`,
+	`- [Current outfits] is the truth at the START of this moment: it records each person's clothing/undress state as of the previous image (by "name"). For a listed person, COPY that outfit VERBATIM into "outfit" unless the [Recent conversation] AFTER that point explicitly changes it — someone puts on, takes off, opens, unbuttons, lifts, pulls aside/down, tears or changes a garment (update ONLY the affected garments and keep the rest), or the scene clearly moved to a new time or place where they would have dressed again (then describe the new outfit).`,
+	`- A person recorded as undressed (naked, topless, bottomless, no bra, no panties, clothes pulled aside, etc.) STAYS that way until the text says they get dressed or cover up. NEVER re-dress someone just because the latest lines do not mention clothes — silence means NO change. Do not soften or omit an undress state that is still in effect.`,
+	`- For a person NOT in [Current outfits], derive the outfit from the text; if the text never describes it, use the default outfit from the reference (or a plausible one) starting with "fully clothed".`,
 	``,
 	`General rules:`,
 	`- English only. Focus on the single most recent visual beat, not the whole history.`,
-	`- "base", "appearance" and "state" are tag lists; "scene" is the only place for full sentences.`,
+	`- "base", "appearance", "outfit" and "state" are tag lists; "scene" is the only place for full sentences.`,
 	`- Do NOT copy the status window, stat block, or any prompt/instruction text from the input — write your own concise tags.`,
 	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, "rating:" tags, or negative terms — those are added separately.`,
 	`- Keep it concise (combined budget is small): "base" short, "scene" at most two sentences, each character under ~40 tags.`,
@@ -901,6 +909,23 @@ function isReservedName(key: string, charLabel: string, userLabel: string): bool
 function buildKnownBlock(ledger: AppearanceLedger): string {
 	const lines = Object.entries(ledger).map(([name, e]) => `- ${name}: ${e.appearance}`);
 	return lines.length ? `[Known characters]\n${lines.join('\n')}` : '';
+}
+
+/** 복장 원장을 LLM 주입용 [Current outfits] 블록으로. 비면 빈 문자열. */
+function buildOutfitBlock(ledger: OutfitLedger): string {
+	const lines = Object.entries(ledger).map(([name, e]) => `- ${name}: ${e.outfit}`);
+	return lines.length ? `[Current outfits]\n${lines.join('\n')}` : '';
+}
+
+/** 원장 상한 초과 시 가장 오래 안 나온 항목부터 제거(LRU evict). 변경 여부 반환. */
+function evictLedger(ledger: Record<string, { lastSeen: number }>, max: number): boolean {
+	const names = Object.keys(ledger);
+	if (names.length <= max) return false;
+	names
+		.sort((a, b) => ledger[a].lastSeen - ledger[b].lastSeen)
+		.slice(0, names.length - max)
+		.forEach((n) => delete ledger[n]);
+	return true;
 }
 
 interface ImageRequestBody {
@@ -1067,6 +1092,12 @@ chatRouter.post('/image/prepare', async (c) => {
 	const ledger: AppearanceLedger = { ...(session.appearances ?? {}) };
 	let ledgerDirty = false;
 	const knownBlock = buildKnownBlock(ledger); // LLM 주입용 [Known characters] 블록
+	// 복장 원장(세션 누적) — 인물별 현재 복장/노출 상태. 주인공·유저 포함. 이전 이미지 시점 값을 주입하고
+	// LLM 이 "텍스트가 바꾸지 않으면 그대로 복사"한 결과를 다시 저장해 옷 상태를 턴 간 이어 간다.
+	// 재생성(replaceId)은 과거 시점 그림일 수 있어 원장을 읽기만 하고 갱신하지 않는다.
+	const outfits: OutfitLedger = { ...(session.outfits ?? {}) };
+	let outfitsDirty = false;
+	const outfitBlock = buildOutfitBlock(outfits); // LLM 주입용 [Current outfits] 블록
 
 	// 디버그(요청자가 debug 모드일 때만)용 진단값 누적 — 성공·실패 양쪽에서 동봉한다.
 	let situation = ''; // base 와 인물 캡션을 ' | ' 로 합친 표시용
@@ -1086,6 +1117,7 @@ chatRouter.post('/image/prepare', async (c) => {
 					promptModel,
 					characterRef,
 					knownCharacters: knownBlock,
+					currentOutfits: outfitBlock,
 					situation,
 					baseScene,
 					scene: sceneText,
@@ -1120,6 +1152,7 @@ chatRouter.post('/image/prepare', async (c) => {
 		const promptParts: string[] = [];
 		if (characterRef) promptParts.push(`[Character]\n${characterRef}`);
 		if (knownBlock) promptParts.push(knownBlock);
+		if (outfitBlock) promptParts.push(outfitBlock);
 		promptParts.push(sceneBlock);
 		// 캔버스 방향 힌트(system 은 고정 prefix 라 user 쪽에 붙임). 가로형이면 옆으로 넓은 구도를 유도.
 		promptParts.push(canvasHint(resolution));
@@ -1147,8 +1180,9 @@ chatRouter.post('/image/prepare', async (c) => {
 		const rawChars = (Array.isArray(obj.characters) ? obj.characters : []).slice(0, MAX_CHARACTERS);
 		charCaptions = [];
 		for (const cc of rawChars) {
-			const entry = cc as { name?: unknown; appearance?: unknown; state?: unknown };
+			const entry = cc as { name?: unknown; appearance?: unknown; outfit?: unknown; state?: unknown };
 			const cleanState = sanitizeSituation(str(entry.state));
+			const outfit = sanitizeSituation(str(entry.outfit)).slice(0, MAX_OUTFIT_CHARS);
 			let appearance = sanitizeSituation(str(entry.appearance)).slice(0, MAX_APPEARANCE_CHARS);
 			const key = normalizeKey(str(entry.name));
 			// 주인공(char)·유저(user)는 원장에 박지 않는다(주인공은 매 턴 ref 로 안정).
@@ -1163,20 +1197,22 @@ chatRouter.post('/image/prepare', async (c) => {
 					ledgerDirty = true;
 				}
 			}
+			// 복장 원장: 이번 턴 복장을 name 별로 기록(주인공·유저 포함). 재생성이면 저장 안 함.
+			if (key && outfit && !replaceId && outfits[key]?.outfit !== outfit) {
+				outfits[key] = { outfit, lastSeen: turnRef };
+				outfitsDirty = true;
+			}
 			// 옷 입은 장면이면 가려지는 특징(유두·음모·배 문신 등)을 캡션에서 뺀다 — 원장 외형에도 적용.
-			const caption = [stripHiddenFeatures(appearance, cleanState), cleanState].filter(Boolean).join(', ');
+			// 노출 판정은 outfit+state 합본으로. 캡션 = 외형 + 복장 + 포즈/표정.
+			const caption = [stripHiddenFeatures(appearance, `${outfit}, ${cleanState}`), outfit, cleanState]
+				.filter(Boolean)
+				.join(', ');
 			if (caption) charCaptions.push(caption);
 		}
 
 		// 원장 상한 초과 시 가장 오래 안 나온 인물부터 제거(LRU evict).
-		const names = Object.keys(ledger);
-		if (names.length > MAX_LEDGER_ENTRIES) {
-			names
-				.sort((a, b) => ledger[a].lastSeen - ledger[b].lastSeen)
-				.slice(0, names.length - MAX_LEDGER_ENTRIES)
-				.forEach((n) => delete ledger[n]);
-			ledgerDirty = true;
-		}
+		if (evictLedger(ledger, MAX_LEDGER_ENTRIES)) ledgerDirty = true;
+		if (evictLedger(outfits, MAX_LEDGER_ENTRIES)) outfitsDirty = true;
 
 		// 표시용 합본(디버그 패널·빈값 판정). base·자연어 장면·인물 캡션을 ' | ' 로 잇는다.
 		situation = [baseScene, sceneText, ...charCaptions].filter(Boolean).join(' | ');
@@ -1239,12 +1275,12 @@ chatRouter.post('/image/prepare', async (c) => {
 		);
 	}
 
-	// 외형 원장 변경분 영속 — 다음 턴 일관성. 응답 전에 inline 저장(빠른 재요청 레이스 방지).
-	if (ledgerDirty) {
+	// 외형·복장 원장 변경분 영속 — 다음 턴 일관성. 응답 전에 inline 저장(빠른 재요청 레이스 방지).
+	if (ledgerDirty || outfitsDirty) {
 		try {
-			await updateAppearances(db, sessionId, ledger);
+			await updateImageLedgers(db, sessionId, { appearances: ledger, outfits });
 		} catch (e) {
-			console.warn('[chat/image] 외형 원장 저장 실패(무시):', String(e));
+			console.warn('[chat/image] 이미지 원장 저장 실패(무시):', String(e));
 		}
 	}
 

@@ -5,13 +5,17 @@
  * 스키마는 NAI V4.5/V5 캐릭터 기능(char_captions 분리)에 맞춰 장면을 분해한다:
  *  - base: 배경·구도·인원수 태그·상호작용(source#/target#) 등 전역 캡션(태그).
  *  - scene: 자연어 장면 문장(1~2문장, 영어) — V5 만 조립에 사용. 인물은 역할 명사로만.
- *  - characters[]: 화면에 보이는 인물별 { name, appearance(고정 외형), state(현재 복장·포즈·표정) }.
+ *  - characters[]: 화면에 보이는 인물별 { name, appearance(고정 외형), outfit(현재 복장/노출 상태), state(포즈·표정) }.
+ *    outfit 을 state 에서 분리한 이유: 채팅에선 복장 원장(session.outfits)으로 턴 간 이어 가기 위해.
  */
 import { jsonSchema } from 'ai';
 
 export interface ScenePromptCharacter {
 	name: string;
 	appearance: string;
+	/** 현재 복장/노출 상태(태그). 채팅에선 복장 원장으로 턴 간 유지. */
+	outfit: string;
+	/** 포즈·행동·표정·프레이밍(복장 제외). */
 	state: string;
 }
 
@@ -35,9 +39,10 @@ export const SCENE_PROMPT_SCHEMA = jsonSchema<ScenePromptObject>({
 				properties: {
 					name: { type: 'string' },
 					appearance: { type: 'string' },
+					outfit: { type: 'string' },
 					state: { type: 'string' }
 				},
-				required: ['name', 'appearance', 'state']
+				required: ['name', 'appearance', 'outfit', 'state']
 			}
 		}
 	},
@@ -90,24 +95,25 @@ export function sanitizeScene(raw: string): string {
  * 옷을 벗기거나 들춘다. → 가려지는 특징은 appearance 금지, 실제로 노출된 순간에만 state 에 넣게 한다.
  */
 export const HIDDEN_FEATURE_RULE = [
-	`- HIDDEN FEATURES: body details that clothing normally covers — nipples, areolae, pubic hair, genitals, abs/toned stomach, tan lines, and any tattoo, scar, mole, birthmark or piercing on the breasts, chest, stomach, back, hips, thighs or buttocks — must NEVER go in "appearance", even if the reference lists them as permanent traits. Mention them ONLY in "state", and ONLY when that body part is actually uncovered at this moment.`,
-	`- Never undress, unbutton, lift or open clothing that the text does not: if the person is dressed, "state" MUST begin with "fully clothed" followed by the garments, and nothing under the clothes may be tagged.`
+	`- HIDDEN FEATURES: body details that clothing normally covers — nipples, areolae, pubic hair, genitals, abs/toned stomach, tan lines, and any tattoo, scar, mole, birthmark or piercing on the breasts, chest, stomach, back, hips, thighs or buttocks — must NEVER go in "appearance", even if the reference lists them as permanent traits. Mention them ONLY in "outfit" (as part of the undress state), and ONLY when that body part is actually uncovered at this moment.`,
+	`- Never undress, unbutton, lift or open clothing that neither the text nor the recorded outfit does: if the person is dressed, "outfit" MUST begin with "fully clothed" followed by the garments, and nothing under the clothes may be tagged.`
 ].join('\n');
 
 /** 옷을 입은 상태에선 그릴 수 없는(가려지는) 특징 태그 — 세그먼트 단위로 매칭. */
 const HIDDEN_FEATURE_RE =
 	/\b(nipples?|areolae?|pubic|pussy|vagina|vulva|clitoris|clit|labia|penis|cock|testicles|anus|genitals?|abs|six ?pack|toned stomach|tan ?lines?|womb tattoo|(?:stomach|belly|abdomen|abdominal|breast|chest|back|hip|thigh|thighs|butt|buttocks|ass|crotch|groin|pubic|shoulder blade|waist|rib|ribs) (?:tattoo|scar|mole|birthmark|piercing)|(?:tattoo|scar|mole|birthmark|piercing)s? (?:on|across|under|below|between|over) (?:the |her |his |their )?(?:stomach|belly|abdomen|lower abdomen|breasts?|chest|back|lower back|hips?|thighs?|butt|buttocks|ass|crotch|groin|shoulder blades?|waist|ribs?|navel)|navel piercing|belly button piercing|nipple piercings?|genital piercings?)\b/i;
 
-/** state 에 노출 신호가 있는지 — 있으면 가려진 특징도 그대로 둔다(부위별 세분화는 안 함). */
+/** outfit/state 에 노출 신호가 있는지 — 있으면 가려진 특징도 그대로 둔다(부위별 세분화는 안 함). */
 const EXPOSURE_RE =
 	/\b(naked|nude|nudity|topless|bottomless|braless|pantsless|no bra|no panties|no shirt|no pants|undress(?:ed|ing)?|strip(?:ped|ping)?|breasts? out|exposed|open shirt|open clothes|open jacket|open robe|clothes (?:lift|pull|down)|shirt (?:lift|pull)|skirt (?:lift|pull)|dress (?:lift|pull)|panties (?:aside|pull|down)|clothing aside|see-through|wet (?:shirt|clothes)|cleavage|midriff|navel|crop top|bikini|swimsuit|lingerie|underwear|bra only|panties only|towel|bath(?:ing|tub)?|shower(?:ing)?|onsen|hot spring|sex|vaginal|anal|fellatio|cunnilingus|paizuri|masturbat\w*|cum|after sex|nipples?|pussy|penis|spread legs)\b/i;
 
 /**
  * 옷을 입은 장면이면 appearance 에서 가려지는 특징 태그를 떼어 낸다(LLM 이 규칙을 어겨도 출력단에서 차단).
  * 원장(session.appearances)에 이미 박힌 외형에도 매 턴 적용되므로 소급된다.
+ * `exposure` 는 노출 판정 대상 문자열 — 호출자가 outfit 과 state 를 합쳐 넘긴다.
  */
-export function stripHiddenFeatures(appearance: string, state: string): string {
-	if (!appearance || EXPOSURE_RE.test(state)) return appearance;
+export function stripHiddenFeatures(appearance: string, exposure: string): string {
+	if (!appearance || EXPOSURE_RE.test(exposure)) return appearance;
 	return appearance
 		.split(',')
 		.map((s) => s.trim())
