@@ -15,6 +15,12 @@ import { DEFAULT_NAI_MODEL, getNaiModel } from '$lib/naiModels';
 const SUBSCRIPTION_URL = 'https://api.novelai.net/user/subscription';
 const GENERATE_URL = 'https://image.novelai.net/ai/generate-image';
 const UPSCALE_URL = 'https://image.novelai.net/ai/upscale'; // api.novelai.net/ai/upscale 은 404(이미지 API 는 image.novelai.net 으로 이전)
+/**
+ * 업스케일 요청의 필수 `model`. image.novelai.net 은 model 없으면 400("model doesn't exist"),
+ * V4.5 id 는 400("doesn't support standalone upscaling"). V5 Full 만 통과(2026-09-05 실측) — 업스케일러 자체는
+ * 모델 무관하므로 원본을 만든 그림체 모델과 상관없이 항상 이 값을 보낸다.
+ */
+const UPSCALE_MODEL = 'nai-diffusion-5-full';
 
 /** NovelAI 구독 등급. 3 = Opus. */
 export const OPUS_TIER = 3;
@@ -353,7 +359,7 @@ export async function generateImage(
 
 /**
  * NovelAI 업스케일(2배). NAIA2.0 의 upscale_NAI 와 동일 동작:
- *   POST /ai/upscale  body { image: base64, width, height, scale } → 응답 ZIP(이미지 1장).
+ *   POST /ai/upscale  body { image: base64, width, height, scale, model } → 응답 ZIP(image_0.png 1장).
  * 이미 인코딩된 base64(클라가 보낸 원본)를 그대로 전달해 재인코딩을 피한다.
  */
 export async function upscaleImage(
@@ -370,7 +376,8 @@ export async function upscaleImage(
 				image: opts.imageBase64,
 				width: opts.width,
 				height: opts.height,
-				scale
+				scale,
+				model: UPSCALE_MODEL
 			})
 		});
 	} catch (e) {
