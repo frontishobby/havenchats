@@ -31,6 +31,35 @@ export interface ChatRequestBody {
 	userMsgId?: string;
 	assistantMsgId?: string;
 	debug?: boolean;
+	/**
+	 * 입력 필터(/api/chat/rewrite)로 이 유저 메시지를 변환하는 데 든 비용(USD). 있으면 user 행 cost 로 저장.
+	 * (이미지 commit 의 ?cost= 와 같은 클라 보고 방식)
+	 */
+	inputCost?: number;
+}
+
+// ── 입력 필터(유저 입력을 지정 문체·뉘앙스로 변환) ─────────────────────────
+
+/** POST /api/chat/rewrite 요청 본문. 전송 직전 유저 입력을 캐릭터·최근 대화 맥락에 맞춰 다시 쓴다. */
+export interface RewriteRequestBody {
+	characterId: string;
+	/** 이어가는 세션이면 그 id(최근 대화를 맥락으로 씀). 없으면 오프닝만 맥락. */
+	sessionId?: string;
+	openingIndex?: number;
+	/** 원문(유저가 입력창에 쓴 그대로). */
+	text: string;
+	/** 필터 지시 한 줄(예: "무협지 풍으로"). */
+	filter: string;
+	/** 변환에 쓸 모델 — 채팅 허용목록(MODEL_IDS) 전체 가능. */
+	model?: string;
+}
+
+/** POST /api/chat/rewrite 응답. */
+export interface RewriteResponse {
+	/** 변환된 입력문. */
+	text: string;
+	/** 변환 LLM 비용(USD). /api/chat 의 inputCost 로 되돌려 보내 user 행에 저장. */
+	cost: number | null;
 }
 
 // ── 실시간 이미지 생성(클라가 NovelAI 직접 호출) ──────────────────────────

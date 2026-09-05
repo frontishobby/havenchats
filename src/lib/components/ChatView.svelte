@@ -13,7 +13,7 @@
 	import { openLogin } from '$lib/state/loginModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { generateImageDirect, getNovelaiToken, NovelaiError } from '$lib/novelaiClient';
-	import type { ImagePrepareResponse, ImageCommitResponse } from '$lib/api/chat';
+	import type { ImagePrepareResponse, ImageCommitResponse, RewriteResponse } from '$lib/api/chat';
 	import { resized } from '$lib/imageUrl';
 	import { imgSrc } from '$lib/imageBase';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
@@ -55,6 +55,12 @@
 	const USER_ACTS_LABELS = ['금지', '적정', '풍부'];
 
 	const MODEL_KEY = 'haven:model';
+
+	// ── 입력 필터(전송 전 유저 입력을 지정 문체로 변환) 설정 ──
+	const FILTER_ENABLED_KEY = 'haven:filter:enabled';
+	const FILTER_PROMPT_KEY = 'haven:filter:prompt';
+	const FILTER_MODEL_KEY = 'haven:filter:model';
+	const FILTER_PROMPT_MAX = 300;
 
 	// ── 실시간 이미지 생성(NovelAI) 설정 ──
 	const IMG_ENABLED_KEY = 'haven:img:enabled';
@@ -378,6 +384,16 @@
 
 	// ── 실시간 이미지 생성 설정/상태 ──
 	let showImageSettings = $state(false); // 이미지 설정 모달
+
+	// ── 입력 필터 ── 켜고 지시문이 있으면 send() 가 /api/chat/rewrite 로 원문을 변환한 뒤 전송한다.
+	let filterEnabled = $state(false);
+	let filterPrompt = $state(''); // 변환 지시 한 줄(예: "무협지 풍으로")
+	let filterModel = $state(DEFAULT_MODEL_ID); // 변환 모델 — 채팅 모델 목록(MODELS) 전체 선택 가능
+	let showFilterSettings = $state(false); // 입력 필터 모달
+	let filterModelOpen = $state(false);
+	let rewriting = $state(false); // 변환 요청 진행 중(전송 직전)
+	const filterActive = $derived(filterEnabled && filterPrompt.trim().length > 0);
+	const currentFilterModel = $derived(getModel(filterModel) ?? MODELS[0]);
 	let imageEnabled = $state(false); // 켜져 있으면 매 assistant 턴마다 이미지 생성
 	let imageResolution = $state<ImgResolution>('832x1216');
 	// 선택된 그림체 id('' = 기본 그림체). 즐겨찾기·추천 목록에서 prompt 를 해석해 사용.
@@ -456,6 +472,11 @@
 		if (savedPM && IMAGE_PROMPT_MODEL_IDS.has(savedPM)) imagePromptModel = savedPM;
 		imageEarly = localStorage.getItem(IMG_EARLY_KEY) === '1';
 		ignoreCharacterAssets = localStorage.getItem(IMG_IGNORE_ASSETS_KEY) === '1';
+		// 입력 필터 설정 복원(전역).
+		filterEnabled = localStorage.getItem(FILTER_ENABLED_KEY) === '1';
+		filterPrompt = (localStorage.getItem(FILTER_PROMPT_KEY) ?? '').slice(0, FILTER_PROMPT_MAX);
+		const savedFM = localStorage.getItem(FILTER_MODEL_KEY);
+		if (savedFM && getModel(savedFM)) filterModel = savedFM;
 		// 이미지 생성 ON 여부·그림체:
 		//  - 새 채팅(세션 없음): 캐릭터 추천 그림체가 있으면 그 그림체로 자동 ON, 없으면 OFF(디폴트).
 		//  - 이어가는 세션: 기존 전역 설정(localStorage) 복원.
@@ -523,6 +544,15 @@
 	$effect(() => {
 		localStorage.setItem(IMG_IGNORE_ASSETS_KEY, ignoreCharacterAssets ? '1' : '0');
 	});
+	$effect(() => {
+		localStorage.setItem(FILTER_ENABLED_KEY, filterEnabled ? '1' : '0');
+	});
+	$effect(() => {
+		localStorage.setItem(FILTER_PROMPT_KEY, filterPrompt);
+	});
+	$effect(() => {
+		localStorage.setItem(FILTER_MODEL_KEY, filterModel);
+	});
 
 	// NovelAI 키 등록 상태 조회(이미지 설정 모달 열 때 1회). 미등록이면 등록 안내를 띄운다.
 	async function loadNaiStatus() {
@@ -554,6 +584,47 @@
 		showImageSettings = false;
 		imgModelOpen = false;
 		styleOpen = false;
+	}
+
+	function toggleFilterSettings() {
+		showFilterSettings = !showFilterSettings;
+		if (!showFilterSettings) filterModelOpen = false;
+	}
+	function closeFilterSettings() {
+		showFilterSettings = false;
+		filterModelOpen = false;
+	}
+	function selectFilterModel(id: string) {
+		filterModel = id;
+		filterModelOpen = false;
+	}
+
+	/**
+	 * 입력 필터: 원문을 캐릭터·최근 대화 맥락에 맞춰 지시 문체로 변환(/api/chat/rewrite).
+	 * 실패하면 throw — send() 가 전송을 중단하고 입력을 복원한다.
+	 */
+	async function rewriteInput(text: string): Promise<RewriteResponse> {
+		const res = await fetch('/api/chat/rewrite', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				characterId: character.id,
+				sessionId: sessionId ?? undefined,
+				openingIndex: data.openingIndex,
+				text,
+				filter: filterPrompt.trim(),
+				model: filterModel
+			})
+		});
+		if (!res.ok) {
+			const j = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+			if (j.error === 'no_gateway_key') apiKeyModal.open = true;
+			throw new Error(j.message ?? `HTTP ${res.status}`);
+		}
+		const d = (await res.json()) as RewriteResponse;
+		const out = (d.text ?? '').trim();
+		if (!out) throw new Error('빈 결과');
+		return { text: out, cost: d.cost ?? null };
 	}
 	function selectImgModel(id: string) {
 		imagePromptModel = id;
@@ -995,8 +1066,8 @@
 	}
 
 	async function send() {
-		const text = input.trim();
-		if (!text || streaming) return;
+		const original = input.trim();
+		if (!original || streaming) return;
 
 		// 비로그인 상태에서는 전송 대신 로그인 모달을 띄운다 (입력값은 유지)
 		if (!data.user) {
@@ -1005,8 +1076,8 @@
 		}
 
 		// 너무 긴 메시지는 서버가 413 으로 거부하므로 전송 전에 막는다 (입력값 유지)
-		if (text.length > MAX_USER_MSG_CHARS) {
-			sendError = `메시지가 너무 길어요. ${MAX_USER_MSG_CHARS.toLocaleString()}자 이내로 줄여주세요. (현재 ${text.length.toLocaleString()}자)`;
+		if (original.length > MAX_USER_MSG_CHARS) {
+			sendError = `메시지가 너무 길어요. ${MAX_USER_MSG_CHARS.toLocaleString()}자 이내로 줄여주세요. (현재 ${original.length.toLocaleString()}자)`;
 			return;
 		}
 		sendError = null;
@@ -1018,16 +1089,42 @@
 		// 새로고침 전(라이브) 메시지도 같은 id 로 DB 삭제가 가능해진다.
 		const userMsgId = crypto.randomUUID();
 		const assistantMsgId = crypto.randomUUID();
-		messages.push({ id: userMsgId, role: 'user', content: text });
+		const userIdx = messages.length;
+		// 입력 필터가 켜져 있으면 원문을 먼저 버블에 띄우고(pending 표시) 변환 결과로 갈아끼운다.
+		messages.push({ id: userMsgId, role: 'user', content: original, pending: filterActive || undefined });
+		streaming = true;
+		await scrollUserToTop(userMsgId);
+
+		// ── 입력 필터: 전송 직전 원문을 지시 문체로 변환. 실패 시 전송 중단·버블 제거·입력 복원.
+		let text = original;
+		let inputCost: number | undefined;
+		if (filterActive) {
+			rewriting = true;
+			try {
+				const r = await rewriteInput(original);
+				text = r.text;
+				inputCost = r.cost ?? undefined;
+				messages[userIdx].content = text;
+			} catch (e) {
+				messages.splice(userIdx, 1);
+				input = original;
+				sendError = `입력 필터 변환 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`;
+				streaming = false;
+				rewriting = false;
+				await tick();
+				autoGrow();
+				return;
+			}
+			rewriting = false;
+			messages[userIdx].pending = false;
+		}
 
 		// assistant placeholder. $state 배열은 push 시 프록시로 감싸므로,
 		// 반드시 messages[idx] (프록시)를 통해 수정해야 반응성이 동작한다.
 		const idx = messages.length;
 		messages.push({ id: assistantMsgId, role: 'assistant', content: '' });
-		streaming = true;
 		// 첫 대화(세션 없음)면 미리 입력해 둔 상시 기억을 세션 생성과 함께 저장한다.
 		const newSessionMemory = sessionId ? undefined : memoryDraft.trim() || undefined;
-		await scrollUserToTop(userMsgId);
 
 		// 응답 완료 후 실시간 이미지를 생성할지(정상 응답일 때만) — finally 에서 트리거.
 		let imageAfter = false;
@@ -1051,6 +1148,7 @@
 					userMsgId,
 					assistantMsgId,
 					memory: newSessionMemory,
+					inputCost,
 					debug: debug || undefined
 				})
 			});
@@ -1244,10 +1342,12 @@
 	function onWindowKey(e: KeyboardEvent) {
 		if (e.key !== 'Escape') return;
 		if (modelOpen) modelOpen = false;
+		else if (filterModelOpen) filterModelOpen = false;
 		else if (imgModelOpen) imgModelOpen = false;
 		else if (styleOpen) styleOpen = false;
 		else if (showSettings) showSettings = false;
 		else if (showImageSettings) closeImageSettings();
+		else if (showFilterSettings) closeFilterSettings();
 	}
 
 	function autoGrow() {
@@ -1299,6 +1399,37 @@
 			</div>
 		</button>
 		<div class="header-right">
+			<button
+				class="settings-btn"
+				class:active={filterActive}
+				onclick={toggleFilterSettings}
+				aria-label="입력 필터"
+				aria-expanded={showFilterSettings}
+				title="입력 필터 — 보내는 글을 지정한 문체로 변환"
+			>
+				<svg
+					viewBox="0 0 24 24"
+					width="18"
+					height="18"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path
+						d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z"
+					/>
+					<path d="m14 7 3 3" />
+					<path d="M5 6v4" />
+					<path d="M19 14v4" />
+					<path d="M10 2v2" />
+					<path d="M7 8H3" />
+					<path d="M21 16h-4" />
+					<path d="M11 3H9" />
+				</svg>
+			</button>
 			<button
 				class="settings-btn"
 				class:active={imageEnabled}
@@ -1560,6 +1691,124 @@
 						<p class="summary-empty">아직 요약이 없어요. 대화가 길어지면 자동으로 생성됩니다.</p>
 					{/if}
 				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if showFilterSettings}
+		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+		<div class="modal-backdrop" onclick={closeFilterSettings} role="presentation">
+			<div
+				class="modal"
+				role="dialog"
+				aria-modal="true"
+				aria-label="입력 필터"
+				tabindex="-1"
+				onclick={(e) => e.stopPropagation()}
+			>
+				<div class="modal-head">
+					<h2>입력 필터</h2>
+					<button class="modal-close" onclick={closeFilterSettings} aria-label="닫기">✕</button>
+				</div>
+
+				<div class="setting">
+					<div class="setting-row">
+						<span class="field-label" id="filter-enable-label">입력 필터</span>
+						<button
+							class="switch"
+							class:on={filterEnabled}
+							role="switch"
+							aria-checked={filterEnabled}
+							aria-labelledby="filter-enable-label"
+							onclick={() => (filterEnabled = !filterEnabled)}
+						>
+							<span class="knob"></span>
+						</button>
+					</div>
+					<p class="setting-hint">
+						켜면 보내는 글이 <strong>캐릭터 설정·최근 대화</strong> 맥락에 맞춰 아래 지시의 문체·뉘앙스로
+						다시 쓰여 전송돼요. 의도·행동·대사는 그대로 유지됩니다. 지시는 입력창 위의 한 줄에서도 바꿀 수
+						있어요.
+					</p>
+				</div>
+
+				{#if filterEnabled}
+					<div class="setting">
+						<div class="setting-row">
+							<label class="field-label" for="filter-prompt">변환 지시</label>
+						</div>
+						<input
+							id="filter-prompt"
+							class="filter-input boxed"
+							type="text"
+							bind:value={filterPrompt}
+							placeholder="예: 무협지 풍으로"
+							maxlength={FILTER_PROMPT_MAX}
+							autocomplete="off"
+						/>
+						<p class="setting-hint">
+							한 줄로 적어요. 예: <em>무협지 풍으로</em> · <em>사극 말투로</em> · <em>냉소적이고 짧게</em> ·
+							<em>어린아이처럼 서툴게</em>
+						</p>
+					</div>
+
+					<div class="setting">
+						<div class="setting-row">
+							<span class="field-label" id="filter-model-label">변환 모델</span>
+						</div>
+						<div class="model-select">
+							<button
+								class="model-trigger"
+								class:open={filterModelOpen}
+								onclick={() => (filterModelOpen = !filterModelOpen)}
+								aria-haspopup="listbox"
+								aria-expanded={filterModelOpen}
+								aria-labelledby="filter-model-label"
+							>
+								{#if iconFailed[currentFilterModel.id]}
+									<span class="model-icon fallback">{currentFilterModel.label.charAt(0)}</span>
+								{:else}
+									<img
+										class="model-icon"
+										src={currentFilterModel.icon}
+										alt=""
+										onerror={() => (iconFailed[currentFilterModel.id] = true)}
+									/>
+								{/if}
+								<span class="model-name">{currentFilterModel.label}</span>
+								<span class="chev">▾</span>
+							</button>
+							{#if filterModelOpen}
+								<ul class="model-list" role="listbox" aria-labelledby="filter-model-label">
+									{#each MODELS as m (m.id)}
+										<li>
+											<button
+												class="model-option"
+												class:selected={m.id === filterModel}
+												role="option"
+												aria-selected={m.id === filterModel}
+												onclick={() => selectFilterModel(m.id)}
+											>
+												{#if iconFailed[m.id]}
+													<span class="model-icon fallback">{m.label.charAt(0)}</span>
+												{:else}
+													<img
+														class="model-icon"
+														src={m.icon}
+														alt=""
+														onerror={() => (iconFailed[m.id] = true)}
+													/>
+												{/if}
+												<span class="model-name">{m.label}</span>
+											</button>
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+						<p class="setting-hint">변환은 짧은 호출이라 채팅 모델과 달라도 돼요. 비용은 보낸 글 옆에 표시됩니다.</p>
+					</div>
+				{/if}
 			</div>
 		</div>
 	{/if}
@@ -1894,8 +2143,8 @@
 				{#if m.content || m.errorReason || m.role === 'image_generation' || (streaming && m === lastMessage)}
 					<div class="para {m.role}" data-mid={m.id}>
 						{#if !(streaming && m === lastMessage) && !m.pending}
-							{#if (m.role === 'assistant' || m.role === 'image_generation') && m.cost != null && Number.isFinite(m.cost) && m.cost > 0}
-								<span class="msg-cost" title="이 응답 생성 비용">{formatCost(m.cost)}</span>
+							{#if m.cost != null && Number.isFinite(m.cost) && m.cost > 0}
+								<span class="msg-cost" title={m.role === 'user' ? '입력 필터 변환 비용' : '이 응답 생성 비용'}>{formatCost(m.cost)}</span>
 							{/if}
 							{#if m.role === 'image_generation'}
 								<button
@@ -2004,6 +2253,12 @@
 							{/if}
 						{:else}
 							{@render novelBody(m.content, m.role === 'user')}
+							{#if m.role === 'user' && m.pending}
+								<div class="rewrite-tag" role="status">
+									<span class="typing"><i></i><i></i><i></i></span>
+									<span>입력 필터로 변환 중…</span>
+								</div>
+							{/if}
 						{/if}
 						{#if m.errorReason}
 							<p class="msg-error-reason">사유: {m.errorReason}</p>
@@ -2023,6 +2278,51 @@
 	</div>
 
 	<div class="composer" bind:clientHeight={composerH}>
+		{#if filterEnabled}
+			<!-- 입력 필터 지시 한 줄 — 켜져 있는 동안 항상 보이고, 여기서 바로 고칠 수 있다. -->
+			<div class="filter-bar" class:busy={rewriting}>
+				<svg
+					viewBox="0 0 24 24"
+					width="15"
+					height="15"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path
+						d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z"
+					/>
+					<path d="m14 7 3 3" />
+					<path d="M5 6v4" />
+					<path d="M19 14v4" />
+					<path d="M10 2v2" />
+				</svg>
+				<input
+					class="filter-input"
+					type="text"
+					bind:value={filterPrompt}
+					placeholder="입력 필터 지시 — 예: 무협지 풍으로"
+					maxlength={FILTER_PROMPT_MAX}
+					autocomplete="off"
+					aria-label="입력 필터 지시"
+					onkeydown={(e) => {
+						if (e.key === 'Enter') {
+							e.preventDefault();
+							textarea?.focus();
+						}
+					}}
+				/>
+				<button class="filter-chip" onclick={toggleFilterSettings} title="변환 모델 바꾸기">
+					{currentFilterModel.label}
+				</button>
+				<button class="filter-off" onclick={() => (filterEnabled = false)} aria-label="입력 필터 끄기">
+					✕
+				</button>
+			</div>
+		{/if}
 		<div class="composer-inner">
 			<textarea
 				bind:this={textarea}
@@ -2032,7 +2332,7 @@
 					if (sendError) sendError = null;
 				}}
 				onkeydown={onKeydown}
-				placeholder={`행동이나 대사를 입력하세요…`}
+				placeholder={filterActive ? '행동이나 대사를 입력하세요… (필터로 변환 후 전송)' : '행동이나 대사를 입력하세요…'}
 				maxlength={MAX_USER_MSG_CHARS}
 				rows="1"
 			></textarea>
@@ -3125,6 +3425,89 @@
 		color: var(--danger, #ef4444);
 		margin: 8px 0 0;
 	}
+	/* 입력 필터 — 컴포저 위 한 줄 지시 바 */
+	.filter-bar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin: 0 0 8px;
+		padding: 5px 8px 5px 12px;
+		border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+		background: color-mix(in srgb, var(--accent) 9%, var(--bg-card));
+		border-radius: 14px;
+		color: var(--accent);
+		transition: opacity 0.15s ease;
+	}
+	.filter-bar.busy {
+		opacity: 0.7;
+	}
+	.filter-bar svg {
+		flex-shrink: 0;
+	}
+	.filter-input {
+		flex: 1;
+		min-width: 0;
+		background: transparent;
+		border: none;
+		outline: none;
+		color: var(--text);
+		font-size: 0.85rem;
+		line-height: 1.4;
+		padding: 4px 0;
+	}
+	.filter-input::placeholder {
+		color: var(--text-faint);
+	}
+	.filter-input.boxed {
+		width: 100%;
+		box-sizing: border-box;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		padding: 9px 12px;
+		font-size: 0.9rem;
+		transition: border-color 0.15s ease;
+	}
+	.filter-input.boxed:focus {
+		border-color: var(--accent);
+	}
+	.filter-chip {
+		flex-shrink: 0;
+		border: 1px solid var(--border);
+		background: var(--bg);
+		color: var(--text-dim);
+		border-radius: 999px;
+		padding: 3px 9px;
+		font-size: 0.72rem;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+	.filter-chip:hover {
+		color: var(--text);
+		border-color: var(--text-faint);
+	}
+	.filter-off {
+		flex-shrink: 0;
+		background: none;
+		border: none;
+		color: var(--text-faint);
+		font-size: 0.85rem;
+		padding: 2px 4px;
+		cursor: pointer;
+	}
+	.filter-off:hover {
+		color: var(--text);
+	}
+	/* 유저 버블 아래 변환 진행 표시 */
+	.rewrite-tag {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		margin-top: 6px;
+		font-size: 0.75rem;
+		color: var(--accent);
+	}
+
 	.local-warn {
 		flex-shrink: 0;
 		padding: 8px 14px;

@@ -69,7 +69,13 @@ import { pickNaiModel } from '$lib/naiModels';
 import { IMAGE_PROMPT_MODEL_IDS, DEFAULT_IMAGE_PROMPT_MODEL_ID } from '$lib/data/models';
 import type { ImageDebug } from '$lib/chatDebug';
 import { loadChatPage } from '$lib/server/chatPageLoad';
-import type { ChatRequestBody, ImagePrepareResponse, ImageCommitResponse } from '$lib/api/chat';
+import type {
+	ChatRequestBody,
+	ImagePrepareResponse,
+	ImageCommitResponse,
+	RewriteRequestBody,
+	RewriteResponse
+} from '$lib/api/chat';
 import type { AppEnv } from '../../context';
 import { requireUser } from '../../context';
 
@@ -172,8 +178,10 @@ chatRouter.post('/', async (c) => {
 		});
 	}
 
-	// 유저 메시지 즉시 영속화 (스트림 끊겨도 유실 방지) + 세션 모델 갱신
-	const userSeq = await appendMessage(db, session.id, 'user', text, modelId, undefined, undefined, userMsgId);
+	// 유저 메시지 즉시 영속화 (스트림 끊겨도 유실 방지) + 세션 모델 갱신.
+	// 입력 필터(/rewrite)를 거쳤으면 그 변환 비용을 user 행 cost 로 함께 기록(통계 합산용).
+	const inputCost = clampReportedCost(body.inputCost);
+	const userSeq = await appendMessage(db, session.id, 'user', text, modelId, undefined, inputCost, userMsgId);
 
 	// live window(seq > summary_upto_seq) — 방금 넣은 유저 메시지·오프닝 포함
 	const fullWindow = await getWindow(db, session.id, session.summaryUptoSeq);
@@ -1327,6 +1335,184 @@ interface InspectBody {
 	userActs?: number;
 	/** 저장하지 않고 이 변수로 평가해 미리보기(변수 조작 실험용). */
 	varsOverride?: Record<string, string>;
+}
+
+/** 클라가 보고한 비용(USD)을 검증 — 유한·0 초과·상식적 상한(1턴 $1) 안일 때만 채택. */
+function clampReportedCost(v: unknown): number | undefined {
+	if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > 1) return undefined;
+	return v;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// POST '/rewrite' — 입력 필터: 유저 입력을 지정 문체·뉘앙스로 변환(캐릭터·최근 대화 맥락 참고)
+// ════════════════════════════════════════════════════════════════════════════
+
+/** 필터 지시문 상한(한 줄). */
+const MAX_FILTER_CHARS = 300;
+/** 참고용 캐릭터 설정 상한(문체·호칭 맞추기용이라 통짜 전부는 불필요). */
+const REWRITE_MAX_DESC_CHARS = 6000;
+/** 참고용 최근 대화 — 최근 N 개, 각 메시지 글자 상한. */
+const REWRITE_RECENT_MSGS = 8;
+const REWRITE_RECENT_MSG_CHARS = 1500;
+/** 변환 출력 상한(원문 ≤ 4000 토큰이므로 넉넉히). */
+const REWRITE_MAX_OUTPUT_TOKENS = 3000;
+
+function buildRewriteSystem(args: {
+	filter: string;
+	character: Character;
+	userLabel: string;
+	userPersona: string | null;
+	summary: string | null;
+	recent: Array<{ role: string; content: string }>;
+}): string {
+	const { filter, character, userLabel, userPersona, summary, recent } = args;
+	const lines: string[] = [
+		`너는 캐릭터 롤플레이 채팅의 '입력 필터'다. 사용자("${userLabel}")가 캐릭터("${character.name}")에게 보내려고 방금 쓴 입력문을, 아래 변환 지시에 맞는 문체·어조·뉘앙스로 다시 쓴다.`,
+		``,
+		`# 변환 지시`,
+		filter,
+		``,
+		`# 규칙`,
+		`- 원문의 의도·행동·대사·정보(무엇을 하고, 무엇을 말하고, 무엇을 묻는지)는 빠짐없이 보존한다. 새 사건·설정·인물을 지어내거나 원문에 없는 행동을 추가하지 않는다.`,
+		`- 상대 캐릭터("${character.name}")의 반응·대사·행동을 대신 쓰지 않는다. 이건 사용자 쪽 입력이다.`,
+		`- 인칭·시점은 원문을 따른다(1인칭이면 1인칭, 행동 지시문 형식이면 지시문 형식). 원문에서 사용자를 가리키는 말은 그대로 사용자를 가리켜야 한다.`,
+		`- 분량은 원문과 비슷하게 유지한다(최대 1.5배). 원문이 한 줄이면 한두 줄로.`,
+		`- 대사는 큰따옴표("…")로, 행동·서술은 산문으로 쓴다. 원문이 괄호 ( ) 나 *…* 지시문 형식을 쓰면 그 형식을 유지한다.`,
+		`- 아래 캐릭터 설정·최근 대화는 문체·호칭·상황(누가 누구에게, 어떤 관계·장면인지)을 맞추기 위한 참고일 뿐이다. 거기에 답하거나 이야기를 이어 쓰지 마라.`,
+		`- 모든 등장인물은 만 18세 이상 성인으로 간주한다. 미성년자에 대한 성적·선정적 표현은 어떤 경우에도 만들지 않는다.`,
+		`- 출력은 변환된 입력문 본문만. 설명·머리말·따옴표로 전체 감싸기·코드블록 금지.`,
+		``,
+		`# 캐릭터 설정 (참고)`,
+		personalize(character.description, character.name, userLabel).trim().slice(0, REWRITE_MAX_DESC_CHARS) ||
+			'(설정 없음)',
+		``,
+		`# 사용자 정보`,
+		`- 이름: ${userLabel}`
+	];
+	if (userPersona && userPersona.trim()) lines.push(`- 페르소나: ${userPersona.trim()}`);
+	if (summary && summary.trim()) {
+		lines.push(``, `# 지금까지의 이야기 (요약)`, summary.trim());
+	}
+	if (recent.length > 0) {
+		lines.push(``, `# 최근 대화 (참고, 오래된 것부터)`);
+		for (const m of recent) {
+			const who = m.role === 'user' ? userLabel : character.name;
+			const body = m.content.length > REWRITE_RECENT_MSG_CHARS
+				? '…' + m.content.slice(-REWRITE_RECENT_MSG_CHARS)
+				: m.content;
+			lines.push(`[${who}]`, body, ``);
+		}
+	}
+	return lines.join('\n');
+}
+
+chatRouter.post('/rewrite', async (c) => {
+	const user = requireUser(c);
+	const db = c.env.DB;
+	if (!db) return c.json({ error: 'db unavailable' }, 500);
+
+	const gatewayKey = await getDecryptedKey(db, user.id, 'gateway');
+	if (!gatewayKey) {
+		return c.json(
+			{ error: 'no_gateway_key', message: 'API 키 관리에서 Vercel AI Gateway 키를 먼저 등록해 주세요.' },
+			400
+		);
+	}
+
+	const body = (await c.req.json()) as RewriteRequestBody;
+	const text = (body.text ?? '').trim();
+	const filter = (body.filter ?? '').trim().slice(0, MAX_FILTER_CHARS);
+	if (!text) return c.json({ error: 'empty message' }, 400);
+	if (!filter) return c.json({ error: 'empty filter', message: '필터 지시가 비어 있어요.' }, 400);
+	if (estimateTokens(text) > MAX_USER_MSG_TOKENS) return c.json({ error: 'message too long' }, 413);
+
+	const character = await findCharacter(db, body.characterId);
+	if (!character) return c.json({ error: 'character not found' }, 404);
+	if (character.imported) {
+		const raw = await getCharacterPrompt(db, character.id);
+		if (raw != null) character.description = raw;
+	}
+
+	const userLabel = (user.personaName && user.personaName.trim()) || user.name || '나';
+	const modelId = pickModel(body.model);
+
+	// 맥락: 세션이 있으면 live window 의 꼬리(최근 N 개) + 요약, 없으면 오프닝만.
+	let summary: string | null = null;
+	let recent: Array<{ role: string; content: string }> = [];
+	if (body.sessionId) {
+		const session = await getSession(db, body.sessionId, user.id);
+		if (!session) return c.json({ error: 'session not found' }, 404);
+		summary = session.summary;
+		const win = await getWindow(db, session.id, session.summaryUptoSeq);
+		recent = win.slice(-REWRITE_RECENT_MSGS).map((m) => ({ role: m.role, content: m.content }));
+	} else {
+		const opening = personalize(openingContent(character, body.openingIndex), character.name, userLabel);
+		if (opening.trim()) recent = [{ role: 'assistant', content: opening }];
+	}
+
+	const system = buildRewriteSystem({
+		filter,
+		character,
+		userLabel,
+		userPersona: user.persona,
+		summary,
+		recent
+	});
+	const gateway = createGateway({ apiKey: gatewayKey });
+
+	try {
+		const result = await generateText({
+			model: gateway(modelId),
+			system,
+			messages: [{ role: 'user', content: `다음 입력문을 변환 지시에 맞게 다시 써라. 변환된 본문만 출력.\n\n<입력문>\n${text}\n</입력문>` }],
+			providerOptions: buildProviderOptions(modelId, { noThinking: true }),
+			temperature: 0.8,
+			maxOutputTokens: REWRITE_MAX_OUTPUT_TOKENS + reasoningHeadroom(modelId),
+			maxRetries: 1
+		});
+		const out = stripWrapping(result.text);
+		if (!out) {
+			console.warn(`[rewrite] empty output model=${modelId} finish=${result.finishReason}`);
+			return c.json(
+				{ error: 'empty_output', message: '모델이 변환 결과를 내지 않았어요. 다른 모델로 바꾸거나 다시 시도해 주세요.' },
+				502
+			);
+		}
+		const cost = parseGatewayCost(result.providerMetadata) ?? null;
+		console.log(
+			`[rewrite] model=${modelId} in=${result.usage?.inputTokens ?? 0} out=${result.usage?.outputTokens ?? 0} cost=${cost ?? '-'} chars=${text.length}→${out.length}`
+		);
+		const res: RewriteResponse = { text: out, cost };
+		return c.json(res);
+	} catch (e) {
+		console.error(`[rewrite] failed model=${modelId}:`, e);
+		notifyServerError({
+			context: 'generateText /api/chat/rewrite',
+			error: e,
+			extra: { model: modelId, character: character.id, user: user.id },
+			waitUntil: getWaitUntil()
+		});
+		return c.json(
+			{
+				error: 'rewrite_failed',
+				message: isOverloadError(e)
+					? '변환 모델이 일시적으로 과부하예요. 잠시 후 다시 보내거나 다른 모델로 바꿔보세요.'
+					: '입력 변환에 실패했어요. 잠시 후 다시 시도해 주세요.'
+			},
+			502
+		);
+	}
+});
+
+/** 모델이 출력 전체를 코드블록/따옴표로 감싼 경우만 벗긴다(본문 안의 대사 따옴표는 유지). */
+function stripWrapping(raw: string): string {
+	let t = raw.trim();
+	const fence = t.match(/^```[a-z]*\n([\s\S]*?)\n```$/i);
+	if (fence) t = fence[1].trim();
+	// 전체가 하나의 따옴표 쌍으로만 감싸였고 안에 같은 따옴표가 없을 때만 벗긴다(순수 대사 원문은 안 건드림).
+	const q = t.match(/^[「『](.+)[」』]$/s);
+	if (q && !/[「『」』]/.test(q[1])) t = q[1].trim();
+	return t;
 }
 
 chatRouter.post('/inspect', async (c) => {
