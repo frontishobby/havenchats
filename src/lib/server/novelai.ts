@@ -65,25 +65,54 @@ export const QUALITY_TAIL =
 	', -4::artist collaboration, year 2025, year 2024, -3::spoken bubble, text, cross-section::, rating:explicit, {{{-3::censored, photo inset, stomach deformation}}}, {{{-3::small lines::}}}, 1.5::balanced contrast::, -2::simple illustration::, -1::censored::, best quality, amazing quality, very aesthetic, intricate detail, highres, incredibly absurdres';
 
 /**
- * V5 용 퀄리티 꼬리(2026-09 조사 기준).
- *  - NovelAI V5 공식 Light 프리셋 `very aesthetic, amazing quality, no text` 기반.
- *  - `high complexity`: V5 신규 complexity 태그 — 일반 이미지엔 high 를 공식 권장(low/ultra 는 화풍 재현용).
- *  - `year 2026`: year 태그는 V5 에서도 유효(최신 화풍 편향). `::` 숫자 가중치도 V5 에서 그대로 동작.
- *  - V4.5 꼬리의 balanced contrast·incredibly absurdres·artist collaboration 은 V5 문서에 근거가 없어 제외.
- *  - rating:explicit 는 넣지 않음(NSFW 캐릭터는 앞에 rating:nsfw 가 붙음). 노출이 약하면 추가 검토.
+ * V5 용 퀄리티 꼬리(아카 "NAI V5 기초 가이드" + 공식 문서 기준, 2026-09).
+ * 가이드 순서: (인원수) > (작가) > (연도) > (배경/장면) > (퀄리티) > (작법) > (마이너스) > nsfw.
+ * 이 꼬리는 그 중 **퀄리티 > 마이너스** 구간. V5 는 퀄리티 태그에 가중치를 적극 쓰는 것이 권장(0~3).
+ *  - complexity(V5 신규): 일반 이미지엔 high 를 메인(1.5~3), ultra 를 서브(0.2~0.8). flat color 그림체는
+ *    low/medium 이 맞으므로 **그림체 프롬프트에 complexity 가 있으면 여기 것은 생략**(buildPositivePrompt).
+ *  - 마이너스: 가이드 기본 3종(multiple views·simple illustration·artist collaboration) + 말풍선/텍스트·검열.
+ *  - `no text` 는 V5 공식 프리셋 항목.
  */
 export const QUALITY_TAIL_V5 =
-	', year 2026, -3::spoken bubble, text::, -2::simple illustration::, -1::censored::, high complexity, very aesthetic, amazing quality, no text, best quality, highres';
+	', 1.3::very aesthetic, masterpiece, amazing quality, absurdres::, no text, -2::spoken bubble, text::, -1::multiple views::, -1::simple illustration::, -1::artist collaboration::, -1::censored::';
+
+/** V5 complexity 태그(가이드 저자 설정: high 3 / ultra 0.5 → 여기선 high 2 로 완화). 그림체에 complexity 있으면 생략. */
+export const COMPLEXITY_V5 = '2::high complexity::, 0.5::ultra complexity::';
+
+/** V5 연도 태그(가이드: year 2025·2026 각 1.5). 그림체에 year 태그가 이미 있으면 생략. */
+export const YEAR_TAGS_V5 = '1.5::year 2025::, 1.5::year 2026::';
 
 /** 모델별 퀄리티 꼬리. */
 export function qualityTailFor(model: string): string {
 	return getNaiModel(model).version === 'v5' ? QUALITY_TAIL_V5 : QUALITY_TAIL;
 }
 
-/** 고정 네거티브 프롬프트. 맨 앞 아동 코드 차단 태그는 미성년 묘사 억제(하드 차단과 병행). */
+/** 고정 네거티브 프롬프트(V4.5). 맨 앞 아동 코드 차단 태그는 미성년 묘사 억제(하드 차단과 병행). */
 export const NEGATIVE_PROMPT =
 	'child, loli, shota, toddler, infant, baby, young child, age regression, ' +
 	'text, logo, signature, watermark, too many watermarks, chili inset, 0.4::artist:nameo (judgemasterkou), artist:matsunaga kouyou::, artist collaboration, chibi, 1990s (style), bad anatomy, distorted anatomy, disfigured, bad hands, missing finger, extra digits, mutation, extra arms, extra legs, long neck, bad feet, very displeasing, undetailed eyes, multiple views, negative space, blank page, variant set, large variant set, 4koma, 2koma, oekaki, halftone, screentone, artistic error, film grain, scan artifacts, jpeg artifacts, chromatic aberration, dithering, disorganized colors, lowres, worst quality, bad quality, cheesy, sloppiness, unfinished, Incomplete, ai-generated';
+
+/**
+ * V5 네거티브. 가이드 순서: (기본 오류) > (세밀한 오류) > (작법 배제 + official style/official art) > (작가 배제) > (원하지 않는 요소).
+ * `official style, official art` 는 V5 에서 그림체에 과도하게 영향을 줘 배제가 권장됨. 아동 차단 태그는 항상 맨 앞.
+ */
+export const NEGATIVE_PROMPT_V5 =
+	'child, loli, shota, toddler, infant, baby, young child, age regression, ' +
+	// 기본 오류
+	'bad anatomy, distorted anatomy, disfigured, bad hands, missing finger, extra digits, mutation, extra arms, extra legs, long neck, bad feet, lowres, worst quality, bad quality, blurry, very displeasing, undetailed eyes, chibi, ' +
+	// 세밀한 오류(글자·레이아웃)
+	'text, logo, signature, watermark, too many watermarks, artist name, chili inset, multiple views, negative space, blank page, variant set, large variant set, 4koma, 2koma, oekaki, artistic error, unfinished, incomplete, sloppiness, ' +
+	// 작법 배제(노이즈 유발) + official style/art
+	'halftone, screentone, film grain, scan artifacts, jpeg artifacts, chromatic aberration, dithering, disorganized colors, 1990s (style), official style, official art, ' +
+	// 작가 배제
+	'0.4::artist:nameo (judgemasterkou), artist:matsunaga kouyou::, artist collaboration, ' +
+	// 원하지 않는 요소
+	'cheesy, ai-generated';
+
+/** 모델별 네거티브 프롬프트. */
+export function negativeFor(model: string): string {
+	return getNaiModel(model).version === 'v5' ? NEGATIVE_PROMPT_V5 : NEGATIVE_PROMPT;
+}
 
 /**
  * 그림체 Hub 썸네일용 고정 표준 장면(SFW). 모든 그림체를 같은 장면으로 렌더해 카드 비교가 일관되게.
@@ -110,16 +139,15 @@ export const IMAGE_PARAMS: ImageParams = {
 };
 
 /**
- * V5 생성 파라미터. euler_a + karras(V5 는 noise_schedule 을 karras 로만 받음), cfg_rescale 0.
- * CFG 는 NAI 기본 7 대신 커뮤니티 권장 5.0(낮을수록 부드럽고 높을수록 윤곽·채도 강함).
- * steps 는 Opus 무료 상한(28).
+ * V5 생성 파라미터(아카 V5 기초 가이드 저자 설정과 동일). euler_a + karras(V5 는 karras 만 받음),
+ * CFG 5(권장 4~7), rescale 0.4(권장 0.2~0.5 — 높을수록 채도↓·번짐), steps 28(Opus 무료 상한).
  */
 export const IMAGE_PARAMS_V5: ImageParams = {
 	sampler: 'k_euler_ancestral',
 	scheduler: 'karras',
 	steps: 28,
 	cfgScale: 5,
-	cfgRescale: 0
+	cfgRescale: 0.4
 };
 
 /** 모델별 생성 파라미터(디버그 표시·요청 바디 공용). */
@@ -140,9 +168,15 @@ export function isResolutionKey(v: unknown): v is ResolutionKey {
 }
 
 /**
- * 최종 positive 프롬프트 조립: (NSFW면) rating:nsfw + 그림체 + 상황 + 퀄리티 꼬리(모델별).
- * 그림체/상황의 끝 콤마를 정리한 뒤 ', ' 로 잇고, 퀄리티 꼬리(앞 콤마 포함)를 붙인다.
- * 그림체가 비면 스타일 태그 없이 상황+퀄리티만(하드코딩 기본값 없음). nsfw=true 면 맨 앞에 rating:nsfw.
+ * 최종 positive 프롬프트 조립(모델별).
+ *
+ * V4.5: (NSFW면) rating:nsfw + 그림체 + 상황 + 퀄리티 꼬리(기존 손튜닝 그대로).
+ * V5(아카 V5 기초 가이드 순서): **인원수** > 그림체(작가) > 연도 > 장면 나머지 > complexity > 퀄리티/마이너스 > nsfw.
+ *  - 인원수 태그(1girl/2boys/solo…)는 상황 프롬프트 어디에 있든 맨 앞으로 끌어올린다(V5 는 위치가 중요).
+ *    단일 인물이면 `solo` 를 보강(가이드: 퀄리티에 영향).
+ *  - 연도·complexity 는 그림체가 이미 지정했으면 생략(그림체 의도 우선).
+ *  - nsfw 는 맨 뒤(가이드). uncensored 동반.
+ * 그림체/상황의 끝 콤마를 정리한 뒤 ', ' 로 잇는다. 그림체가 비면 스타일 태그 없이(하드코딩 기본값 없음).
  */
 export function buildPositivePrompt(
 	stylePrompt: string,
@@ -152,9 +186,39 @@ export function buildPositivePrompt(
 ): string {
 	const style = stylePrompt.trim().replace(/,\s*$/, '').trim();
 	const sit = situation.trim().replace(/,\s*$/, '').trim();
-	const head = [style, sit].filter(Boolean).join(', ');
-	const body = head + qualityTailFor(model);
-	return nsfw ? `rating:nsfw, uncensored, ${body}` : body;
+	if (getNaiModel(model).version !== 'v5') {
+		const head = [style, sit].filter(Boolean).join(', ');
+		const body = head + QUALITY_TAIL;
+		return nsfw ? `rating:nsfw, uncensored, ${body}` : body;
+	}
+	const { count, rest } = hoistCountTags(sit);
+	const styleLower = style.toLowerCase();
+	const year = /\byear\s*20\d\d\b/.test(styleLower) ? '' : YEAR_TAGS_V5;
+	const complexity = /\bcomplexity\b/.test(styleLower) ? '' : COMPLEXITY_V5;
+	const head = [count, style, year, rest, complexity].filter(Boolean).join(', ');
+	const body = head + QUALITY_TAIL_V5;
+	return nsfw ? `${body}, nsfw, uncensored` : body;
+}
+
+/** 인원수 태그(1girl, 2boys, 6+girls, multiple girls, solo, 1other …). */
+const COUNT_TAG_RE = /^(?:solo|\d+\+?\s?(?:girls?|boys?|others?)|multiple (?:girls|boys|others))$/i;
+
+/**
+ * 상황 프롬프트에서 인원수 태그를 분리해 맨 앞 그룹으로 만든다(V5). 세그먼트 순서는 유지.
+ * 인원수 태그가 정확히 하나이고 1명(1girl/1boy/1other)이면 `solo` 를 보강한다.
+ */
+function hoistCountTags(situation: string): { count: string; rest: string } {
+	const segs = situation
+		.split(',')
+		.map((x) => x.trim())
+		.filter(Boolean);
+	const counts = segs.filter((x) => COUNT_TAG_RE.test(x));
+	const rest = segs.filter((x) => !COUNT_TAG_RE.test(x));
+	const nonSolo = counts.filter((x) => x.toLowerCase() !== 'solo');
+	if (nonSolo.length === 1 && /^1(?:girl|boy|other)$/i.test(nonSolo[0]) && !counts.some((x) => x.toLowerCase() === 'solo')) {
+		counts.push('solo');
+	}
+	return { count: counts.join(', '), rest: rest.join(', ') };
 }
 
 export interface GeneratedImage {
@@ -223,14 +287,14 @@ export function buildGeneratePayload(
 			legacy_v3_extend: false,
 			skip_cfg_above_sigma: null,
 			seed,
-			negative_prompt: NEGATIVE_PROMPT,
+			negative_prompt: negativeFor(spec.id),
 			v4_prompt: {
 				caption: { base_caption: positive, char_captions: posCharCaptions },
 				use_coords: false,
 				use_order: true
 			},
 			v4_negative_prompt: {
-				caption: { base_caption: NEGATIVE_PROMPT, char_captions: negCharCaptions },
+				caption: { base_caption: negativeFor(spec.id), char_captions: negCharCaptions },
 				legacy_uc: false
 			}
 		}

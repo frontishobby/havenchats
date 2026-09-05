@@ -54,7 +54,7 @@ import {
 	buildGeneratePayload,
 	isResolutionKey,
 	DEFAULT_RESOLUTION,
-	NEGATIVE_PROMPT,
+	negativeFor,
 	imageParamsFor,
 	type ResolutionKey
 } from '$lib/server/novelai';
@@ -835,8 +835,8 @@ const SITUATION_SYSTEM = [
 	`  "base": string  — Danbooru-style tags for everything that is NOT an individual character's body/clothes: the SUBJECT COUNT tag (e.g. "1girl", "1boy, 1girl", "2girls"), framing/composition (e.g. "upper body", "cowboy shot", "full body", "from above", "pov"), setting/background, lighting and mood, and INTERACTION action tags between characters using the "source#"/"target#"/"mutual#" prefixes (e.g. "source#hug" on the initiator's intent, "target#hug", "mutual#kiss"). Lowercase, comma-separated.`,
 	`  "characters": array — one entry per person VISIBLE in the frame, ordered top-to-bottom / left-to-right. Each entry is { "name", "appearance", "state" }:`,
 	`    - "name": a STABLE identifier for this person, used to keep their look consistent across images. Use the literal "char" for the main roleplay character ({{char}}), and the literal "user" for the user/{{나}}. For anyone else, if they are the SAME person as someone in [Known characters], reuse that EXACT name; otherwise assign a short identifier (their in-story name if any, else a concise descriptor like "waitress").`,
-	`    - "appearance": that person's FIXED physical look as Danbooru tags only — an UNNUMBERED subject word ("girl"/"boy"/"other"), hair color/length/style, eye color, body type, and distinctive PERMANENT features. NEVER put clothing, expression, or pose here. For "char" use the [Character] reference. For a person listed in [Known characters], COPY their recorded appearance verbatim. For a brand-new person, invent a plausible consistent appearance.`,
-	`    - "state": that person's CURRENT scene-specific look from the latest moment — clothing or state of undress (e.g. "white blouse, unbuttoned, no bra", "naked, towel"), plus expression and pose. This is the only part that changes turn to turn. Lowercase, comma-separated.`,
+	`    - "appearance": that person's FIXED physical look as Danbooru tags only, in THIS order — an UNNUMBERED subject word ("girl"/"boy"/"other"), then a body-type class if any (e.g. "mature female", "petite"), then hair color/length/style, eye color, skin, finer body details (e.g. "narrow waist", "large breasts"), and distinctive PERMANENT features. NEVER put clothing, expression, or pose here. For "char" use the [Character] reference. For a person listed in [Known characters], COPY their recorded appearance verbatim. For a brand-new person, invent a plausible consistent appearance.`,
+	`    - "state": that person's CURRENT scene-specific look from the latest moment, in THIS order: clothing or state of undress (e.g. "white blouse, unbuttoned, no bra", "naked, towel") → framing of this person if notable (e.g. "from side") → pose/action from the largest movement to the smallest → expression from the overall emotion to details (e.g. "smile, open mouth, half-closed eyes, looking at viewer"). This is the only part that changes turn to turn. Lowercase, comma-separated.`,
 	``,
 	`Character rules:`,
 	`- "appearance" must stay identical for the same person across turns (that is what keeps images consistent); only "state" follows the latest scene.`,
@@ -1092,7 +1092,7 @@ chatRouter.post('/image/prepare', async (c) => {
 					llmError,
 					stylePrompt,
 					positive,
-					negative: NEGATIVE_PROMPT,
+					negative: negativeFor(naiModel),
 					model: naiModel,
 					resolution,
 					params: {
