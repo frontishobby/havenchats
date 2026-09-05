@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { streamText, generateText, generateObject, jsonSchema } from 'ai';
+import { streamText, generateText, generateObject } from 'ai';
 import { createGateway, type GatewayProvider } from '@ai-sdk/gateway';
 import { getWaitUntil } from '$lib/server/waitUntil';
 import { findCharacter } from '$lib/server/characters';
@@ -49,6 +49,13 @@ import {
 } from '$lib/server/chatAssembly';
 import { loadRecentChats, parseRecentCursor, RECENT_PAGE_SIZE } from '$lib/server/recentChats';
 import { containsMinorTerms } from '$lib/server/minorSafety';
+import {
+	ADULT_ONLY_RULE,
+	SCENE_PROMPT_SCHEMA,
+	sanitizeScene,
+	sanitizeTags as sanitizeSituation,
+	str
+} from '$lib/server/imagePrompt';
 import {
 	buildPositivePrompt,
 	buildGeneratePayload,
@@ -796,44 +803,15 @@ function pickPromptModel(requested?: string): string {
 }
 
 /**
- * 구조화 출력 스키마(generateObject) — NAI V4.5 캐릭터 기능에 맞춰 장면을 분해한다.
+ * 구조화 출력 스키마는 `$lib/server/imagePrompt` 의 SCENE_PROMPT_SCHEMA(썸네일과 공용).
  *  - base: 배경·구도·인원수 태그(1girl/2girls/1boy 1girl)·상호작용(source#/target#) 등 전역 캡션.
- *  - scene: **자연어 장면 문장**(1~2문장, 영어). 태그로 어색한 관계·행위 흐름·시선·공간 배치용. 인물은
- *    역할 명사로만 지칭(the woman/the man) — 외형·옷은 절대 안 넣어 char_captions 와 충돌·누출을 막는다.
- *    V5 만 조립에 사용(buildPositivePrompt), V4.5 그림체면 버린다.
+ *  - scene: **자연어 장면 문장**(1~2문장, 영어). V5 만 조립에 사용(buildPositivePrompt), V4.5 그림체면 버린다.
  *  - characters[]: 화면에 보이는 인물별로 name/appearance/state 분해.
  *    · name: 외형 원장 대조용 안정 식별자(주인공=char, 유저=user, 그 외 in-story 이름/식별자).
  *    · appearance: 고정 외형(머리·눈·체형·고유특징) — 원장에 박아 턴 간 고정.
  *    · state: 가변(현재 복장·노출·표정·포즈) — 매 턴 새로.
  *    인물을 분리하면 NAI 가 인물 간 속성 누출(머리색·옷 bleeding)을 막는다.
  */
-const SITUATION_SCHEMA = jsonSchema<{
-	base: string;
-	scene: string;
-	characters: { name: string; appearance: string; state: string }[];
-}>({
-	type: 'object',
-	additionalProperties: false,
-	properties: {
-		base: { type: 'string' },
-		scene: { type: 'string' },
-		characters: {
-			type: 'array',
-			items: {
-				type: 'object',
-				additionalProperties: false,
-				properties: {
-					name: { type: 'string' },
-					appearance: { type: 'string' },
-					state: { type: 'string' }
-				},
-				required: ['name', 'appearance', 'state']
-			}
-		}
-	},
-	required: ['base', 'scene', 'characters']
-});
-
 const SITUATION_SYSTEM = [
 	`You convert the latest moment of a Korean roleplay scene into a structured image-generation prompt for NovelAI Diffusion (V4.5/V5, anime illustration), using its MULTI-CHARACTER feature.`,
 	`You are given a [Character] reference sheet for the main roleplay character, an optional [Known characters] roster of people whose fixed appearance was already established earlier in this story, and the [Recent conversation] (the last few turns, oldest to newest, including the user's actions). Depict ONLY the LATEST moment — the final line of the conversation; use the earlier lines purely as context for what is happening right now. Ignore non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
@@ -859,45 +837,8 @@ const SITUATION_SYSTEM = [
 	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, "rating:" tags, or negative terms — those are added separately.`,
 	`- Keep it concise (combined budget is small): "base" short, "scene" at most two sentences, each character under ~40 tags.`,
 	`- NSFW content is allowed and should be described plainly when present.`,
-	`- ABSOLUTE RULE: every person MUST be depicted as an adult (18+). NEVER output any tag or wording depicting minors, children, or age-regressed characters (e.g. loli, shota, child, kid, toddler, "young girl/boy", "little girl/boy"). If the scene implies a minor, depict them as a clear adult instead. This overrides everything else.`
+	ADULT_ONLY_RULE
 ].join('\n');
-
-/** 문자열 정규화(trim). 알 수 없는 값은 빈 문자열. */
-function str(v: unknown): string {
-	return typeof v === 'string' ? v.trim() : '';
-}
-
-/**
- * 상황 프롬프트 후처리. NovelAI 는 영어/danbooru 태그만 해석하므로, 모델이 (지시에도 불구하고)
- * 캐릭터 프롬프트의 '상태창'을 통짜로 베껴 넣는 걸 출력단에서 막는다.
- * — 줄·콤마 단위 세그먼트로 쪼개 한글이 들어간 조각은 통째로 제거(잔여 숫자/기호 junk 포함) →
- *   순수 영어 태그/구문만 ', ' 로 재조립. 입력(assistantText)은 그대로라 모델은 상태를 참고는 한다.
- */
-const HANGUL_RE = /[가-힣ᄀ-ᇿ㄰-㆏ꥠ-꥿ힰ-퟿]/;
-function sanitizeSituation(raw: string): string {
-	return raw
-		.split(/[\r\n,]+/)
-		.map((s) => s.trim())
-		.filter((s) => s && !HANGUL_RE.test(s))
-		.join(', ')
-		.replace(/\s+/g, ' ')
-		.trim();
-}
-
-/**
- * 자연어 장면 문장 후처리. 문장 안의 콤마는 살려야 하므로 **줄 단위**로만 쪼개 한글 줄을 버리고,
- * 공백 정리 후 끝의 마침표/콤마를 떼어 낸다(뒤에 ', ' 로 태그가 이어지므로).
- */
-function sanitizeScene(raw: string): string {
-	return raw
-		.split(/[\r\n]+/)
-		.map((s) => s.trim())
-		.filter((s) => s && !HANGUL_RE.test(s))
-		.join(' ')
-		.replace(/\s+/g, ' ')
-		.replace(/[.,\s]+$/, '')
-		.trim();
-}
 
 /**
  * 외형 원장 키 정규화 — LLM 이 준 name 의 표기 흔들림(공백/대소문자)만 흡수한다.
@@ -1147,7 +1088,7 @@ chatRouter.post('/image/prepare', async (c) => {
 		// 게이트웨이가 일시적 503/500 을 자동 재시도하지 않으므로 직접 백오프 재시도한다.
 		const result = await generateObjectWithRetry({
 			model: gateway(promptModel),
-			schema: SITUATION_SCHEMA,
+			schema: SCENE_PROMPT_SCHEMA,
 			system: SITUATION_SYSTEM,
 			prompt: userPrompt,
 			temperature: 0.7,

@@ -66,3 +66,35 @@ export interface AssistResponse {
 	ok: true;
 	character: AssistDraft;
 }
+
+/**
+ * 썸네일 상황 프롬프트(구조화). LLM 이 만들고 패널에서 편집해 되돌려 보낸다.
+ *  - base: 인원수·구도·배경·조명·상호작용 태그(전역 캡션).
+ *  - scene: 자연어 장면 문장(영어, V5 그림체만 사용).
+ *  - characters: 인물별 캡션(외형 + 현재 복장·포즈·표정) — NAI char_captions 로 분리 전송.
+ */
+export interface ThumbnailPrompt {
+	base: string;
+	scene: string;
+	characters: string[];
+}
+
+/** POST /api/characters/thumbnail 요청 바디. */
+export interface ThumbnailRequest {
+	/** 캐릭터 설정(프롬프트 본문) — 외형 추출용. */
+	description?: string;
+	/** 그림체(스타일) 프롬프트. 없으면 그림체 미적용. */
+	style?: string;
+	/** NovelAI 생성 모델 id(고른 그림체에 박힌 값, 허용목록 검증). */
+	naiModel?: string;
+	/** 제작자의 자연어 연출 지시(한국어 OK). 어떤 장면·누가 몇 명 나오는지. 비면 주인공 단독 초상. */
+	direction?: string;
+	/** 편집된 구조화 프롬프트. 있고 regen 이 아니면 LLM 을 거치지 않고 그대로 사용. */
+	prompt?: ThumbnailPrompt;
+	/** true 면 prompt 가 있어도 설정+연출로 다시 생성. */
+	regen?: boolean;
+	/** NSFW 캐릭터면 positive 앞에 rating:nsfw. */
+	nsfw?: boolean;
+	/** 상황 프롬프트 LLM(IMAGE_PROMPT_MODEL_IDS 허용목록). 없으면 기본. */
+	model?: string;
+}

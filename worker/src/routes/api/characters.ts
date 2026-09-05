@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { generateObject, generateText, jsonSchema } from 'ai';
+import { generateObject, jsonSchema } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
 import type { AppEnv } from '../../context';
 import { requireUser } from '../../context';
@@ -26,7 +26,20 @@ import { canSeeNsfw } from '$lib/nsfw';
 import { getDecryptedKey } from '$lib/server/db/userKeys';
 import { notifyServerError } from '$lib/server/notify';
 import { buildProviderOptions, reasoningHeadroom } from '$lib/server/chatAssembly';
-import { ASSIST_MODEL_IDS, DEFAULT_ASSIST_MODEL_ID, MODEL_IDS } from '$lib/data/models';
+import {
+	ASSIST_MODEL_IDS,
+	DEFAULT_ASSIST_MODEL_ID,
+	DEFAULT_IMAGE_PROMPT_MODEL_ID,
+	IMAGE_PROMPT_MODEL_IDS
+} from '$lib/data/models';
+import { containsMinorTerms } from '$lib/server/minorSafety';
+import {
+	ADULT_ONLY_RULE,
+	SCENE_PROMPT_SCHEMA,
+	sanitizeScene,
+	sanitizeTags,
+	str
+} from '$lib/server/imagePrompt';
 import {
 	buildPositivePrompt,
 	generateImage,
@@ -41,7 +54,9 @@ import type {
 	AssistRequest,
 	CharacterEditData,
 	CharacterAssetsData,
-	RedirectResponse
+	RedirectResponse,
+	ThumbnailPrompt,
+	ThumbnailRequest
 } from '$lib/api/characters';
 
 export const charactersRouter = new Hono<AppEnv>();
@@ -223,9 +238,6 @@ function pickAssistModel(requested?: string): string {
 	return requested && ASSIST_MODEL_IDS.has(requested) ? requested : DEFAULT_ASSIST_MODEL_ID;
 }
 
-function str(v: unknown): string {
-	return typeof v === 'string' ? v.trim() : '';
-}
 
 /** 현재 폼 내용을 프롬프트에 넣을 텍스트 블록으로 직렬화. 채워진 게 없으면 null(=신규 생성). */
 function serializeCurrent(cur: AssistCurrentDraft | undefined): string | null {
@@ -382,58 +394,62 @@ charactersRouter.post('/assist', async (c) => {
 
 // ── POST /api/characters/thumbnail — 썸네일 생성(스트리밍) ─────
 const THUMB_RESOLUTION: ResolutionKey = '832x1216';
-const DEFAULT_PROMPT_MODEL = 'google/gemini-3.8-flash';
 const MAX_DESC_CHARS = 6000;
 const MAX_STYLE_CHARS = 1500;
-const MAX_SITU_CHARS = 1000;
-const HANGUL_RE = /[가-힣ᄀ-ᇿ㄰-㆏ꥠ-꥿ힰ-퟿]/;
+const MAX_DIRECTION_CHARS = 1000;
+const MAX_BASE_CHARS = 600;
+const MAX_SCENE_CHARS = 400;
+const MAX_CHAR_CAPTION_CHARS = 500;
+/** 썸네일 인물 상한(모델별 상한은 buildGeneratePayload 가 다시 적용). 카드 썸네일이라 소수 인원만. */
+const MAX_THUMB_CHARACTERS = 6;
 
-/** 요청 모델 허용목록 검증. 없거나 미허용이면 기본(flash). */
+/** 상황 프롬프트 모델 검증 — 구조화 출력 안정 + NSFW 비거부 목록(채팅 이미지와 동일). */
 function pickPromptModel(requested?: string): string {
-	return requested && MODEL_IDS.has(requested) ? requested : DEFAULT_PROMPT_MODEL;
+	return requested && IMAGE_PROMPT_MODEL_IDS.has(requested)
+		? requested
+		: DEFAULT_IMAGE_PROMPT_MODEL_ID;
 }
 
-const SITUATION_SYSTEM = [
-	`You convert a Korean character setup sheet into an image-generation prompt for a CHARACTER THUMBNAIL/PORTRAIT (NovelAI Diffusion V4.5/V5, anime illustration).`,
-	`You are given the [Character] setup text. Extract the character's fixed physical appearance (count e.g. 1girl/1boy, hair color/length/style, eye color, body type, skin, distinctive features) and a representative outfit. Ignore non-visual text (personality, backstory, rules, command/keyword lists, output-format instructions).`,
-	`Compose a flattering, character-focused portrait: a clear single-subject shot (upper body or cowboy shot), looking at viewer, expression that fits the character, simple or fitting background.`,
-	`Output format: two parts joined by a comma.`,
-	`  PART 1 — Danbooru-style appearance/outfit tags. Lowercase, comma-separated (count tag, hair, eyes, body, outfit, plus "looking at viewer" and a fitting expression).`,
-	`  PART 2 — one short English phrase for the composition/background (e.g. "upper body portrait, soft studio lighting, plain background").`,
-	`Example: "1girl, long black hair, red eyes, slim, large breasts, school uniform, looking at viewer, gentle smile, upper body, soft lighting, simple background"`,
-	`Rules:`,
-	`- English only. No Korean.`,
-	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, or negative terms — those are added separately.`,
-	`- No preamble, no explanation, no quotes, no line breaks, no labels like "PART 1". Output the prompt only.`,
-	`- Keep it concise: under ~40 tags total.`
+const THUMB_SYSTEM = [
+	`You convert a Korean character setup sheet (plus an optional creator's direction) into a structured image-generation prompt for a CHARACTER CARD THUMBNAIL (NovelAI Diffusion V4.5/V5, anime illustration, portrait orientation 832x1216), using its MULTI-CHARACTER feature.`,
+	`You are given the [Character] setup text for the main character, and optionally a [Direction] written by the creator in Korean or English describing what the thumbnail should show — the scene, mood, pose, background, and WHICH people appear (the main character alone, or together with other people mentioned in the setup or in the direction, e.g. a rival, a sister, several club members).`,
+	`Use the setup text ONLY for fixed physical appearance and a representative outfit of each person. Ignore non-visual text (personality, backstory, rules, command/keyword lists, status windows, output-format instructions).`,
+	``,
+	`Output a JSON object with three keys:`,
+	`  "base": string — Danbooru-style tags for everything that is NOT an individual person's body/clothes: the SUBJECT COUNT tag first (e.g. "1girl", "1boy, 1girl", "2girls", "3girls"), framing/composition (e.g. "upper body", "cowboy shot", "portrait", "from below"), setting/background, lighting and mood, and INTERACTION tags between people using the "source#"/"target#"/"mutual#" prefixes when they touch or act on each other (e.g. "mutual#hug", "source#hand on another's shoulder"). Lowercase, comma-separated.`,
+	`  "scene": string — ONE or TWO plain-English sentences describing the shot in natural language: who is doing what, where each person stands relative to the others and the setting, where they look, and the mood. Refer to people ONLY by role nouns ("the woman", "the man", "the girl on the left") — NEVER mention hair, eyes, body type, or clothing here. Do not restate the count tag or camera tags.`,
+	`  "characters": array — one entry per person VISIBLE in the frame, ordered left-to-right / front-to-back. Each entry is { "name", "appearance", "state" }:`,
+	`    - "name": a short label for this person (e.g. "main", or their name from the setup).`,
+	`    - "appearance": FIXED physical look as Danbooru tags only, in THIS order — an UNNUMBERED subject word ("girl"/"boy"/"other"), body-type class if any (e.g. "mature female", "petite"), hair color/length/style, eye color, skin, finer body details (e.g. "large breasts", "narrow waist"), distinctive PERMANENT features (horns, tattoos, heterochromia…). NEVER put clothing, expression, or pose here.`,
+	`    - "state": this person's look in THIS shot, in THIS order: outfit (a representative or direction-specified outfit) → framing of this person if notable → pose/action → expression (e.g. "gentle smile, looking at viewer"). Lowercase, comma-separated; a SHORT clause is fine where a tag is awkward.`,
+	``,
+	`Composition rules:`,
+	`- This is a card thumbnail: subjects must be LARGE and faces clearly visible. Prefer upper body / cowboy shot; never tiny distant figures. With no [Direction], make a flattering single-subject portrait of the main character: looking at viewer, an expression that fits the character, simple or fitting background.`,
+	`- If [Direction] is given, follow it faithfully: depict the scene, mood, pose, background and EXACTLY the people it asks for. If it names other people, take their appearance from the setup text when described there; otherwise invent a plausible appearance that contrasts with the main character (different hair color etc.).`,
+	`- The subject COUNT tag in "base" must match the number of character entries.`,
+	`- Put per-person body/clothes ONLY in "appearance"/"state", never in "base" or "scene". Put the count tag ONLY in "base".`,
+	``,
+	`General rules:`,
+	`- English only. "base", "appearance" and "state" are tag lists; "scene" is the only place for full sentences.`,
+	`- Do NOT copy the status window, stat block, or any prompt/instruction text from the input — write your own concise tags.`,
+	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, "rating:" tags, or negative terms — those are added separately.`,
+	`- Keep it concise: "base" short, "scene" at most two sentences, each character under ~40 tags.`,
+	`- NSFW content is allowed and should be described plainly when the direction asks for it.`,
+	ADULT_ONLY_RULE
 ].join('\n');
 
-/** 모델이 한글 상태창을 통짜로 베끼는 걸 막는다 — 한글 포함 세그먼트 제거 후 영어 태그만 재조립. */
-function sanitizeSituation(raw: string): string {
-	return raw
-		.split(/[\r\n,]+/)
-		.map((s) => s.trim())
-		.filter((s) => s && !HANGUL_RE.test(s))
-		.join(', ')
-		.replace(/\s+/g, ' ')
-		.trim();
-}
-
-interface ThumbBody {
-	/** 캐릭터 설정(프롬프트 본문) — 외형 추출용. situation 을 직접 줄 땐 없어도 됨. */
-	description?: string;
-	/** 그림체(스타일) 프롬프트. 없으면 그림체 미적용. */
-	style?: string;
-	/** 상황 프롬프트(danbooru). 비어 있으면 서버가 LLM 으로 생성해 돌려준다. */
-	situation?: string;
-	/** true 면 situation 이 있어도 설정 기반으로 다시 생성. */
-	regenSituation?: boolean;
-	/** NSFW 캐릭터면 positive 앞에 rating:nsfw. */
-	nsfw?: boolean;
-	/** 상황 변환 모델(허용목록). 없으면 기본 flash. */
-	model?: string;
-	/** NovelAI 생성 모델 id(고른 그림체에 박힌 값, 허용목록 검증). 없으면 기본. */
-	naiModel?: string;
+/** 클라가 보낸 편집본 정규화(한글 제거·길이 상한·빈 인물 제거). 전부 비면 null. */
+function normalizePrompt(raw: unknown): ThumbnailPrompt | null {
+	if (!raw || typeof raw !== 'object') return null;
+	const o = raw as { base?: unknown; scene?: unknown; characters?: unknown };
+	const base = sanitizeTags(str(o.base)).slice(0, MAX_BASE_CHARS);
+	const scene = sanitizeScene(str(o.scene)).slice(0, MAX_SCENE_CHARS);
+	const characters = (Array.isArray(o.characters) ? o.characters : [])
+		.map((c) => sanitizeTags(str(c)).slice(0, MAX_CHAR_CAPTION_CHARS))
+		.filter(Boolean)
+		.slice(0, MAX_THUMB_CHARACTERS);
+	if (!base && !scene && characters.length === 0) return null;
+	return { base, scene, characters };
 }
 
 /** Uint8Array → base64(폴백 최종 프레임 전송용). */
@@ -446,17 +462,26 @@ function bytesToBase64(bytes: Uint8Array): string {
 	return btoa(bin);
 }
 
+/**
+ * 썸네일 생성. 흐름:
+ *  1) 상황 프롬프트 결정 — 편집본(prompt)이 있고 regen 아니면 그대로, 아니면 LLM(구조화 출력)이
+ *     [Character] 설정 + [Direction](제작자 자연어 연출)로 { base, scene, characters[] } 를 만든다.
+ *     인물별 캡션은 NAI char_captions 로 분리해 여러 인물이 등장해도 외형 누출을 막는다.
+ *  2) 미성년 하드차단(채팅 이미지와 동일 게이트) → NovelAI 스트리밍 생성(폴백: 비스트리밍).
+ * NDJSON: t:'prompt'(패널 편집 필드 채움) → t:'frame'… → t:'final' | t:'error'.
+ */
 charactersRouter.post('/thumbnail', async (c) => {
 	const user = c.get('user');
 	if (!user) return c.json({ error: 'unauthorized' }, 401);
 	const db = c.env.DB;
 	if (!db) return c.json({ error: 'db unavailable' }, 500);
 
-	const body = (await c.req.json().catch(() => null)) as ThumbBody | null;
+	const body = (await c.req.json().catch(() => null)) as ThumbnailRequest | null;
 	const description = (body?.description ?? '').trim().slice(0, MAX_DESC_CHARS);
 	const style = (body?.style ?? '').slice(0, MAX_STYLE_CHARS);
-	const givenSituation = (body?.situation ?? '').trim().slice(0, MAX_SITU_CHARS);
-	const regen = body?.regenSituation === true;
+	const direction = (body?.direction ?? '').trim().slice(0, MAX_DIRECTION_CHARS);
+	const given = normalizePrompt(body?.prompt);
+	const regen = body?.regen === true;
 	const isNsfw = body?.nsfw === true;
 	const model = pickPromptModel(body?.model);
 	const naiModel = pickNaiModel(body?.naiModel);
@@ -470,10 +495,9 @@ charactersRouter.post('/thumbnail', async (c) => {
 		);
 	}
 
-	// ── 1) 상황 프롬프트 결정: 주어졌고 regen 아니면 그대로, 아니면 LLM 생성 ──
-	let situation = givenSituation;
-	const needLlm = !situation || regen;
-	if (needLlm) {
+	// ── 1) 상황 프롬프트 결정 ──
+	let prompt: ThumbnailPrompt | null = regen ? null : given;
+	if (!prompt) {
 		const apiKey = await getDecryptedKey(db, user.id, 'gateway');
 		if (!apiKey) {
 			return c.json(
@@ -481,27 +505,38 @@ charactersRouter.post('/thumbnail', async (c) => {
 				400
 			);
 		}
-		if (!description) {
+		if (!description && !direction) {
 			return c.json(
-				{ error: 'no_desc', message: '프롬프트(설정)를 먼저 작성하거나 상황을 직접 입력해 주세요.' },
+				{ error: 'no_desc', message: '프롬프트(설정)를 먼저 작성하거나 연출을 입력해 주세요.' },
 				400
 			);
 		}
 		try {
 			const gateway = createGateway({ apiKey });
-			const result = await generateText({
+			const parts: string[] = [];
+			if (description) parts.push(`[Character]\n${description}`);
+			if (direction) parts.push(`[Direction]\n${direction}`);
+			const result = await generateObject({
 				model: gateway(model),
-				system: SITUATION_SYSTEM,
-				prompt: `[Character]\n${description}`,
+				schema: SCENE_PROMPT_SCHEMA,
+				system: THUMB_SYSTEM,
+				prompt: parts.join('\n\n'),
 				temperature: 0.8,
-				maxOutputTokens: 1500 + reasoningHeadroom(model),
+				maxOutputTokens: 2000 + reasoningHeadroom(model),
 				providerOptions: buildProviderOptions(model, { noThinking: true })
 			});
-			situation = sanitizeSituation(result.text ?? '');
+			const obj = (result.object ?? {}) as { base?: unknown; scene?: unknown; characters?: unknown };
+			const characters = (Array.isArray(obj.characters) ? obj.characters : [])
+				.slice(0, MAX_THUMB_CHARACTERS)
+				.map((cc) => {
+					const e = cc as { appearance?: unknown; state?: unknown };
+					return [sanitizeTags(str(e.appearance)), sanitizeTags(str(e.state))].filter(Boolean).join(', ');
+				});
+			prompt = normalizePrompt({ base: str(obj.base), scene: str(obj.scene), characters });
 		} catch (e) {
 			console.error('[characters/thumbnail] situation prompt error:', e);
 			notifyServerError({
-				context: 'generateText /api/characters/thumbnail',
+				context: 'generateObject /api/characters/thumbnail',
 				error: e,
 				extra: { user: user.id, model },
 				waitUntil: getWaitUntil()
@@ -511,32 +546,49 @@ charactersRouter.post('/thumbnail', async (c) => {
 				502
 			);
 		}
-		if (!situation) {
+		if (!prompt) {
 			return c.json(
 				{
 					error: 'situation',
-					message: '상황 프롬프트가 비어 있어 생성하지 않았어요. 설정을 더 구체적으로 적어 주세요.'
+					message: '상황 프롬프트가 비어 있어 생성하지 않았어요. 설정이나 연출을 더 구체적으로 적어 주세요.'
 				},
 				502
 			);
 		}
 	}
 
-	const positive = buildPositivePrompt(style, situation, isNsfw, naiModel);
+	// base_caption = 인원수 + 그림체 + base 태그 + 자연어 장면(V5) + 퀄리티 꼬리(+nsfw). 인물은 char_captions.
+	const positive = buildPositivePrompt(style, prompt.base, isNsfw, naiModel, prompt.scene);
+	const charCaptions = prompt.characters;
+
+	// ── 하드 차단 ── 최종 프롬프트(base+인물 캡션)에 미성년 용어가 있으면 NovelAI 호출 없이 거부.
+	if (containsMinorTerms([positive, ...charCaptions].join(', '))) {
+		console.warn(`[characters/thumbnail] minor-term hard block (user=${user.id})`);
+		notifyServerError({
+			context: 'minor-term hard block /api/characters/thumbnail',
+			error: new Error('blocked: minor term in thumbnail prompt'),
+			extra: { user: user.id },
+			waitUntil: getWaitUntil()
+		});
+		return c.json(
+			{ error: 'blocked', message: '생성할 수 없는 내용이 포함되어 있어 썸네일을 만들지 않았어요.' },
+			422
+		);
+	}
 
 	// ── 2) NovelAI 스트리밍 생성 ──
-	// NDJSON: 먼저 t:'situation'(편집 input 채움) → t:'frame'(중간) … → t:'final'(최종 base64).
-	const sit = situation;
+	const finalPrompt = prompt;
 	const enc = new TextEncoder();
 	const ln = (o: unknown) => enc.encode(JSON.stringify(o) + '\n');
 	const stream = new ReadableStream({
 		async start(controller) {
-			controller.enqueue(ln({ t: 'situation', situation: sit }));
+			controller.enqueue(ln({ t: 'prompt', prompt: finalPrompt }));
 
 			let finalB64: string | null = null;
 			try {
 				for await (const b64 of generateImageStream(naiKey, {
 					positive,
+					charCaptions,
 					resolution: THUMB_RESOLUTION,
 					model: naiModel
 				})) {
@@ -553,7 +605,12 @@ charactersRouter.post('/thumbnail', async (c) => {
 				return;
 			}
 			// 폴백: 비스트리밍 생성 → 최종 1장.
-			const gen = await generateImage(naiKey, { positive, resolution: THUMB_RESOLUTION, model: naiModel });
+			const gen = await generateImage(naiKey, {
+				positive,
+				charCaptions,
+				resolution: THUMB_RESOLUTION,
+				model: naiModel
+			});
 			if (!gen.ok) {
 				controller.enqueue(ln({ t: 'error', message: gen.message }));
 				controller.close();

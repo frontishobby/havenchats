@@ -3,6 +3,7 @@
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { base64ToBlob, blobToBase64, blobToWebp } from '$lib/imagePreview';
 	import type { ArtStyle } from '$lib/types';
+	import type { ThumbnailPrompt, ThumbnailRequest } from '$lib/api/characters';
 	import { getNaiModel } from '$lib/naiModels';
 
 	let {
@@ -21,14 +22,27 @@
 		onuse: (file: File, styleId: string) => void;
 	} = $props();
 
-	const SITU_MAX = 1000;
+	const DIRECTION_MAX = 1000;
+	const BASE_MAX = 600;
+	const SCENE_MAX = 400;
+	const CHAR_MAX = 500;
+	const MAX_CHARS = 6;
 
 	// 그림체 선택(내가 만들거나 즐겨찾기한 것 — listMine 과 동일 후보).
 	let styles = $state<ArtStyle[]>([]);
 	let styleId = $state('');
 	const currentStyle = $derived(styles.find((s) => s.id === styleId) ?? null);
+	const isV5 = $derived(!currentStyle || getNaiModel(currentStyle.model).version === 'v5');
 
-	let situation = $state('');
+	/** 제작자의 자연어 연출(한국어 OK). 비면 주인공 단독 초상. */
+	let direction = $state('');
+	/** LLM 이 만든(또는 편집한) 구조화 프롬프트. 인물별 캡션은 NAI char_captions 로 분리 전송된다. */
+	let prompt = $state<ThumbnailPrompt>({ base: '', scene: '', characters: [] });
+	let promptOpen = $state(false);
+	const hasPrompt = $derived(
+		!!(prompt.base.trim() || prompt.scene.trim() || prompt.characters.some((c) => c.trim()))
+	);
+
 	let previewUrl = $state<string | null>(null);
 	let finalBlob = $state<Blob | null>(null);
 	/** finalBlob 을 만들 때 실제로 쓴 그림체 id(생성 시점 캡처 — "사용" 시 추천 그림체로 전달). */
@@ -52,11 +66,24 @@
 		if (u) URL.revokeObjectURL(u);
 	}
 
+	function applyPrompt(p: unknown) {
+		const o = (p ?? {}) as Partial<ThumbnailPrompt>;
+		prompt = {
+			base: (o.base ?? '').slice(0, BASE_MAX),
+			scene: (o.scene ?? '').slice(0, SCENE_MAX),
+			characters: (Array.isArray(o.characters) ? o.characters : [])
+				.filter((c): c is string => typeof c === 'string')
+				.map((c) => c.slice(0, CHAR_MAX))
+				.slice(0, MAX_CHARS)
+		};
+		promptOpen = true;
+	}
+
 	/**
-	 * NDJSON 스트림 소비. t:situation 으로 편집 input 채우고, t:frame/final 로 프리뷰 갱신.
+	 * NDJSON 스트림 소비. t:prompt 로 편집 필드를 채우고, t:frame/final 로 프리뷰 갱신.
 	 * 최종 Blob 을 반환(없으면 null).
 	 */
-	async function streamGenerate(body: Record<string, unknown>): Promise<Blob | null> {
+	async function streamGenerate(body: ThumbnailRequest): Promise<Blob | null> {
 		error = null;
 		noKey = false;
 		const res = await fetch('/api/characters/thumbnail', {
@@ -78,8 +105,8 @@
 		}
 		let final: Blob | null = null;
 		const handle = (o: Record<string, unknown>) => {
-			if (o.t === 'situation' && typeof o.situation === 'string') {
-				situation = o.situation.slice(0, SITU_MAX);
+			if (o.t === 'prompt') {
+				applyPrompt(o.prompt);
 			} else if ((o.t === 'frame' || o.t === 'final') && typeof o.img === 'string') {
 				const blob = base64ToBlob(o.img);
 				if (o.t === 'final') final = blob;
@@ -123,12 +150,15 @@
 		return final;
 	}
 
-	/** 썸네일 생성/재생성. regenSituation=true 면 설정 기반으로 상황을 새로 만든다. */
-	async function generate(regenSituation = false) {
+	/**
+	 * 썸네일 생성/재생성. regen=true(또는 편집 프롬프트가 비어 있음)면 설정+연출로 LLM 이 프롬프트를
+	 * 새로 만들고, 아니면 편집된 프롬프트를 그대로 써서 그림만 다시 뽑는다.
+	 */
+	async function generate(regen = false) {
 		if (generating) return;
-		// 상황을 직접 안 적었고 설정도 없으면 생성 불가(서버도 거부).
-		if (!situation.trim() && !description.trim()) {
-			error = '프롬프트(설정)를 먼저 작성하거나 상황을 직접 입력해 주세요.';
+		const needLlm = regen || !hasPrompt;
+		if (needLlm && !description.trim() && !direction.trim()) {
+			error = '프롬프트(설정)를 먼저 작성하거나 연출을 입력해 주세요.';
 			return;
 		}
 		generating = true;
@@ -141,8 +171,15 @@
 				style: currentStyle?.prompt ?? '',
 				// 그림체에 박힌 NovelAI 모델로 생성(그림체 없음이면 서버 기본).
 				naiModel: currentStyle?.model,
-				situation: regenSituation ? '' : situation.trim(),
-				regenSituation,
+				direction: direction.trim(),
+				prompt: needLlm
+					? undefined
+					: {
+							base: prompt.base.trim(),
+							scene: prompt.scene.trim(),
+							characters: prompt.characters.map((c) => c.trim()).filter(Boolean)
+						},
+				regen: needLlm,
 				nsfw
 			});
 			if (blob) {
@@ -152,6 +189,14 @@
 		} finally {
 			generating = false;
 		}
+	}
+
+	function addCharacter() {
+		if (prompt.characters.length >= MAX_CHARS) return;
+		prompt.characters.push('');
+	}
+	function removeCharacter(i: number) {
+		prompt.characters.splice(i, 1);
 	}
 
 	/** "이 썸네일 사용": NAI 2x 업스케일 → webp 변환 → 폼 썸네일 등록. */
@@ -203,7 +248,10 @@
 	<div class="t-head">
 		<span class="t-logo">🖼️</span>
 		<h2>AI 썸네일 생성</h2>
-		<p>설정(프롬프트)을 바탕으로 외형을 뽑아 썸네일을 만들어요. 그림체를 고르고 여러 번 돌려보세요.</p>
+		<p>
+			설정(프롬프트)에서 외형을 뽑아 썸네일을 만들어요. 연출을 적으면 그 장면으로, 여러 인물을 함께
+			등장시킬 수도 있어요.
+		</p>
 	</div>
 
 	{#if noKey}
@@ -240,28 +288,96 @@
 	{/if}
 
 	<div class="t-label-row">
-		<label class="t-label" for="thumb-situ">상황 프롬프트 (danbooru)</label>
+		<label class="t-label" for="thumb-direction">연출 (자연어, 선택)</label>
 		<button
 			class="t-mini"
 			onclick={() => generate(true)}
-			disabled={generating || !description.trim()}
-			title="설정을 바탕으로 상황을 새로 생성">↻ 설정 기반</button
+			disabled={generating || (!description.trim() && !direction.trim())}
+			title="설정과 연출을 바탕으로 프롬프트를 새로 만들고 다시 생성">↻ 설정·연출 반영</button
 		>
 	</div>
 	<textarea
-		id="thumb-situ"
+		id="thumb-direction"
 		class="t-situ"
 		rows="3"
-		maxlength={SITU_MAX}
-		bind:value={situation}
-		placeholder="생성을 누르면 설정에서 자동으로 채워져요. 직접 수정도 가능해요. 예: 1girl, long black hair, red eyes, school uniform, looking at viewer, upper body"
+		maxlength={DIRECTION_MAX}
+		bind:value={direction}
+		placeholder="비우면 주인공 단독 초상. 예: 주인공과 여동생이 나란히 서서 카메라를 보고 웃는다. 배경은 벚꽃 거리, 저녁 노을"
 		disabled={generating}
 	></textarea>
+
+	<details class="t-prompt" bind:open={promptOpen}>
+		<summary>
+			생성된 프롬프트
+			{#if hasPrompt}
+				<span class="t-badge">{prompt.characters.filter((c) => c.trim()).length}명</span>
+			{:else}
+				<span class="t-badge t-badge-dim">생성 후 편집 가능</span>
+			{/if}
+		</summary>
+		<label class="t-sub" for="thumb-base">기본 (인원수·구도·배경)</label>
+		<textarea
+			id="thumb-base"
+			class="t-situ t-sm"
+			rows="2"
+			maxlength={BASE_MAX}
+			bind:value={prompt.base}
+			placeholder="예: 2girls, upper body, cherry blossoms, sunset, side by side"
+			disabled={generating}
+		></textarea>
+		<label class="t-sub" for="thumb-scene">
+			장면 문장 {#if !isV5}<span class="t-faint">(V4.5 그림체에선 미사용)</span>{/if}
+		</label>
+		<textarea
+			id="thumb-scene"
+			class="t-situ t-sm"
+			rows="2"
+			maxlength={SCENE_MAX}
+			bind:value={prompt.scene}
+			placeholder="예: The two women stand shoulder to shoulder, smiling at the viewer."
+			disabled={generating}
+		></textarea>
+		<div class="t-sub-row">
+			<span class="t-sub">인물 (외형 + 복장·포즈·표정, 인물별로 분리 전송)</span>
+			<button
+				class="t-mini"
+				onclick={addCharacter}
+				disabled={generating || prompt.characters.length >= MAX_CHARS}>+ 인물</button
+			>
+		</div>
+		{#each prompt.characters as _, i (i)}
+			<div class="t-char">
+				<span class="t-char-n">{i + 1}</span>
+				<textarea
+					class="t-situ t-sm"
+					rows="2"
+					maxlength={CHAR_MAX}
+					bind:value={prompt.characters[i]}
+					placeholder="예: girl, long black hair, red eyes, school uniform, gentle smile, looking at viewer"
+					disabled={generating}
+				></textarea>
+				<button
+					class="t-x"
+					onclick={() => removeCharacter(i)}
+					disabled={generating}
+					aria-label="인물 제거">✕</button
+				>
+			</div>
+		{/each}
+		{#if prompt.characters.length === 0}
+			<p class="t-hint">인물이 없으면 기본 태그만으로 그려요. 보통 1명 이상 넣는 걸 권장해요.</p>
+		{/if}
+	</details>
 
 	{#if error}<p class="t-error">{error}</p>{/if}
 
 	<div class="t-actions">
-		<button class="t-gen" onclick={() => generate(false)} disabled={generating}>
+		<button
+			class="t-gen"
+			onclick={() => generate(false)}
+			disabled={generating}
+			title={hasPrompt ? '편집된 프롬프트 그대로 다시 그리기' : '설정·연출로 프롬프트를 만들어 생성'}
+		>
 			{generating ? '생성 중…' : previewUrl ? '다시 생성' : '썸네일 생성'}
 		</button>
 		<button class="t-use" onclick={useThumb} disabled={!finalBlob || generating || using}>
@@ -535,5 +651,105 @@
 		font-size: 0.74rem;
 		line-height: 1.5;
 		color: var(--text-faint);
+	}
+	.t-sm {
+		font-size: 0.8rem;
+		padding: 7px 9px;
+	}
+	.t-prompt {
+		margin-top: 12px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		padding: 8px 10px 10px;
+		background: color-mix(in srgb, var(--bg-elev) 55%, transparent);
+	}
+	.t-prompt summary {
+		cursor: pointer;
+		font-size: 0.78rem;
+		font-weight: 700;
+		color: var(--text-dim);
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		list-style: none;
+	}
+	.t-prompt summary::-webkit-details-marker {
+		display: none;
+	}
+	.t-prompt summary::before {
+		content: '▸';
+		font-size: 0.7rem;
+		transition: transform 0.15s ease;
+	}
+	.t-prompt[open] summary::before {
+		transform: rotate(90deg);
+	}
+	.t-badge {
+		font-size: 0.68rem;
+		font-weight: 700;
+		padding: 1px 7px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--accent) 18%, transparent);
+		color: var(--accent);
+	}
+	.t-badge-dim {
+		background: var(--bg-elev);
+		color: var(--text-faint);
+	}
+	.t-sub {
+		display: block;
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--text-dim);
+		margin: 10px 0 4px;
+	}
+	.t-sub-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		margin-top: 10px;
+	}
+	.t-sub-row .t-sub {
+		margin: 0;
+	}
+	.t-faint {
+		color: var(--text-faint);
+		font-weight: 500;
+	}
+	.t-char {
+		display: grid;
+		grid-template-columns: 18px 1fr 22px;
+		gap: 6px;
+		align-items: start;
+		margin-top: 6px;
+	}
+	.t-char .t-situ {
+		margin-top: 0;
+	}
+	.t-char-n {
+		margin-top: 8px;
+		font-size: 0.7rem;
+		font-weight: 800;
+		color: var(--text-faint);
+		text-align: center;
+	}
+	.t-x {
+		margin-top: 6px;
+		width: 22px;
+		height: 22px;
+		border: none;
+		border-radius: 50%;
+		background: var(--bg-elev);
+		color: var(--text-faint);
+		font-size: 0.7rem;
+		cursor: pointer;
+	}
+	.t-x:hover:not(:disabled) {
+		color: var(--nsfw);
+	}
+	.t-x:disabled {
+		opacity: 0.45;
+		cursor: default;
 	}
 </style>

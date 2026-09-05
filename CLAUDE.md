@@ -74,6 +74,7 @@ src/                  # SvelteKit 정적 SPA(프론트엔드 only)
       waitUntil.ts    # getWaitUntil() → ExecutionContext.waitUntil
       auth.ts crypto.ts novelai.ts characters.ts characterForm.ts imageStore.ts images.ts(getImages→env.IMAGES)
       credits.ts notify.ts recentChats.ts chatPageLoad.ts chatAssembly.ts minorSafety.ts nsfwUnlock.ts cloudflare.ts cfPricing.ts importCharx.ts
+      imagePrompt.ts    # 이미지 상황 프롬프트 공용(구조화 스키마 SCENE_PROMPT_SCHEMA·sanitizeTags/Scene·ADULT_ONLY_RULE) — 채팅 이미지·썸네일 공용
       db/ users.ts characters.ts chats.ts userKeys.ts styles.ts admin.ts  remote.ts(getDB→env.DB 직결)
   routes/             # 전부 클라 렌더(.svelte) + universal 로더(+page.ts/+layout.ts, ssr=false)
     +layout.{svelte,ts}   # ssr=false + /api/me 로드(유저·사이드바·크레딧)
@@ -107,7 +108,7 @@ static/favicon.svg, static/models/*.avif
 
 - **메인**: 캐릭터 그리드 + 검색/태그 필터. **비로그인 시 NSFW 캐릭터 숨김**.
 - **캐릭터 제작/관리**: `/create`로 캐릭터 등록(이름·소개·프롬프트·태그·오프닝 다중·썸네일·장면 이미지). 소유자만 수정(`/characters/[id]/edit`)·삭제. 폼/이미지 파싱은 `characterForm.ts`, R2 정리는 `imageStore.ts`.
-- **AI 도우미(제작 폼)**: `CharacterAssistPanel`(러프 입력 → `POST /api/characters/assist` `generateObject` 구조화 출력으로 폼 채움·기존 내용 보존 수정) + `CharacterThumbnailPanel`(NovelAI 썸네일). **허용 모델 `ASSIST_MODELS`: Claude Opus 5·GPT-5.6 Sol·GLM 5.3 Flash(기본)** — 구조화 출력 안정 모델만(Gemini Flash 는 NSFW 설정 입력 content-filter 로 제외). PC(≥1080px)는 폼 우측 sticky 열, **모바일은 우하단 ✦ FAB → 바텀시트**(탭: 캐릭터 생성/썸네일) — 같은 DOM 인스턴스를 CSS 로만 배치 전환.
+- **AI 도우미(제작 폼)**: `CharacterAssistPanel`(러프 입력 → `POST /api/characters/assist` `generateObject` 구조화 출력으로 폼 채움·기존 내용 보존 수정) + `CharacterThumbnailPanel`(NovelAI 썸네일 — **자연어 연출**(선택, 한국어) + 설정을 `POST /api/characters/thumbnail` 이 `generateObject` 로 `{ base, scene, characters[] }` 구조화(스키마·sanitizer 는 채팅 이미지와 공용 `lib/server/imagePrompt.ts`) → 인물별 캡션을 NAI `char_captions` 로 분리해 **여러 인물 동시 등장** 가능. 패널에서 base/장면 문장/인물 캡션을 편집해 그림만 다시 뽑거나(`prompt` 전송) '↻ 설정·연출 반영'으로 재생성(`regen`). 상황 프롬프트 모델은 `IMAGE_PROMPT_MODELS`(GLM 5.3 Flash), 미성년 하드차단 동일 적용). **허용 모델 `ASSIST_MODELS`: Claude Opus 5·GPT-5.6 Sol·GLM 5.3 Flash(기본)** — 구조화 출력 안정 모델만(Gemini Flash 는 NSFW 설정 입력 content-filter 로 제외). PC(≥1080px)는 폼 우측 sticky 열, **모바일은 우하단 ✦ FAB → 바텀시트**(탭: 캐릭터 생성/썸네일) — 같은 DOM 인스턴스를 CSS 로만 배치 전환.
 - **유저 프로필 페이지**(`/user/[id]`): 공개 프로필 + 제작 캐릭터 목록. 본인이면 전체, 외부 방문자에겐 NSFW 숨김.
 - **채팅**: **소설 모드**(말풍선 X, 산문). 괄호 `()`/`*..*` 지시문=기울임, 대사=`발화자 | "대사"`(`|` 제거·이름 강조). **장면 이미지** 인라인 표시(위치코드/핀 토큰). 실시간 스트리밍.
 - **대화 영속화**: 세션+메시지 D1 저장. 유저 메시지는 즉시 저장(스트림 끊겨도 유실 방지), assistant는 `onFinish`에 저장. **사이드바 최근 채팅**(`listRecentSessions`, 마지막 대사 미리보기). `/chat/[id]/session/[sessionId]` 경로로 이어가기(구버전 `?s=`도 하위호환). 새 세션은 첫 전송 시 lazy 생성 후 `replaceState`로 세션 URL로 교체(기본은 항상 새 세션).
