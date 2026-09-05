@@ -130,6 +130,21 @@ export function buildProviderOptions(
 	return out;
 }
 
+/**
+ * 롤플레이 본문 생성용 반복 억제 페널티(OpenAI 호환 샘플링 파라미터).
+ * DeepSeek·GLM 은 긴 맥락에서 직전 assistant 턴의 문단·상투 묘사를 그대로 복사하는 경향이 강해
+ * (2026-09 실측: 마지막 응답 41문단 중 31문단이 직전 응답과 글자 단위 동일) 약한 페널티를 건다.
+ * Anthropic·Google 은 이 파라미터를 지원하지 않아(SDK 경고) 넘기지 않는다.
+ */
+export function repetitionPenalties(
+	modelId: string
+): { frequencyPenalty?: number; presencePenalty?: number } {
+	if (modelId.startsWith('deepseek/') || modelId.startsWith('zai/') || modelId.startsWith('openai/')) {
+		return { frequencyPenalty: 0.4, presencePenalty: 0.3 };
+	}
+	return {};
+}
+
 /** 캐릭터의 첫 상황(오프닝) 본문. 인덱스 범위 밖이면 기본(0), 없으면 ''. */
 export function openingContent(character: Character, index?: number): string {
 	const greetings = character.greetings;
@@ -257,7 +272,8 @@ export function buildMessages(
 		if (loreBlock) last.content = `${last.content}\n\n${loreBlock}`;
 		const directive = [
 			`[응답 지침]`,
-			`- 분량: 약 ${maxSentences}문장 내외로 작성하라.`,
+			`- 분량: 최대 ${maxSentences}문장. 상한이지 목표가 아니다 — 새로 일어날 일이 없으면 분량을 채우려 하지 말고 짧게 끝내라.`,
+			`- 반복 금지: 앞선 응답들에 이미 쓴 문장·문단·묘사 표현(표정·숨·목소리 묘사 등)을 그대로 또는 살짝 바꿔 다시 쓰지 마라. 같은 인물이 같은 반응을 되풀이하게 하지 말고, 매 응답은 장면을 한 단계 앞으로 진행시켜라(새 행동·결정·사건·정보).`,
 			userActsLine(userActs)
 		].join('\n');
 		out.push({ role: 'user', content: directive });

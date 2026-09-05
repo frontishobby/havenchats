@@ -42,6 +42,7 @@ import {
 	openingContent,
 	pickModel,
 	reasoningHeadroom,
+	repetitionPenalties,
 	WINDOW_TOKEN_BUDGET,
 	KEEP_RECENT,
 	MAX_USER_MSG_TOKENS,
@@ -277,6 +278,8 @@ chatRouter.post('/', async (c) => {
 		messages,
 		providerOptions: buildProviderOptions(modelId),
 		temperature: 0.9,
+		// 직전 턴 문단 복사(DeepSeek 계열 장문 반복) 억제. 모델별로 지원되는 경우에만 값이 들어간다.
+		...repetitionPenalties(modelId),
 		maxOutputTokens: outputReserve,
 		onError: ({ error }) => {
 			streamError = error;

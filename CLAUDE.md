@@ -27,6 +27,7 @@
 - **프롬프트 캐싱**: system은 **고정 prefix**(제작자 `description` + 장면 이미지 카탈로그 + 상대(유저) 정보 + 가드레일)로 만들고, 가변 부분(분량·'나' 행동 지침)은 **마지막 유저 메시지 끝에 부착** → prefix 캐싱 유지. **요약(rolling summary) 블록은 system 맨 끝**에 둬서 갱신 전까지 prefix 캐시 재사용. `providerOptions.gateway.caching='auto'`.
 - **토큰 전략**(`/api/chat`): ① **sliding window** — `seq > summary_upto_seq` 메시지만 모델에 전송. ② **rolling summary** — window 토큰이 `WINDOW_TOKEN_BUDGET`(6000) 초과 + `KEEP_RECENT`(12) 초과 시 백그라운드 요약(`waitUntil`). ③ **input 하드가드** — 모델 `contextLimit` 기준으로 요청 시점에 오래된 window를 동기적으로 잘라냄(최신은 항상 보존). ④ 단일 유저 메시지 `MAX_USER_MSG_TOKENS`(4000) 초과 시 413 거부.
 - **모델 선택은 서버에서 허용목록(`MODEL_IDS`) 검증** 후 사용 (임의 모델 주입 방지). 각 모델은 `contextLimit`(input 가드 기준) 보유.
+- **반복 억제**(`/api/chat`): 분량 지침은 '최대 N문장'(상한, 목표 아님) + '앞선 응답 문장·문단·상투 묘사 재사용 금지, 매 턴 장면 진행' 규칙을 응답 지침에 포함. DeepSeek·GLM·OpenAI 엔 `repetitionPenalties`(frequency 0.4·presence 0.3) 추가(Anthropic·Google 미지원이라 제외). 배경: DeepSeek V4 Pro 장문 세션에서 직전 응답 41문단 중 31문단이 글자 단위 복사되던 실측(2026-09).
 - **장면 이미지(축×조합)**: 모델은 응답에 **위치코드**(`{AAB}` — 축별 value index를 A=0,B=1…로) 출력. DB 저장 시 `pinSceneCodes`로 **불변 토큰**(`{#entryId}`)으로 고정(이후 제작자가 축/값 순서 바꿔도 안 흔들림). 렌더러는 두 형식 모두 해석. 유틸은 `lib/imageCodes.ts`(클라/서버 공용 순수함수).
 - **`{{나}}` 플레이스홀더**: 제작자 프롬프트·오프닝의 `{{나}}` → 유저 이름(없으면 '나')으로 치환.
 - **NSFW 주의**: 메인스트림 모델(OpenAI/Anthropic/Google)은 성인물 거부. NSFW엔 허용 모델 필요. 미성년자 묘사 등 불법 콘텐츠 차단 가드레일은 system 프롬프트에 항상 포함.
