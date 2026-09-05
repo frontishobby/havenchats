@@ -143,6 +143,11 @@ export type ImageStorage = 'local' | 'r2';
 export interface ImageAxis {
 	label: string;
 	values: string[];
+	/**
+	 * 폴백 값 index(선택). 위치코드가 가리키는 조합이 없을 때 이 축을 이 값으로 바꿔 재시도.
+	 * 희소 그리드(예: 인물마다 상황 일부만 존재)에서 "상황=기본" 으로 떨어뜨리는 용도.
+	 */
+	fallback?: number;
 }
 
 /**

@@ -1,6 +1,7 @@
 import type {
 	CharacterImageSet,
 	GridImageSet,
+	ImageAxis,
 	ImageEntry,
 	NamedImage,
 	NamedImageSet
@@ -20,16 +21,50 @@ import { imgSrc } from './imageBase';
  * 렌더러는 위치코드({AAB})·이미지 토큰(`<img="name">`)·고정 토큰({#id}) 을 모두 해석한다.
  */
 
-const MAX_AXIS_VALUES = 26; // A–Z
+/**
+ * 축 값 코드 = 대문자 base-26, 축마다 고정 폭. 값이 26개 이하면 한 글자(A–Z),
+ * 676개 이하면 두 글자(AA–ZZ). 폭은 값 개수에서 결정되므로 기존 세트(≤26)는 코드가 그대로다.
+ * 위치코드 = 축 순서대로 각 축 코드를 이어 붙인 것({AAB}, {ABCD}…).
+ */
+const MAX_AXIS_VALUES = 26 * 26; // 최대 두 글자(AA–ZZ)
 
 /** 장면 이미지 세트 제약(그리드 방식 — 클라이언트·서버 공용). */
 export const IMAGE_LIMITS = {
 	MAX_AXES: 4,
-	MAX_AXIS_VALUES, // 코드 한 글자 = A–Z
+	MAX_AXIS_VALUES, // 축 값 = 최대 676개(코드 두 글자)
 	AXIS_LABEL_MAX: 20,
 	VALUE_LABEL_MAX: 20,
-	MAX_ENTRIES: 50
+	MAX_ENTRIES: 6000 // 인물×상황 대량 세트(리리스 류 3,878장) 수용. named 와 동일 상한
 } as const;
+
+/** 값 개수에 따른 축 코드 폭(글자 수). */
+export function axisWidth(valueCount: number): number {
+	return valueCount > 26 ? 2 : 1;
+}
+
+/** 축 안의 value index → 고정 폭 base-26 코드("A", "AB"…). 범위 밖이면 '?' 반복. */
+export function valueCode(valueCount: number, index: number): string {
+	const w = axisWidth(valueCount);
+	if (index < 0 || index >= valueCount || index >= 26 ** w) return '?'.repeat(w);
+	let n = index;
+	let s = '';
+	for (let i = 0; i < w; i++) {
+		s = String.fromCharCode(65 + (n % 26)) + s;
+		n = Math.floor(n / 26);
+	}
+	return s;
+}
+
+/** 고정 폭 base-26 코드 → index. 대문자가 아니면 -1. */
+function parseValueCode(s: string): number {
+	let n = 0;
+	for (let i = 0; i < s.length; i++) {
+		const d = s.charCodeAt(i) - 65;
+		if (d < 0 || d > 25) return -1;
+		n = n * 26 + d;
+	}
+	return n;
+}
 
 /** 플랫 네임드 방식 제약. import(charx) 는 대량 갤러리라 상한이 넉넉하다. */
 export const NAMED_LIMITS = {
@@ -76,21 +111,26 @@ export function localSceneKey(characterId: string, id: string): string {
 // 그리드(축×조합) — 위치코드
 // ─────────────────────────────────────────────────────────────
 
-/** combo(축별 index) → 위치코드("AAB"). 범위 밖 index 는 '?' 로(방어적). */
-export function comboToCode(combo: number[]): string {
-	return combo
-		.map((i) => (i >= 0 && i < MAX_AXIS_VALUES ? String.fromCharCode(65 + i) : '?'))
-		.join('');
+/**
+ * combo(축별 index) → 위치코드("AAB"). 축 정의를 주면 축별 폭(1~2글자)을 반영한다.
+ * axes 를 생략하면 모든 축을 한 글자로 취급(값 26개 이하인 레거시 세트용). 범위 밖 index 는 '?'.
+ */
+export function comboToCode(combo: number[], axes?: ImageAxis[]): string {
+	return combo.map((idx, ai) => valueCode(axes?.[ai]?.values.length ?? 26, idx)).join('');
 }
 
-/** 위치코드 → combo. 글자 수가 축 개수와 다르거나 범위를 벗어나면 null. */
+/** 위치코드 → combo. 총 글자 수가 축 폭 합과 다르거나 범위를 벗어나면 null. */
 export function codeToCombo(code: string, axes: GridImageSet['axes']): number[] | null {
-	if (code.length !== axes.length) return null;
+	const total = axes.reduce((n, a) => n + axisWidth(a.values.length), 0);
+	if (code.length !== total) return null;
 	const combo: number[] = [];
-	for (let i = 0; i < code.length; i++) {
-		const idx = code.charCodeAt(i) - 65; // 'A' → 0
-		if (idx < 0 || idx >= axes[i].values.length) return null;
+	let pos = 0;
+	for (const axis of axes) {
+		const w = axisWidth(axis.values.length);
+		const idx = parseValueCode(code.slice(pos, pos + w));
+		if (idx < 0 || idx >= axis.values.length) return null;
 		combo.push(idx);
+		pos += w;
 	}
 	return combo;
 }
@@ -100,12 +140,37 @@ export function findEntryById(set: GridImageSet, id: string): ImageEntry | null 
 	return set.entries.find((e) => e.id === id) ?? null;
 }
 
-/** 위치코드로 조합 조회(현재 축/값 기준). */
+function findEntryByCombo(set: GridImageSet, combo: number[]): ImageEntry | null {
+	const key = combo.join(',');
+	return set.entries.find((e) => e.combo.join(',') === key) ?? null;
+}
+
+/** 위치코드로 조합 조회(현재 축/값 기준, 정확히 일치하는 조합만). */
 export function findEntryByCode(set: GridImageSet, code: string): ImageEntry | null {
 	const combo = codeToCombo(code, set.axes);
 	if (!combo) return null;
-	const key = combo.join(',');
-	return set.entries.find((e) => e.combo.join(',') === key) ?? null;
+	return findEntryByCombo(set, combo);
+}
+
+/**
+ * 위치코드 조회 + 폴백. 정확한 조합이 없으면 `fallback` 이 지정된 축을 뒤에서부터
+ * 하나씩 기본값으로 바꿔 가며 재시도한다(예: [인물][상황] 세트에서 그 인물의 해당 상황이
+ * 없으면 상황=기본 으로). 희소 그리드(인물마다 상황 일부만 존재)에서 토큰이 숨겨지는 것 방지.
+ */
+export function findEntryByCodeWithFallback(set: GridImageSet, code: string): ImageEntry | null {
+	const combo = codeToCombo(code, set.axes);
+	if (!combo) return null;
+	const exact = findEntryByCombo(set, combo);
+	if (exact) return exact;
+	const cur = [...combo];
+	for (let ai = set.axes.length - 1; ai >= 0; ai--) {
+		const fb = set.axes[ai].fallback;
+		if (fb == null || fb < 0 || fb >= set.axes[ai].values.length || cur[ai] === fb) continue;
+		cur[ai] = fb;
+		const hit = findEntryByCombo(set, cur);
+		if (hit) return hit;
+	}
+	return null;
 }
 
 /** R2 오브젝트 키: charimg/<characterId>/<entryId>.<ext> */
@@ -139,13 +204,14 @@ export function entryAlt(set: GridImageSet, entry: ImageEntry): string {
 function buildGridCatalog(set: GridImageSet): string {
 	const axisOrder = set.axes.map((a) => a.label).join('][');
 	const axisLines = set.axes.map((a) => {
-		const vals = a.values.map((v, i) => `${String.fromCharCode(65 + i)}=${v}`).join(', ');
-		return `  - ${a.label}: ${vals}`;
+		const w = axisWidth(a.values.length);
+		const vals = a.values.map((v, i) => `${valueCode(a.values.length, i)}=${v}`).join(', ');
+		return `  - ${a.label}(${w}글자): ${vals}`;
 	});
 	return [
 		`# 장면 이미지 (선택적 출력)`,
-		`이야기 흐름상 한 장면이 떠오르면, 각 축에서 값을 하나씩 골라 그 글자들을 [${axisOrder}] 순서로 이어 붙인 코드를 중괄호로 감싸 한 줄에 단독으로 출력하라. 예: {${comboToCode(set.entries[0].combo)}}`,
-		`- 축과 값(글자):`,
+		`이야기 흐름상 한 장면이 떠오르면, 각 축에서 값을 하나씩 골라 그 코드를 [${axisOrder}] 순서로 이어 붙인 뒤 중괄호로 감싸 한 줄에 단독으로 출력하라. 예: {${comboToCode(set.entries[0].combo, set.axes)}}`,
+		`- 축과 값(코드): 축마다 코드 글자 수가 정해져 있다(괄호 안).`,
 		...axisLines,
 		`규칙: 위 축 값 중에서만 골라 코드를 만들고, 장면이 실제로 바뀔 때만 출력한다. 본문 서술·대사는 평소대로 이어가라.`
 	].join('\n');
@@ -204,7 +270,7 @@ export function buildImageCatalog(set: CharacterImageSet | null | undefined): st
 	return '';
 }
 
-// 위치코드 토큰(한 줄 단독): {ABC} — 대문자 1~8글자.
+// 위치코드 토큰(한 줄 단독): {ABC} — 대문자 1~8글자(축 4개 × 최대 2글자).
 const POSITIONAL_LINE = /^\{([A-Z]{1,8})\}$/;
 // 고정 토큰(한 줄 단독): {#<id>}
 const PINNED_LINE = /^\{#([A-Za-z0-9_-]+)\}$/;
@@ -240,7 +306,7 @@ export function stripSceneTokens(line: string): string {
 export function pinSceneCodes(text: string, set: CharacterImageSet | null | undefined): string {
 	if (isGrid(set)) {
 		return text.replace(POSITIONAL_GLOBAL, (whole, code: string) => {
-			const entry = findEntryByCode(set, code);
+			const entry = findEntryByCodeWithFallback(set, code);
 			return entry ? `{#${entry.id}}` : whole;
 		});
 	}
@@ -313,7 +379,7 @@ export function resolveSceneLine(
 	if (isGrid(set)) {
 		const pos = POSITIONAL_LINE.exec(line);
 		if (pos) {
-			const entry = findEntryByCode(set, pos[1]);
+			const entry = findEntryByCodeWithFallback(set, pos[1]);
 			if (!entry) return null;
 			return decorateScene({ url: entryUrl(characterId, entry, version), alt: entryAlt(set, entry) }, entry.id, characterId, set);
 		}

@@ -29,6 +29,7 @@
 - **모델 선택은 서버에서 허용목록(`MODEL_IDS`) 검증** 후 사용 (임의 모델 주입 방지). 각 모델은 `contextLimit`(input 가드 기준) 보유.
 - **반복 억제**(`/api/chat`): 분량 지침은 '최대 N문장'(상한, 목표 아님) + '앞선 응답 문장·문단·상투 묘사 재사용 금지, 매 턴 장면 진행' 규칙을 응답 지침에 포함. DeepSeek·GLM·OpenAI 엔 `repetitionPenalties`(frequency 0.4·presence 0.3) 추가(Anthropic·Google 미지원이라 제외). 배경: DeepSeek V4 Pro 장문 세션에서 직전 응답 41문단 중 31문단이 글자 단위 복사되던 실측(2026-09).
 - **장면 이미지(축×조합)**: 모델은 응답에 **위치코드**(`{AAB}` — 축별 value index를 A=0,B=1…로) 출력. DB 저장 시 `pinSceneCodes`로 **불변 토큰**(`{#entryId}`)으로 고정(이후 제작자가 축/값 순서 바꿔도 안 흔들림). 렌더러는 두 형식 모두 해석. 유틸은 `lib/imageCodes.ts`(클라/서버 공용 순수함수).
+- **그리드 코드 폭 가변**: 축 값 26개 초과면 코드 두 글자(AA~ZZ, 최대 676), 조합 상한 6,000, `ImageAxis.fallback`(없는 조합이면 그 축을 기본값으로 재시도 — 인물×상황 희소 세트용). 대량 업로드는 관리자 전용 `POST /api/characters/:id/scenes/bulk` + `scripts/scenes-bulk.mjs`(파일명 `키_키.webp` → combo, `HAVEN_COOKIE` 필요).
 - **`{{나}}` 플레이스홀더**: 제작자 프롬프트·오프닝의 `{{나}}` → 유저 이름(없으면 '나')으로 치환.
 - **NSFW 주의**: 메인스트림 모델(OpenAI/Anthropic/Google)은 성인물 거부. NSFW엔 허용 모델 필요. 미성년자 묘사 등 불법 콘텐츠 차단 가드레일은 system 프롬프트에 항상 포함.
 - **검증은 `npm run check`/build로**. UI 변경마다 Playwright 띄우지 말 것 (사용자 선호).

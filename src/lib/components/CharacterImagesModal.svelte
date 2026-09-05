@@ -19,7 +19,7 @@
 </script>
 
 <script lang="ts">
-	import { IMAGE_LIMITS, comboToCode, entryUrl } from '$lib/imageCodes';
+	import { IMAGE_LIMITS, comboToCode, entryUrl, valueCode } from '$lib/imageCodes';
 
 	let {
 		open,
@@ -146,8 +146,9 @@
 		return null;
 	}
 
-	function letter(i: number): string {
-		return String.fromCharCode(65 + i);
+	/** 축 값 코드 배지(축 값 수에 따라 1~2글자). */
+	function letter(count: number, i: number): string {
+		return valueCode(count, i);
 	}
 
 	// ── 적용(완료) ──
@@ -167,12 +168,12 @@
 		for (const e of entries) {
 			const key = e.combo.join(',');
 			if (seen.has(key)) {
-				error = `중복된 조합이 있습니다: {${comboToCode(e.combo)}}`;
+				error = `중복된 조합이 있습니다: {${comboToCode(e.combo, axes)}}`;
 				return;
 			}
 			seen.add(key);
 			if (!e.file && !e.ext) {
-				error = `조합 {${comboToCode(e.combo)}} 에 이미지를 추가해 주세요.`;
+				error = `조합 {${comboToCode(e.combo, axes)}} 에 이미지를 추가해 주세요.`;
 				return;
 			}
 		}
@@ -234,7 +235,7 @@
 							<div class="values">
 								{#each axis.values as _, v (v)}
 									<div class="value">
-										<span class="badge">{letter(v)}</span>
+										<span class="badge">{letter(axis.values.length, v)}</span>
 										<input
 											type="text"
 											placeholder="값 이름"
@@ -278,14 +279,14 @@
 					{#each entries as entry, i (entry.id)}
 						{@const url = entryImageUrl(entry)}
 						<div class="entry">
-							<span class="code">{comboToCode(entry.combo)}</span>
+							<span class="code">{comboToCode(entry.combo, axes)}</span>
 							<div class="selects">
 								{#each axes as axis, a (a)}
 									<label class="sel">
 										<span class="sel-label">{axis.label || `축 ${a + 1}`}</span>
 										<select bind:value={entries[i].combo[a]}>
 											{#each axis.values as val, vi (vi)}
-												<option value={vi}>{val || letter(vi)}</option>
+												<option value={vi}>{val || letter(axis.values.length, vi)}</option>
 											{/each}
 										</select>
 									</label>

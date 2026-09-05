@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import {
+		axisWidth,
 		comboToCode,
 		entryUrl,
 		entryAlt,
@@ -9,7 +10,8 @@
 		isNamed,
 		isLocalSet,
 		localSceneKey,
-		namedUrl
+		namedUrl,
+		valueCode
 	} from '$lib/imageCodes';
 	import { localSceneURL } from '$lib/import/localImages';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
@@ -23,8 +25,8 @@
 	// 로컬(IndexedDB) 세트면 R2 URL 대신 blob URL 로 렌더.
 	const local = $derived(isLocalSet(set));
 
-	function letter(i: number): string {
-		return String.fromCharCode(65 + i);
+	function letter(count: number, i: number): string {
+		return valueCode(count, i);
 	}
 
 	function back() {
@@ -71,11 +73,11 @@
 		<section class="axes">
 			{#each set.axes as axis, a (a)}
 				<div class="axis">
-					<span class="axis-pos">{a + 1}번째 글자</span>
+					<span class="axis-pos">{a + 1}번째 축 · {axisWidth(axis.values.length)}글자</span>
 					<span class="axis-label">{axis.label}</span>
 					<div class="vals">
 						{#each axis.values as v, vi (vi)}
-							<span class="val"><span class="badge">{letter(vi)}</span>{v}</span>
+							<span class="val"><span class="badge">{letter(axis.values.length, vi)}</span>{v}</span>
 						{/each}
 					</div>
 				</div>
@@ -93,7 +95,7 @@
 						aria-label={`${entryAlt(set, entry)} 확대 보기`}
 					>
 						<img src={entryUrl(character.id, entry, character.updatedAt)} alt={entryAlt(set, entry)} loading="lazy" />
-						<span class="code">{comboToCode(entry.combo)}</span>
+						<span class="code">{comboToCode(entry.combo, set.axes)}</span>
 					</button>
 					<figcaption>{entryAlt(set, entry)}</figcaption>
 				</figure>

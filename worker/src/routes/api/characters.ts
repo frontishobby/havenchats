@@ -18,7 +18,8 @@ import {
 	updateImageSet
 } from '$lib/server/db/characters';
 import { styleExists } from '$lib/server/db/styles';
-import { ALLOWED_IMAGE, parseCharacterForm } from '$lib/server/characterForm';
+import { ALLOWED_IMAGE, MAX_IMAGE_BYTES, parseCharacterForm } from '$lib/server/characterForm';
+import { IMAGE_LIMITS, entryKey, isGrid } from '$lib/imageCodes';
 import { commitSceneImages, deleteAllSceneImages, deleteKeys } from '$lib/server/imageStore';
 import { isAdmin, requireAdmin } from '$lib/server/auth';
 import { findCharacter } from '$lib/server/characters';
@@ -50,7 +51,7 @@ import {
 	type ResolutionKey
 } from '$lib/server/novelai';
 import { pickNaiModel } from '$lib/naiModels';
-import type { Audience } from '$lib/types';
+import type { Audience, ImageAxis, ImageEntry } from '$lib/types';
 import type {
 	AssistCurrentDraft,
 	AssistDraft,
@@ -1075,4 +1076,114 @@ charactersRouter.get('/:id/assets-data', async (c) => {
 	}
 
 	return c.json({ character } satisfies CharacterAssetsData);
+});
+
+// ── 장면 이미지 대량 업로드(그리드) — 관리자 전용 ───────────────────────
+/**
+ * POST /api/characters/:id/scenes/bulk (multipart)
+ *  - axes: ImageAxis[] JSON — 세트의 축 정의(전체 교체). 기존 그리드 세트가 있으면 값 순서가 같아야 함.
+ *  - f:<i0>,<i1>,…: 파일. 필드명이 combo(축별 value index). webp/avif.
+ *  - reset=1 이면 기존 엔트리·R2 를 전부 지우고 새로 시작.
+ * 같은 combo 가 이미 있으면 그 엔트리의 id 를 재사용(이미지 교체), 없으면 새 id.
+ * 수백~수천 장을 배치(요청당 수십 장)로 올리는 로컬 스크립트(scripts/scenes-bulk.mjs)용.
+ */
+charactersRouter.post('/:id/scenes/bulk', async (c) => {
+	const user = requireUser(c);
+	requireAdmin(user.email);
+	const cid = c.req.param('id');
+	const db = c.env.DB;
+	const bucket = c.env.IMAGES;
+	if (!db || !bucket) throw new HttpError(500, 'storage unavailable');
+
+	const own = await getCharacterOwnership(db, cid);
+	if (!own || own.creatorId !== user.id) throw new HttpError(404, '캐릭터를 찾을 수 없어요.');
+
+	const form = await c.req.formData();
+	let axesRaw: unknown;
+	try {
+		axesRaw = JSON.parse(String(form.get('axes') ?? '[]'));
+	} catch {
+		throw new HttpError(400, 'axes 형식이 올바르지 않아요.');
+	}
+	if (!Array.isArray(axesRaw) || axesRaw.length === 0 || axesRaw.length > IMAGE_LIMITS.MAX_AXES)
+		throw new HttpError(400, `축은 1~${IMAGE_LIMITS.MAX_AXES}개여야 해요.`);
+	const axes: ImageAxis[] = [];
+	for (const a of axesRaw as Array<{ label?: unknown; values?: unknown; fallback?: unknown }>) {
+		const label = typeof a?.label === 'string' ? a.label.trim() : '';
+		const values = Array.isArray(a?.values)
+			? a.values.map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean)
+			: [];
+		if (!label || values.length === 0 || values.length > IMAGE_LIMITS.MAX_AXIS_VALUES)
+			throw new HttpError(400, `축 "${label}" 정의가 올바르지 않아요.`);
+		const fb = a.fallback;
+		axes.push(
+			typeof fb === 'number' && Number.isInteger(fb) && fb >= 0 && fb < values.length
+				? { label, values, fallback: fb }
+				: { label, values }
+		);
+	}
+
+	const existing = await findCharacter(db, cid);
+	const reset = String(form.get('reset') ?? '') === '1';
+	const oldSet = existing?.imageSet ?? null;
+	let entries: ImageEntry[] = [];
+	const staleKeys: string[] = [];
+	if (isGrid(oldSet) && !reset) {
+		if (oldSet.axes.length !== axes.length)
+			throw new HttpError(400, '기존 세트와 축 개수가 달라요. reset=1 로 새로 시작하세요.');
+		entries = [...oldSet.entries];
+	} else if (oldSet) {
+		// 세트 교체(reset 또는 named→grid): 옛 R2 키 전부 정리 대상.
+		if (isGrid(oldSet)) staleKeys.push(...oldSet.entries.map((e) => entryKey(cid, e)));
+		else staleKeys.push(...oldSet.images.map((i) => `charimg/${cid}/${i.id}.${i.ext}`));
+	}
+
+	const byCombo = new Map<string, number>(entries.map((e, i) => [e.combo.join(','), i]));
+	const uploaded: string[] = [];
+	let added = 0;
+	let replaced = 0;
+	for (const [field, value] of form.entries()) {
+		if (!field.startsWith('f:') || !(value instanceof File) || value.size === 0) continue;
+		const combo = field
+			.slice(2)
+			.split(',')
+			.map((s) => Number(s));
+		if (combo.length !== axes.length || combo.some((v, ai) => !Number.isInteger(v) || v < 0 || v >= axes[ai].values.length))
+			throw new HttpError(400, `조합 "${field}" 이(가) 축 범위를 벗어났어요.`);
+		const ext = ALLOWED_IMAGE[value.type];
+		if (!ext) throw new HttpError(400, `"${field}": webp/avif 만 가능해요.`);
+		if (value.size > MAX_IMAGE_BYTES) throw new HttpError(400, `"${field}": 3MB 초과.`);
+
+		const key = combo.join(',');
+		const idx = byCombo.get(key);
+		let entry: ImageEntry;
+		if (idx != null) {
+			const prev = entries[idx];
+			if (prev.ext !== ext) staleKeys.push(entryKey(cid, prev));
+			entry = { id: prev.id, combo, ext };
+			entries[idx] = entry;
+			replaced++;
+		} else {
+			if (entries.length >= IMAGE_LIMITS.MAX_ENTRIES)
+				throw new HttpError(400, `조합은 최대 ${IMAGE_LIMITS.MAX_ENTRIES}개까지예요.`);
+			entry = { id: crypto.randomUUID(), combo, ext };
+			entries.push(entry);
+			byCombo.set(key, entries.length - 1);
+			added++;
+		}
+		const objKey = entryKey(cid, entry);
+		await bucket.put(objKey, await value.arrayBuffer(), { httpMetadata: { contentType: value.type } });
+		uploaded.push(objKey);
+	}
+
+	try {
+		await updateImageSet(db, cid, { kind: 'grid', axes, entries });
+	} catch (e) {
+		await deleteKeys(bucket, uploaded);
+		throw e;
+	}
+	// 교체된 옛 키는 DB 확정 후 정리(best-effort).
+	if (staleKeys.length) getWaitUntil()(deleteKeys(bucket, staleKeys.filter((k) => !uploaded.includes(k))));
+
+	return c.json({ ok: true, added, replaced, total: entries.length });
 });

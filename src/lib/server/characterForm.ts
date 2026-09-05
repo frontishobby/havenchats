@@ -257,7 +257,13 @@ export function parseImageSet(form: FormData): ImageSetResult {
 				ok: false,
 				error: `값 이름은 ${IMAGE_LIMITS.VALUE_LABEL_MAX}자 이내로 입력해 주세요.`
 			};
-		axes.push({ label, values });
+		// 폴백 값(선택): 범위 안의 정수만 채택, 아니면 무시.
+		const fbRaw = (o as { fallback?: unknown }).fallback;
+		const fallback =
+			typeof fbRaw === 'number' && Number.isInteger(fbRaw) && fbRaw >= 0 && fbRaw < values.length
+				? fbRaw
+				: undefined;
+		axes.push(fallback == null ? { label, values } : { label, values, fallback });
 	}
 
 	// ── 조합(행) 검증 ──
@@ -286,7 +292,7 @@ export function parseImageSet(form: FormData): ImageSetResult {
 		}
 		const comboKey = combo.join(',');
 		if (seenCombo.has(comboKey))
-			return { ok: false, error: `중복된 조합이 있습니다: {${comboToCode(combo)}}` };
+			return { ok: false, error: `중복된 조합이 있습니다: {${comboToCode(combo, axes)}}` };
 		seenCombo.add(comboKey);
 
 		// 파일(신규/교체) 또는 기존 ext(유지) 중 하나.
