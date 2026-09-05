@@ -65,12 +65,15 @@ export const QUALITY_TAIL =
 	', -4::artist collaboration, year 2025, year 2024, -3::spoken bubble, text, cross-section::, rating:explicit, {{{-3::censored, photo inset, stomach deformation}}}, {{{-3::small lines::}}}, 1.5::balanced contrast::, -2::simple illustration::, -1::censored::, best quality, amazing quality, very aesthetic, intricate detail, highres, incredibly absurdres';
 
 /**
- * V5 용 퀄리티 꼬리. NovelAI V5 공식 퀄리티 프리셋(`very aesthetic, amazing quality, no text`)을 기본으로,
- * V4.5 꼬리에서 세대 무관한 억제 항목(말풍선/검열/단순화)만 가볍게 유지한다. V5 는 V4.5 와 태그 반응이
- * 달라 V4.5 꼬리(year 태그·balanced contrast 등)를 그대로 쓰면 화풍이 틀어진다.
+ * V5 용 퀄리티 꼬리(2026-09 조사 기준).
+ *  - NovelAI V5 공식 Light 프리셋 `very aesthetic, amazing quality, no text` 기반.
+ *  - `high complexity`: V5 신규 complexity 태그 — 일반 이미지엔 high 를 공식 권장(low/ultra 는 화풍 재현용).
+ *  - `year 2026`: year 태그는 V5 에서도 유효(최신 화풍 편향). `::` 숫자 가중치도 V5 에서 그대로 동작.
+ *  - V4.5 꼬리의 balanced contrast·incredibly absurdres·artist collaboration 은 V5 문서에 근거가 없어 제외.
+ *  - rating:explicit 는 넣지 않음(NSFW 캐릭터는 앞에 rating:nsfw 가 붙음). 노출이 약하면 추가 검토.
  */
 export const QUALITY_TAIL_V5 =
-	', -3::spoken bubble, text::, -2::simple illustration::, -1::censored::, very aesthetic, amazing quality, no text, best quality, highres';
+	', year 2026, -3::spoken bubble, text::, -2::simple illustration::, -1::censored::, high complexity, very aesthetic, amazing quality, no text, best quality, highres';
 
 /** 모델별 퀄리티 꼬리. */
 export function qualityTailFor(model: string): string {
@@ -107,14 +110,15 @@ export const IMAGE_PARAMS: ImageParams = {
 };
 
 /**
- * V5 생성 파라미터. NovelAI V5 기본값(scale 7, cfg_rescale 0, euler_a + karras 고정)을 따르되
- * steps 는 Opus 무료 상한(28)까지 올린다. V5 는 noise_schedule 을 karras 로만 받는다.
+ * V5 생성 파라미터. euler_a + karras(V5 는 noise_schedule 을 karras 로만 받음), cfg_rescale 0.
+ * CFG 는 NAI 기본 7 대신 커뮤니티 권장 5.0(낮을수록 부드럽고 높을수록 윤곽·채도 강함).
+ * steps 는 Opus 무료 상한(28).
  */
 export const IMAGE_PARAMS_V5: ImageParams = {
 	sampler: 'k_euler_ancestral',
 	scheduler: 'karras',
 	steps: 28,
-	cfgScale: 7,
+	cfgScale: 5,
 	cfgRescale: 0
 };
 

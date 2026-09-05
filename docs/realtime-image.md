@@ -37,7 +37,7 @@ CFG rescale 0.28
 상황 프롬프트 생성을 단일 문자열(`generateText`)에서 **구조화 출력(`generateObject`)** 으로 전환하고,
 NovelAI V4.5 **멀티 캐릭터 기능**(`char_captions`)을 사용하도록 변경.
 
-> 2026-09-05: NovelAI Diffusion **V5**(2026-08-21 출시) 지원. 생성 모델은 그림체(`art_styles.model`)에 박히며, 허용목록·세대 정보는 `src/lib/naiModels.ts`. V5 는 `params_version: 4`, `noise_schedule` karras 고정, CFG 7 / rescale 0, 퀄리티 꼬리는 V5 공식 프리셋 기반(`QUALITY_TAIL_V5`), 인물 상한 32. V4.5 그림체는 기존 손튜닝 파라미터·꼬리 그대로.
+> 2026-09-05: NovelAI Diffusion **V5**(2026-08-21 출시) 지원. 생성 모델은 그림체(`art_styles.model`)에 박히며, 허용목록·세대 정보는 `src/lib/naiModels.ts`. V5 는 `params_version: 4`, `noise_schedule` karras 고정, CFG 5 / rescale 0, 퀄리티 꼬리는 V5 공식 프리셋 + `high complexity` + `year 2026`(`QUALITY_TAIL_V5`), 인물 상한 32. V4.5 그림체는 기존 손튜닝 파라미터·꼬리 그대로.
 
 - **모델 한정**: 상황 프롬프트 모델을 구조화 출력이 안정적인 **Gemini 계열** 로만 허용
   (`IMAGE_PROMPT_MODELS`/`IMAGE_PROMPT_MODEL_IDS`, 기본 `google/gemini-3.8-flash`). 다른 모델은 JSON 불안정.
