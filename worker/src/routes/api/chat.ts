@@ -63,6 +63,7 @@ import {
 	buildPositivePrompt,
 	buildGeneratePayload,
 	isResolutionKey,
+	RESOLUTIONS,
 	DEFAULT_RESOLUTION,
 	negativeFor,
 	imageParamsFor,
@@ -825,6 +826,16 @@ function pickPromptModel(requested?: string): string {
  *    · state: 가변(현재 복장·노출·표정·포즈) — 매 턴 새로.
  *    인물을 분리하면 NAI 가 인물 간 속성 누출(머리색·옷 bleeding)을 막는다.
  */
+/** 해상도(캔버스 방향)에 따른 구도 힌트 — 상황 프롬프트 user 메시지 끝에 부착. */
+function canvasHint(resolution: ResolutionKey): string {
+	const { width, height } = RESOLUTIONS[resolution];
+	if (width > height)
+		return `[Canvas] LANDSCAPE ${width}x${height} (wide). Compose horizontally: put "wide shot" or "cowboy shot"/"upper body" with room at the sides, let the background/setting fill the width, and place people side by side rather than stacked. Avoid "full body" standing portraits that would be cropped top/bottom.`;
+	if (width === height)
+		return `[Canvas] SQUARE ${width}x${height}. Keep the subject centered with balanced margins.`;
+	return `[Canvas] PORTRAIT ${width}x${height} (tall). Vertical compositions are fine (full body, standing).`;
+}
+
 const SITUATION_SYSTEM = [
 	`You convert the latest moment of a Korean roleplay scene into a structured image-generation prompt for NovelAI Diffusion (V4.5/V5, anime illustration), using its MULTI-CHARACTER feature.`,
 	`You are given a [Character] reference sheet for the main roleplay character, an optional [Known characters] roster of people whose fixed appearance was already established earlier in this story, and the [Recent conversation] (the last few turns, oldest to newest, including the user's actions). Depict ONLY the LATEST moment — the final line of the conversation; use the earlier lines purely as context for what is happening right now. Ignore non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
@@ -1098,6 +1109,8 @@ chatRouter.post('/image/prepare', async (c) => {
 		if (characterRef) promptParts.push(`[Character]\n${characterRef}`);
 		if (knownBlock) promptParts.push(knownBlock);
 		promptParts.push(sceneBlock);
+		// 캔버스 방향 힌트(system 은 고정 prefix 라 user 쪽에 붙임). 가로형이면 옆으로 넓은 구도를 유도.
+		promptParts.push(canvasHint(resolution));
 		const userPrompt = promptParts.join('\n\n');
 		// 게이트웨이가 일시적 503/500 을 자동 재시도하지 않으므로 직접 백오프 재시도한다.
 		const result = await generateObjectWithRetry({

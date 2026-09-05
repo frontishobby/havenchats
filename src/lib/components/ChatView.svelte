@@ -71,8 +71,16 @@
 	const IMG_IGNORE_ASSETS_KEY = 'haven:img:ignoreAssets';
 	// '빠른 생성 우선': 스트리밍 응답이 이만큼(자) 도달하면 마지막 부분을 포기하고 이미지를 미리 발사.
 	const IMG_EARLY_TRIGGER_CHARS = 600;
-	const IMG_RESOLUTIONS = ['832x1216', '1024x1024'] as const;
+	const IMG_RESOLUTIONS = ['832x1216', '1024x1024', '1216x832'] as const;
 	type ImgResolution = (typeof IMG_RESOLUTIONS)[number];
+	const IMG_RESOLUTION_LABELS: Record<ImgResolution, string> = {
+		'832x1216': '세로',
+		'1024x1024': '정사각',
+		'1216x832': '가로'
+	};
+	function isImgResolution(v: unknown): v is ImgResolution {
+		return typeof v === 'string' && (IMG_RESOLUTIONS as readonly string[]).includes(v);
+	}
 	// 상황 프롬프트 생성 기본 모델(이미지 설정에서 변경 가능 — 구조화 출력 안정 모델만).
 	const DEFAULT_IMG_PROMPT_MODEL = DEFAULT_IMAGE_PROMPT_MODEL_ID;
 
@@ -465,7 +473,7 @@
 		if (savedActs !== null) userActs = Math.min(2, Math.max(0, Number(savedActs)));
 		// 실시간 이미지 설정 복원
 		const savedRes = localStorage.getItem(IMG_RES_KEY);
-		if (savedRes === '832x1216' || savedRes === '1024x1024') imageResolution = savedRes;
+		if (isImgResolution(savedRes)) imageResolution = savedRes;
 		imageStyleId = localStorage.getItem(IMG_STYLE_ID_KEY) ?? '';
 		const savedPM = localStorage.getItem(IMG_PROMPT_MODEL_KEY);
 		// 허용목록(구조화 출력 안정 모델)에 있는 값만 복원 — 옛 비허용 모델이 저장돼 있으면 기본값 유지.
@@ -1931,7 +1939,8 @@
 									class:active={imageResolution === r}
 									onclick={() => (imageResolution = r)}
 								>
-									{r}
+									{IMG_RESOLUTION_LABELS[r]}
+									<span class="res-dim">{r.replace('x', '×')}</span>
 								</button>
 							{/each}
 						</div>
@@ -2817,6 +2826,13 @@
 	}
 	.res-btn:hover {
 		border-color: var(--text-faint);
+	}
+	.res-dim {
+		display: block;
+		margin-top: 2px;
+		font-size: 0.7rem;
+		font-weight: 400;
+		color: var(--text-faint);
 	}
 	.res-btn.active {
 		border-color: var(--accent);

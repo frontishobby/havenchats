@@ -169,7 +169,8 @@ export function imageParamsFor(model: string): ImageParams {
 /** 허용 해상도(가로×세로). 임의 값 주입 방지. */
 export const RESOLUTIONS = {
 	'832x1216': { width: 832, height: 1216 },
-	'1024x1024': { width: 1024, height: 1024 }
+	'1024x1024': { width: 1024, height: 1024 },
+	'1216x832': { width: 1216, height: 832 }
 } as const;
 export type ResolutionKey = keyof typeof RESOLUTIONS;
 export const DEFAULT_RESOLUTION: ResolutionKey = '832x1216';
