@@ -34,13 +34,20 @@ export const MODELS: ModelOption[] = [
 export const DEFAULT_MODEL_ID = 'deepseek/deepseek-v4-flash-0731';
 
 /**
- * 캐릭터 제작 보조(assist)에 허용하는 모델 — 구조화 출력(generateObject)이 안정적인
- * Gemini 계열만. (다른 모델은 JSON 출력이 불안정해 제외)
+ * 캐릭터 제작 보조(assist)에 허용하는 모델 — 구조화 출력(generateObject)이 안정적인 것만.
+ * Claude Opus 5 · GPT-5.6 Sol · GLM 5.3 Flash. (Gemini Flash 는 제외 — NSFW 설정 입력을
+ * content-filter 로 빈 응답 처리하는 경우가 있음. DeepSeek 계열은 긴 JSON 출력이 불안정)
+ * MODELS(채팅 목록)의 부분집합이므로 getModel 로 조회 가능.
  */
-export const ASSIST_MODELS: ModelOption[] = MODELS.filter((m) => m.id.startsWith('google/gemini'));
+const ASSIST_MODEL_ID_LIST = ['anthropic/claude-opus-5', 'openai/gpt-5.6-sol', 'zai/glm-5.3-flash'];
+export const ASSIST_MODELS: ModelOption[] = ASSIST_MODEL_ID_LIST.map((id) => {
+	const m = MODELS.find((x) => x.id === id);
+	if (!m) throw new Error(`assist 모델이 MODELS 에 없음: ${id}`);
+	return m;
+});
 export const ASSIST_MODEL_IDS: Set<string> = new Set(ASSIST_MODELS.map((m) => m.id));
-/** assist 기본 모델(허용목록에 있어야 함). */
-export const DEFAULT_ASSIST_MODEL_ID = 'google/gemini-3.8-flash';
+/** assist 기본 모델(허용목록에 있어야 함) — 가장 저렴한 GLM 5.3 Flash. */
+export const DEFAULT_ASSIST_MODEL_ID = 'zai/glm-5.3-flash';
 
 /**
  * 실시간 이미지 상황 프롬프트(generateObject 구조화 출력)에 허용하는 모델.

@@ -52,7 +52,7 @@
 	let error = $state('');
 	let done = $state(false);
 
-	// 모델 선택(localStorage 저장) — assist 는 구조화 출력 안정적인 Gemini 계열만.
+	// 모델 선택(localStorage 저장) — assist 는 구조화 출력이 안정적인 모델(ASSIST_MODELS)만.
 	let model = $state(DEFAULT_ASSIST_MODEL_ID);
 	let modelOpen = $state(false);
 	let iconFailed = $state<Record<string, boolean>>({});

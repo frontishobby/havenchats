@@ -218,7 +218,7 @@ const ASSIST_SYSTEM = [
 	`- 사용자의 러프 입력이 짧아도, 빈 칸 없이 매력적이고 일관된 캐릭터로 풍부하게 살을 붙인다.`
 ].join('\n');
 
-/** 요청의 모델을 assist 허용목록(Gemini 계열)으로 검증. 없거나 미허용이면 기본 모델. */
+/** 요청의 모델을 assist 허용목록(Opus·Sol·GLM — 구조화 출력 안정 모델)으로 검증. 없거나 미허용이면 기본 모델. */
 function pickAssistModel(requested?: string): string {
 	return requested && ASSIST_MODEL_IDS.has(requested) ? requested : DEFAULT_ASSIST_MODEL_ID;
 }

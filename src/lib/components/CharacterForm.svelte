@@ -331,6 +331,32 @@
 		nsfw
 	});
 
+	// 모바일(<1080px) AI 도우미 바텀시트 — PC 에선 같은 패널이 우측 sticky 열로 항상 보인다(인스턴스 1개).
+	const WIDE_QUERY = '(min-width: 1080px)';
+	let assistSheetOpen = $state(false);
+	let assistTab = $state<'assist' | 'thumb'>('assist');
+	function isNarrow(): boolean {
+		return typeof window !== 'undefined' && !window.matchMedia(WIDE_QUERY).matches;
+	}
+	function closeAssistSheet() {
+		if (isNarrow()) assistSheetOpen = false;
+	}
+	// 시트가 열린 동안 바디 스크롤 잠금. PC 폭으로 넓어지면(=sticky 열로 전환) 시트 상태 해제.
+	$effect(() => {
+		if (!assistSheetOpen) return;
+		const mq = window.matchMedia(WIDE_QUERY);
+		const onChange = () => {
+			if (mq.matches) assistSheetOpen = false;
+		};
+		mq.addEventListener('change', onChange);
+		const prev = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		return () => {
+			mq.removeEventListener('change', onChange);
+			document.body.style.overflow = prev;
+		};
+	});
+
 	// AI 보조 패널 결과로 폼 필드를 채운다(create 모드 전용). 이미지·로어북 등은 건드리지 않는다.
 	function applyAssist(c: AssistCharacter) {
 		name = c.name.slice(0, NAME_MAX);
@@ -345,7 +371,8 @@
 			.filter((g) => g.content)
 			.slice(0, GREETINGS_MAX);
 		greetings = gs.length ? gs : [{ name: '', content: '' }];
-		// 사용자가 채워진 폼을 바로 확인할 수 있게 맨 위로.
+		// 사용자가 채워진 폼을 바로 확인할 수 있게 (모바일이면 시트를 닫고) 맨 위로.
+		closeAssistSheet();
 		if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
 	}
 
@@ -878,19 +905,68 @@
 	</button>
 </div>
 
-	<!-- AI 보조 패널(PC 전용) — 생성·수정 양쪽에서 노출. 수정 모드에선 기존 내용 보존·수정. -->
-	<div class="assist-col">
-		<CharacterAssistPanel {nsfw} current={currentDraft} onapply={applyAssist} />
-		<CharacterThumbnailPanel
-			{description}
-			{nsfw}
-			onuse={(file, styleId) => {
-				setImage(file);
-				// 이 썸네일을 만든 그림체를 추천 그림체로 자동 반영(목록에 있을 때만).
-				if (styleId && myStyles.some((s) => s.id === styleId)) recommendedStyleId = styleId;
-			}}
-		/>
+	<!--
+		AI 도우미 — 생성·수정 양쪽에서 노출(수정 모드에선 기존 내용 보존·수정).
+		PC(≥1080px)는 우측 sticky 열, 모바일은 우하단 ✦ 버튼으로 여는 바텀시트(탭: 캐릭터 생성 / 썸네일).
+		같은 DOM 인스턴스를 CSS 로만 다르게 배치해 입력·미리보기 상태가 폭 전환에도 유지된다.
+	-->
+	<div class="assist-col" class:open={assistSheetOpen} aria-label="AI 도우미">
+		<div class="sheet-head">
+			<div class="sheet-tabs" role="tablist">
+				<button
+					type="button"
+					role="tab"
+					aria-selected={assistTab === 'assist'}
+					class:active={assistTab === 'assist'}
+					onclick={() => (assistTab = 'assist')}>✦ 캐릭터 생성</button
+				>
+				<button
+					type="button"
+					role="tab"
+					aria-selected={assistTab === 'thumb'}
+					class:active={assistTab === 'thumb'}
+					onclick={() => (assistTab = 'thumb')}>🖼 썸네일</button
+				>
+			</div>
+			<button
+				type="button"
+				class="sheet-close"
+				onclick={() => (assistSheetOpen = false)}
+				aria-label="AI 도우미 닫기">✕</button
+			>
+		</div>
+		<div class="pane" class:m-hidden={assistTab !== 'assist'}>
+			<CharacterAssistPanel {nsfw} current={currentDraft} onapply={applyAssist} />
+		</div>
+		<div class="pane" class:m-hidden={assistTab !== 'thumb'}>
+			<CharacterThumbnailPanel
+				{description}
+				{nsfw}
+				onuse={(file, styleId) => {
+					setImage(file);
+					// 이 썸네일을 만든 그림체를 추천 그림체로 자동 반영(목록에 있을 때만).
+					if (styleId && myStyles.some((s) => s.id === styleId)) recommendedStyleId = styleId;
+					closeAssistSheet();
+				}}
+			/>
+		</div>
 	</div>
+	{#if assistSheetOpen}
+		<button
+			type="button"
+			class="sheet-backdrop"
+			onclick={() => (assistSheetOpen = false)}
+			aria-label="AI 도우미 닫기"
+		></button>
+	{/if}
+	<button
+		type="button"
+		class="assist-fab"
+		onclick={() => (assistSheetOpen = true)}
+		aria-label="AI 도우미 열기"
+	>
+		<span class="fab-logo">✦</span> AI 도우미
+	</button>
 </div>
 
 <CharacterImagesModal
@@ -941,23 +1017,143 @@
 		max-width: 640px;
 		padding: 28px 20px 80px;
 	}
-	/* AI 보조 패널은 PC(넓은 화면)에서만 노출. 스크롤해도 따라오도록 sticky. */
+	/* ── AI 도우미: 모바일 = 바텀시트(기본), PC = 우측 sticky 열 ─────────────── */
 	.assist-col {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 60;
+		display: flex;
+		flex-direction: column;
+		max-height: min(88vh, 88dvh);
+		overflow-y: auto;
+		background: var(--bg);
+		border-top: 1px solid var(--border);
+		border-radius: 20px 20px 0 0;
+		box-shadow: 0 -16px 50px rgba(0, 0, 0, 0.55);
+		transform: translateY(100%);
+		visibility: hidden;
+		transition:
+			transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
+			visibility 0.28s;
+	}
+	.assist-col.open {
+		transform: none;
+		visibility: visible;
+	}
+	.sheet-head {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 10px 8px 14px;
+		background: var(--bg);
+		border-bottom: 1px solid var(--border);
+		flex-shrink: 0;
+	}
+	.sheet-tabs {
+		flex: 1;
+		display: flex;
+		gap: 6px;
+	}
+	.sheet-tabs button {
+		padding: 8px 13px;
+		border-radius: 999px;
+		border: 1px solid var(--border);
+		background: var(--bg-elev);
+		color: var(--text-dim);
+		font-size: 0.85rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+	.sheet-tabs button.active {
+		background: var(--accent-soft);
+		border-color: var(--accent);
+		color: var(--text);
+	}
+	.sheet-close {
+		width: 34px;
+		height: 34px;
+		border: none;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--text-dim);
+		font-size: 0.95rem;
+	}
+	.pane {
+		padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
+	}
+	.pane.m-hidden {
 		display: none;
 	}
+	.sheet-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 55;
+		border: none;
+		padding: 0;
+		background: rgba(0, 0, 0, 0.6);
+		backdrop-filter: blur(3px);
+	}
+	.assist-fab {
+		position: fixed;
+		right: 16px;
+		bottom: calc(18px + env(safe-area-inset-bottom));
+		z-index: 45;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 12px 18px 12px 14px;
+		border: none;
+		border-radius: 999px;
+		background: linear-gradient(135deg, var(--accent), var(--nsfw));
+		color: #fff;
+		font-size: 0.9rem;
+		font-weight: 800;
+		letter-spacing: -0.01em;
+		box-shadow: 0 10px 28px rgba(124, 92, 255, 0.45);
+	}
+	.assist-fab:active {
+		transform: scale(0.97);
+	}
+	.fab-logo {
+		font-size: 1.05rem;
+	}
 	@media (min-width: 1080px) {
+		/* PC: 폼 옆 sticky 열. 시트 전용 요소(탭 헤더·FAB·백드롭)는 숨기고 두 패널을 모두 펼친다. */
 		.assist-col {
-			display: flex;
-			flex-direction: column;
+			position: sticky;
+			top: 20px;
+			left: auto;
+			right: auto;
+			bottom: auto;
+			z-index: auto;
 			gap: 18px;
 			flex: 0 0 340px;
 			width: 340px;
-			position: sticky;
-			top: 20px;
 			margin-top: 76px;
 			/* 두 패널을 합치면 길어질 수 있으니 sticky 영역 안에서 자체 스크롤. */
 			max-height: calc(100vh - 40px);
-			overflow-y: auto;
+			background: transparent;
+			border: none;
+			border-radius: 0;
+			box-shadow: none;
+			transform: none;
+			visibility: visible;
+			transition: none;
+		}
+		.sheet-head,
+		.sheet-backdrop,
+		.assist-fab {
+			display: none;
+		}
+		.pane,
+		.pane.m-hidden {
+			display: block;
+			padding: 0;
 		}
 	}
 	.back {
