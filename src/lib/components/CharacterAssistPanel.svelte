@@ -17,6 +17,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { ASSIST_MODELS, ASSIST_MODEL_IDS, DEFAULT_ASSIST_MODEL_ID, getModel } from '$lib/data/models';
+	import type { AssistStreamEvent } from '$lib/api/characters';
 
 	let {
 		nsfw = false,
@@ -51,6 +52,34 @@
 	let loading = $state(false);
 	let error = $state('');
 	let done = $state(false);
+	/** 스트림 진행 상황(서버 progress 이벤트). */
+	let progress = $state<{ chars: number; field: string } | null>(null);
+	/** 진행 중인 요청 취소용. */
+	let abort: AbortController | null = null;
+	let cancelled = false;
+
+	/**
+	 * 서버는 10초마다 ping 을 보내므로, 그보다 훨씬 긴 시간 아무 바이트도 안 오면 연결이 죽은 것.
+	 * (서버 자체 상한은 5분 — 그쪽은 error 이벤트로 끝난다.)
+	 */
+	const STALL_MS = 60_000;
+
+	const FIELD_LABEL: Record<string, string> = {
+		name: '이름',
+		tagline: '한 줄 소개',
+		intro: '소개글',
+		description: '프롬프트',
+		tags: '태그',
+		greetings: '첫 상황',
+		nsfw: '마무리',
+		audience: '마무리'
+	};
+	const progressText = $derived.by(() => {
+		if (!progress) return '';
+		const label = FIELD_LABEL[progress.field];
+		const chars = progress.chars.toLocaleString('ko-KR');
+		return label ? `${label} 작성 중 · ${chars}자` : `${chars}자`;
+	});
 
 	// 모델 선택(localStorage 저장) — assist 는 구조화 출력이 안정적인 모델(ASSIST_MODELS)만.
 	let model = $state(DEFAULT_ASSIST_MODEL_ID);
@@ -76,7 +105,18 @@
 		loading = true;
 		error = '';
 		done = false;
+		progress = null;
+		cancelled = false;
+		const ac = new AbortController();
+		abort = ac;
+		// 무수신 감시: 바이트가 올 때마다 재무장.
+		let stallTimer: ReturnType<typeof setTimeout> | undefined;
+		const armStall = () => {
+			clearTimeout(stallTimer);
+			stallTimer = setTimeout(() => ac.abort(), STALL_MS);
+		};
 		try {
+			armStall();
 			const res = await fetch('/api/characters/assist', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
@@ -85,29 +125,83 @@
 					nsfw,
 					model,
 					current: hasContent ? current : undefined
-				})
+				}),
+				signal: ac.signal
 			});
-			const data = (await res.json().catch(() => ({}))) as {
-				ok?: boolean;
-				character?: AssistCharacter;
-				error?: string;
-				message?: string;
-				limit?: number;
-			};
 			if (res.status === 429) {
+				const data = (await res.json().catch(() => ({}))) as { limit?: number };
 				error = `오늘 사용량 한도에 도달했어요${data.limit ? ` ($${data.limit})` : ''}. 내일 다시 시도해 주세요.`;
 				return;
 			}
-			if (!res.ok || !data.ok || !data.character) {
+			const ctype = res.headers.get('content-type') ?? '';
+			if (!res.ok || !res.body || !ctype.includes('ndjson')) {
+				// 스트림 진입 전 실패(401/400/500) — JSON 에러.
+				const data = (await res.json().catch(() => ({}))) as { message?: string };
 				throw new Error(data.message ?? '생성에 실패했어요.');
 			}
-			onapply(data.character);
+
+			// NDJSON 스트림: progress/ping 은 진행 표시·생존 확인, done/error 로 끝난다.
+			let character: AssistCharacter | null = null;
+			let failed: string | null = null;
+			const handle = (ev: AssistStreamEvent) => {
+				if (ev.t === 'progress') progress = { chars: ev.chars, field: ev.field };
+				else if (ev.t === 'done') character = ev.character;
+				else if (ev.t === 'error') failed = ev.message || '생성에 실패했어요.';
+			};
+			const reader = res.body.getReader();
+			const dec = new TextDecoder();
+			let buf = '';
+			const drain = (flush = false) => {
+				let nl: number;
+				while ((nl = buf.indexOf('\n')) >= 0) {
+					const l = buf.slice(0, nl).trim();
+					buf = buf.slice(nl + 1);
+					if (l) {
+						try {
+							handle(JSON.parse(l));
+						} catch {
+							/* 깨진 줄 무시 */
+						}
+					}
+				}
+				if (flush && buf.trim()) {
+					try {
+						handle(JSON.parse(buf.trim()));
+					} catch {
+						/* 무시 */
+					}
+				}
+			};
+			for (;;) {
+				const { done: eof, value } = await reader.read();
+				if (eof) break;
+				armStall();
+				buf += dec.decode(value, { stream: true });
+				drain();
+			}
+			drain(true);
+
+			if (failed) throw new Error(failed);
+			if (!character) throw new Error('서버 응답이 중간에 끊겼어요. 다시 시도해 주세요.');
+			onapply(character);
 			done = true;
 		} catch (e) {
-			error = e instanceof Error ? e.message : '생성에 실패했어요.';
+			if (ac.signal.aborted) {
+				error = cancelled ? '취소했어요.' : '서버 응답이 끊겨 중단했어요. 다시 시도해 주세요.';
+			} else {
+				error = e instanceof Error ? e.message : '생성에 실패했어요.';
+			}
 		} finally {
+			clearTimeout(stallTimer);
 			loading = false;
+			progress = null;
+			abort = null;
 		}
+	}
+
+	function cancel() {
+		cancelled = true;
+		abort?.abort();
 	}
 
 </script>
@@ -201,13 +295,19 @@
 	{#if error}<p class="a-error">{error}</p>{/if}
 	{#if done && !error}<p class="a-done">✓ 폼에 채웠어요. 아래에서 확인·수정하세요.</p>{/if}
 
-	<button class="a-gen" onclick={generate} disabled={!canGenerate}>
-		{#if loading}
-			{hasContent ? '수정 중…' : '생성 중…'}
-		{:else}
+	{#if loading}
+		<div class="a-run">
+			<button class="a-gen" disabled>
+				{hasContent ? '수정 중…' : '생성 중…'}
+				{#if progressText}<span class="a-progress">{progressText}</span>{/if}
+			</button>
+			<button class="a-cancel" type="button" onclick={cancel}>취소</button>
+		</div>
+	{:else}
+		<button class="a-gen" onclick={generate} disabled={!canGenerate}>
 			{hasContent ? 'AI로 수정 반영' : 'AI로 생성'}
-		{/if}
-	</button>
+		</button>
+	{/if}
 	<p class="a-note">생성 결과는 폼에 채워질 뿐, 자동으로 등록되지 않아요. 썸네일·장면 이미지는 직접 추가해 주세요.</p>
 </aside>
 
@@ -400,6 +500,37 @@
 	}
 	.a-gen:not(:disabled):hover {
 		background: var(--accent-hover);
+	}
+	.a-run {
+		display: flex;
+		gap: 8px;
+		margin-top: 14px;
+	}
+	.a-run .a-gen {
+		margin-top: 0;
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 2px;
+	}
+	.a-progress {
+		font-size: 0.74rem;
+		font-weight: 500;
+		opacity: 0.9;
+	}
+	.a-cancel {
+		padding: 0 14px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--text-dim);
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	.a-cancel:hover {
+		color: var(--text);
+		border-color: var(--text-dim);
 	}
 	.a-note {
 		margin: 12px 0 0;

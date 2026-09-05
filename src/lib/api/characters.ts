@@ -61,11 +61,19 @@ export interface AssistDraft {
 	nsfw: boolean;
 }
 
-/** POST /api/characters/assist 성공 응답. */
-export interface AssistResponse {
-	ok: true;
-	character: AssistDraft;
-}
+/**
+ * POST /api/characters/assist 응답 — `application/x-ndjson` 스트림(한 줄 = 이벤트 하나).
+ *  - progress: 부분 객체 도착(누적 글자수·지금 쓰는 필드). 진행 표시용.
+ *  - ping: 조용한 구간(추론 등) heartbeat — 연결 생존 확인용, 내용 없음.
+ *  - done: 완성된 초안. 이후 스트림 종료.
+ *  - error: 실패(타임아웃·LLM 오류·불완전 결과). 이후 스트림 종료.
+ * 스트림 진입 전 실패(401/400/429/500)는 기존처럼 JSON `{ error, message }`.
+ */
+export type AssistStreamEvent =
+	| { t: 'progress'; chars: number; field: string }
+	| { t: 'ping' }
+	| { t: 'done'; character: AssistDraft }
+	| { t: 'error'; message: string; detail?: string };
 
 /**
  * 썸네일 상황 프롬프트(구조화). LLM 이 만들고 패널에서 편집해 되돌려 보낸다.

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { generateObject, jsonSchema } from 'ai';
+import { generateObject, jsonSchema, streamObject } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
 import type { AppEnv } from '../../context';
 import { requireUser } from '../../context';
@@ -51,7 +51,9 @@ import { pickNaiModel } from '$lib/naiModels';
 import type { Audience } from '$lib/types';
 import type {
 	AssistCurrentDraft,
+	AssistDraft,
 	AssistRequest,
+	AssistStreamEvent,
 	CharacterEditData,
 	CharacterAssetsData,
 	RedirectResponse,
@@ -192,6 +194,18 @@ const GREETING_NAME_MAX = 30;
 const GREETINGS_MAX = 5;
 const TAGS_MAX = 5;
 
+/**
+ * assist LLM 호출 상한. 12k+ 토큰 응답을 추론 모델이 만들면 수 분이 걸릴 수 있어 넉넉히 두되,
+ * 공급자가 멈춘 경우 "영원히 대기"가 되지 않도록 반드시 유한하게.
+ */
+const ASSIST_TIMEOUT_MS = 5 * 60_000;
+/** 부분 객체가 안 오는 조용한 구간(추론 단계 등)에도 연결을 살리는 heartbeat 간격. */
+const ASSIST_HEARTBEAT_MS = 10_000;
+/** progress 이벤트 최소 간격(부분 객체는 토큰마다 오므로 그대로 흘리면 과함). */
+const ASSIST_PROGRESS_MS = 400;
+/** 썸네일 상황 프롬프트 LLM 상한(출력 2k 토큰, thinking 끔). */
+const THUMB_PROMPT_TIMEOUT_MS = 120_000;
+
 const ASSIST_SYSTEM = [
 	`너는 한국어 캐릭터 AI 채팅 서비스 "Haven"의 캐릭터 제작 보조다. 사용자가 자연어로 적은 러프한 아이디어를 받아, 이 서비스의 캐릭터 포맷에 맞게 완성도 높은 캐릭터 설정을 만들어 낸다.`,
 	`이 서비스는 **소설 모드**(말풍선이 아닌 산문) 1:1 롤플레이다. 사용자가 캐릭터와 대화한다.`,
@@ -309,38 +323,141 @@ charactersRouter.post('/assist', async (c) => {
 			: `[참고] 제작자는 일반(SFW) 캐릭터로 두었다. 입력 내용이 명백히 성인용이 아니면 nsfw 는 false 로.`
 	].join('\n');
 
-	// 구조화 출력(generateObject) — 공급자가 따옴표·개행 escape 를 보장해 수기 JSON 파싱 깨짐을 없앤다.
-	let parsed: Record<string, unknown>;
-	try {
-		const gateway = createGateway({ apiKey });
-		const result = await generateObject({
-			model: gateway(model),
-			schema: ASSIST_SCHEMA,
-			system: ASSIST_SYSTEM,
-			prompt: userPrompt,
-			temperature: 0.9,
-			// 한 덩이를 끝까지 받아야 하므로 넉넉히. reasoning 모델은 추론이 예산을 먹으니 headroom 추가.
-			maxOutputTokens: 12000 + reasoningHeadroom(model),
-			providerOptions: buildProviderOptions(model)
-		});
-		parsed = result.object as Record<string, unknown>;
-		console.log(`[characters/assist] model=${model} finishReason=${result.finishReason}`);
-	} catch (e) {
-		console.error('[characters/assist] generateObject error:', e);
-		notifyServerError({
-			context: 'generateObject /api/characters/assist',
-			error: e,
-			extra: { user: user.id, model },
-			waitUntil: getWaitUntil()
-		});
-		const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-		return c.json(
-			{ error: 'llm', message: '캐릭터 생성에 실패했어요. 잠시 후 다시 시도해 주세요.', detail },
-			502
-		);
-	}
+	// 구조화 출력을 **스트리밍**(streamObject)으로 받아 NDJSON 으로 흘려보낸다.
+	// 예전 비스트리밍 generateObject 는 12k+ 토큰 응답을 공급자가 다 만들 때까지 어느 홉도 바이트를 보내지 않는
+	// 구조라, 중간 홉이 유휴 연결을 끊거나 공급자가 멈추면(타임아웃·재시도 상한도 없었음) 클라가 영원히 기다렸다.
+	// 이제 부분 객체가 올 때마다 progress, 조용한 구간(추론)엔 ping 을 보내 연결을 살리고, 상한 시간이 지나면
+	// abort 해 명시적 에러로 끝낸다. 클라가 떠나면(cancel) 상류 호출도 중단.
+	const enc = new TextEncoder();
+	const ln = (o: AssistStreamEvent) => enc.encode(JSON.stringify(o) + '\n');
+	const gateway = createGateway({ apiKey });
+	const ac = new AbortController();
+	let timedOut = false;
+	const stream = new ReadableStream<Uint8Array>({
+		async start(controller) {
+			let closed = false;
+			const send = (o: AssistStreamEvent) => {
+				if (closed) return;
+				try {
+					controller.enqueue(ln(o));
+				} catch {
+					closed = true;
+				}
+			};
+			const heartbeat = setInterval(() => send({ t: 'ping' }), ASSIST_HEARTBEAT_MS);
+			const deadline = setTimeout(() => {
+				timedOut = true;
+				ac.abort();
+			}, ASSIST_TIMEOUT_MS);
+			const startedAt = Date.now();
+			try {
+				const result = streamObject({
+					model: gateway(model),
+					schema: ASSIST_SCHEMA,
+					system: ASSIST_SYSTEM,
+					prompt: userPrompt,
+					temperature: 0.9,
+					// 한 덩이를 끝까지 받아야 하므로 넉넉히. reasoning 모델은 추론이 예산을 먹으니 headroom 추가.
+					maxOutputTokens: 12000 + reasoningHeadroom(model),
+					providerOptions: buildProviderOptions(model),
+					// 기본 2회 재시도는 수 분짜리 호출을 3배로 늘려 "무응답"처럼 보이게 한다 → 1회만.
+					maxRetries: 1,
+					abortSignal: ac.signal,
+					onError: ({ error }) => console.error('[characters/assist] stream error:', error)
+				});
 
-	// ── 필드별 정규화·clamp (폼이 최종 검증하므로 여기선 형태만 맞춘다) ──
+				let lastProgress = 0;
+				for await (const partial of result.partialObjectStream) {
+					const now = Date.now();
+					if (now - lastProgress < ASSIST_PROGRESS_MS) continue;
+					lastProgress = now;
+					send({ t: 'progress', ...draftProgress(partial as Record<string, unknown>) });
+				}
+				const parsed = (await result.object) as Record<string, unknown>;
+				console.log(
+					`[characters/assist] model=${model} finishReason=${await result.finishReason} ${Date.now() - startedAt}ms`
+				);
+
+				const norm = normalizeAssistDraft(parsed);
+				if (!norm.ok) {
+					console.warn(`[characters/assist] 불완전 결과 model=${model} ${norm.diag}`);
+					notifyServerError({
+						context: 'incomplete /api/characters/assist',
+						error: new Error(`불완전 결과 — ${norm.diag}\n${JSON.stringify(parsed).slice(0, 600)}`),
+						extra: { user: user.id, model },
+						waitUntil: getWaitUntil()
+					});
+					send({
+						t: 'error',
+						message: '생성 결과가 불완전해요. 입력을 조금 더 구체적으로 적고 다시 시도해 주세요.',
+						detail: norm.diag
+					});
+				} else {
+					send({ t: 'done', character: norm.character });
+				}
+			} catch (e) {
+				const elapsed = Date.now() - startedAt;
+				console.error(`[characters/assist] streamObject error (${elapsed}ms, timedOut=${timedOut}):`, e);
+				notifyServerError({
+					context: timedOut ? 'timeout /api/characters/assist' : 'streamObject /api/characters/assist',
+					error: e,
+					extra: { user: user.id, model, elapsedMs: elapsed },
+					waitUntil: getWaitUntil()
+				});
+				const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+				send({
+					t: 'error',
+					message: timedOut
+						? '응답이 너무 오래 걸려 중단했어요. 다른 모델을 고르거나 다시 시도해 주세요.'
+						: '캐릭터 생성에 실패했어요. 잠시 후 다시 시도해 주세요.',
+					detail
+				});
+			} finally {
+				clearInterval(heartbeat);
+				clearTimeout(deadline);
+				closed = true;
+				try {
+					controller.close();
+				} catch {
+					/* 이미 닫힘 */
+				}
+			}
+		},
+		cancel() {
+			// 클라가 연결을 끊음 → 상류 LLM 호출도 중단(토큰 낭비 방지).
+			ac.abort();
+		}
+	});
+
+	return new Response(stream, {
+		headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' }
+	});
+});
+
+/** 부분 객체에서 진행 상황(누적 글자수·지금 쓰고 있는 필드) 추출 — 클라 진행 표시용. */
+function draftProgress(p: Record<string, unknown>): { chars: number; field: string } {
+	let chars = 0;
+	let field = '';
+	// 모델은 스키마 키 순서(name→…→audience)로 쓰므로, 값이 있는 마지막 키가 현재 필드.
+	for (const key of ['name', 'tagline', 'intro', 'description', 'tags', 'greetings', 'nsfw', 'audience']) {
+		const v = p[key];
+		if (v === undefined || v === null) continue;
+		field = key;
+		if (typeof v === 'string') chars += v.length;
+		else if (key === 'greetings' && Array.isArray(v)) {
+			for (const g of v) {
+				const o = (g ?? {}) as { name?: unknown; content?: unknown };
+				chars += str(o.name).length + str(o.content).length;
+			}
+		}
+	}
+	return { chars, field };
+}
+
+/** LLM 결과를 폼 형태로 정규화·clamp(폼이 최종 검증하므로 여기선 형태만 맞춘다). name/description 없으면 실패. */
+function normalizeAssistDraft(
+	parsed: Record<string, unknown>
+): { ok: true; character: AssistDraft } | { ok: false; diag: string } {
 	const name = str(parsed.name).slice(0, NAME_MAX);
 	const tagline = str(parsed.tagline).slice(0, TAGLINE_MAX);
 	const intro = str(parsed.intro).slice(0, INTRO_MAX);
@@ -368,29 +485,13 @@ charactersRouter.post('/assist', async (c) => {
 	const nsfw = parsed.nsfw === true;
 
 	if (!name || !description) {
-		const diag = `keys=${Object.keys(parsed).join(',')} nameLen=${name.length} descLen=${description.length}`;
-		console.warn(`[characters/assist] 불완전 결과 model=${model} ${diag}`);
-		notifyServerError({
-			context: 'incomplete /api/characters/assist',
-			error: new Error(`불완전 결과 — ${diag}\n${JSON.stringify(parsed).slice(0, 600)}`),
-			extra: { user: user.id, model },
-			waitUntil: getWaitUntil()
-		});
-		return c.json(
-			{
-				error: 'incomplete',
-				message: '생성 결과가 불완전해요. 입력을 조금 더 구체적으로 적고 다시 시도해 주세요.',
-				detail: diag
-			},
-			502
-		);
+		return {
+			ok: false,
+			diag: `keys=${Object.keys(parsed).join(',')} nameLen=${name.length} descLen=${description.length}`
+		};
 	}
-
-	return c.json({
-		ok: true,
-		character: { name, tagline, intro, description, tags, greetings, audience, nsfw }
-	});
-});
+	return { ok: true, character: { name, tagline, intro, description, tags, greetings, audience, nsfw } };
+}
 
 // ── POST /api/characters/thumbnail — 썸네일 생성(스트리밍) ─────
 const THUMB_RESOLUTION: ResolutionKey = '832x1216';
@@ -523,7 +624,10 @@ charactersRouter.post('/thumbnail', async (c) => {
 				prompt: parts.join('\n\n'),
 				temperature: 0.8,
 				maxOutputTokens: 2000 + reasoningHeadroom(model),
-				providerOptions: buildProviderOptions(model, { noThinking: true })
+				providerOptions: buildProviderOptions(model, { noThinking: true }),
+				// 공급자가 멈춰도 유한하게 끝나도록(assist 와 같은 이유).
+				maxRetries: 1,
+				abortSignal: AbortSignal.timeout(THUMB_PROMPT_TIMEOUT_MS)
 			});
 			const obj = (result.object ?? {}) as { base?: unknown; scene?: unknown; characters?: unknown };
 			const characters = (Array.isArray(obj.characters) ? obj.characters : [])
