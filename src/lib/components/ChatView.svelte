@@ -353,37 +353,6 @@
 	// 스크롤 여지를 만들고, 응답이 스트리밍되며 자연스럽게 채워진다. 세션 전환 시 리셋.
 	let tailPad = $state(0);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
-	// ── 모바일 바 토글: 리더를 위로 스크롤(이전 내용 읽기)하면 헤더, 아래로 스크롤하면 입력창을 보인다.
-	// 내용이 짧아 스크롤할 수 없으면 둘 다 표시('both'). 데스크톱에선 CSS 미디어쿼리 밖이라 무시됨.
-	let mobileBar = $state<'header' | 'composer' | 'both'>('both');
-	let lastScrollTop = 0;
-	let headerH = $state(0);
-	let composerH = $state(0);
-	let novelEl = $state<HTMLElement | null>(null);
-	function syncMobileBar() {
-		if (!scroller) return;
-		const top = scroller.scrollTop;
-		const maxTop = scroller.scrollHeight - scroller.clientHeight;
-		if (maxTop < 48) {
-			mobileBar = 'both';
-			lastScrollTop = top;
-			return;
-		}
-		const delta = top - lastScrollTop;
-		if (top <= 4) mobileBar = 'header';
-		else if (maxTop - top <= 4) mobileBar = 'composer';
-		else if (delta <= -8) mobileBar = 'header';
-		else if (delta >= 8) mobileBar = 'composer';
-		else return; // 미세 이동은 방향 판정 안 함(기준점 유지)
-		lastScrollTop = top;
-	}
-	// 내용 높이 변화(스트리밍·이전 대화 로드·세션 전환)에도 스크롤 가능 여부를 다시 판정.
-	$effect(() => {
-		if (!novelEl || typeof ResizeObserver === 'undefined') return;
-		const ro = new ResizeObserver(() => syncMobileBar());
-		ro.observe(novelEl);
-		return () => ro.disconnect();
-	});
 	// 터치(모바일) 기기 여부 — 이 경우 Enter 는 전송하지 않고 개행(기본 동작) 시킨다.
 	let isTouch = $state(false);
 
@@ -1010,13 +979,11 @@
 			await tick();
 			if (scroller) {
 				scroller.scrollTop = prevTop + (scroller.scrollHeight - prevHeight);
-				lastScrollTop = scroller.scrollTop; // prepend 보정은 사용자 스크롤이 아님 → 방향 판정 제외
 			}
 		}
 	}
 
 	function onReaderScroll() {
-		syncMobileBar();
 		if (scroller && scroller.scrollTop < 120 && hasMore && !loadingMore) loadOlder();
 	}
 
@@ -1447,14 +1414,8 @@
 <svelte:window onkeydown={onWindowKey} />
 
 <div class="chat-shell" class:debug>
-<div
-	class="chat"
-	class:bar-header={mobileBar === 'header'}
-	class:bar-composer={mobileBar === 'composer'}
-	style:--hdr-h="{headerH}px"
-	style:--cmp-h="{composerH}px"
->
-	<header class="chat-header" bind:clientHeight={headerH}>
+<div class="chat">
+	<header class="chat-header">
 		<a class="back" href="/" aria-label="뒤로">←</a>
 		<button
 			class="char-info"
@@ -2219,7 +2180,7 @@
 		{#if loadingMore}
 			<div class="load-more">이전 대화를 불러오는 중…</div>
 		{/if}
-		<article class="novel" bind:this={novelEl}>
+		<article class="novel">
 			{#each messages as m (m.clientKey ?? m.id)}
 				{#if m.content || m.errorReason || m.role === 'image_generation' || (streaming && m === lastMessage)}
 					<div class="para {m.role}" data-mid={m.id}>
@@ -2358,7 +2319,7 @@
 		{/if}
 	</div>
 
-	<div class="composer" bind:clientHeight={composerH}>
+	<div class="composer">
 		{#if filterEnabled}
 			<!-- 입력 필터 지시 한 줄 — 켜져 있는 동안 항상 보이고, 여기서 바로 고칠 수 있다. -->
 			<div class="filter-bar" class:busy={rewriting}>
@@ -3144,39 +3105,6 @@
 		color: #fff;
 		font-family: 'Pretendard', system-ui, sans-serif;
 		font-size: 0.74rem;
-	}
-
-	/* ── 모바일: 헤더·입력창을 오버레이로 띄우고 스크롤 방향에 따라 한쪽만 보인다.
-	   (위로 스크롤=헤더, 아래로 스크롤=입력창, 스크롤 불가=둘 다) 리더는 두 바 높이만큼 안쪽 여백 확보. */
-	@media (max-width: 640px) {
-		.chat {
-			position: relative;
-		}
-		.chat-header,
-		.composer {
-			position: absolute;
-			left: 0;
-			right: 0;
-			z-index: 5;
-			transition: transform 0.22s ease;
-			will-change: transform;
-		}
-		.chat-header {
-			top: 0;
-		}
-		.composer {
-			bottom: 0;
-		}
-		.chat.bar-composer .chat-header {
-			transform: translateY(-100%);
-		}
-		.chat.bar-header .composer {
-			transform: translateY(100%);
-		}
-		.chat .reader {
-			padding-top: calc(var(--hdr-h, 0px) + 16px);
-			padding-bottom: calc(var(--cmp-h, 0px) + 16px);
-		}
 	}
 
 	/* ── 소설 리더 ── */
