@@ -367,7 +367,9 @@ chatRouter.post('/', async (c) => {
 					encoder.encode(
 						isOverloadError(streamError)
 							? '⚠️ 지금 이 모델(AI 공급자)이 일시적으로 과부하 상태예요. 잠시 후 다시 보내거나, 설정(⚙)에서 다른 모델로 바꿔보세요.'
-							: '⚠️ 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요.'
+							: isProviderCensorError(streamError)
+								? '⚠️ AI 공급자의 콘텐츠 검열에 응답이 차단됐어요. 다시 보내거나, 설정(⚙)에서 다른 모델로 바꿔보세요.'
+								: '⚠️ 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요.'
 					)
 				);
 			}
@@ -418,8 +420,35 @@ async function collectMeta(
 	} catch (e) {
 		meta.metaError = String(e);
 	}
-	if (streamError) meta.streamError = String(streamError);
+	if (streamError) meta.streamError = describeStreamError(streamError);
 	return meta;
+}
+
+/**
+ * 스트림 에러를 콘솔 메타용 문자열로. Error 가 아닌 객체(AI_TypeValidationError 의 value 에
+ * 공급자 에러 JSON 이 담긴 경우 등)는 String() 이 "[object Object]" 만 남기므로 JSON 으로 편다.
+ */
+function describeStreamError(e: unknown): string {
+	if (e instanceof Error) {
+		const cause = (e as { cause?: unknown }).cause;
+		const value = (e as { value?: unknown }).value;
+		const extra = [cause ? `cause=${safeJson(cause)}` : '', value ? `value=${safeJson(value)}` : '']
+			.filter(Boolean)
+			.join(' ');
+		return `${e.name}: ${e.message}${extra ? ` (${extra})` : ''}`;
+	}
+	return typeof e === 'string' ? e : safeJson(e);
+}
+
+/**
+ * 공급자 측 콘텐츠 검열 차단인지(Alibaba `data_inspection_failed` 등).
+ * 에러 본문이 스트림 안에 JSON 으로 오면 AI_TypeValidationError.value 에 담기므로 통짜 직렬화로 검사.
+ */
+function isProviderCensorError(e: unknown): boolean {
+	const s = describeStreamError(e).toLowerCase();
+	return /data_inspection_failed|inappropriate content|content[_ -]?filter|content_policy|moderation/.test(
+		s
+	);
 }
 
 /**

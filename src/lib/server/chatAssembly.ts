@@ -104,6 +104,9 @@ const GOOGLE_SAFETY_OFF = [
  * 게이트웨이 캐싱 + (모델별) thinking 예산 제한.
  * 무제한 추론은 output 예산을 잠식해 본문을 자르고 비용·지연을 키우므로 소량만 허용한다.
  */
+/** DeepSeek 공급자 우선순위(alibaba 제외 — buildProviderOptions 주석 참고). */
+const DEEPSEEK_PROVIDER_ORDER = ['deepseek', 'fireworks', 'baseten', 'novita', 'deepinfra'];
+
 export function buildProviderOptions(
 	modelId: string,
 	opts?: { noThinking?: boolean }
@@ -135,6 +138,13 @@ export function buildProviderOptions(
 	} else if (modelId.startsWith('xai/')) {
 		out.xai = { reasoningEffort: noThink ? 'low' : XAI_REASONING_EFFORT };
 	} else if (modelId.startsWith('deepseek/')) {
+		// DeepSeek 은 게이트웨이가 11개 공급자(alibaba·fireworks·baseten·…·deepseek) 중 가중 추첨으로
+		// 고르는데, Alibaba(Model Studio)는 자체 콘텐츠 검열이 있어 성인 장면을 스트림 본문의
+		// 에러 JSON(`data_inspection_failed`)으로 거부한다. HTTP 에러가 아니라 공급자 폴백도 안 타고
+		// AI SDK 는 `choices` 누락 → AI_TypeValidationError 로 끝난다(2026-09-06 실측). 또 Alibaba 경유는
+		// frequencyPenalty 를 unsupported 로 버린다. → 검열 없는 네이티브 deepseek 을 1순위로 고정하고
+		// 나머지는 폴백 순서만 준다(order 에 없는 공급자(alibaba)는 시도하지 않는다).
+		out.gateway = { caching: 'auto', order: DEEPSEEK_PROVIDER_ORDER };
 		out.deepseek = { thinking: { type: 'disabled' } };
 	}
 	return out;
