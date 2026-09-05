@@ -39,6 +39,8 @@ NovelAI V4.5 **멀티 캐릭터 기능**(`char_captions`)을 사용하도록 변
 
 > 2026-09-05: NovelAI Diffusion **V5**(2026-08-21 출시) 지원. 생성 모델은 그림체(`art_styles.model`)에 박히며, 허용목록·세대 정보는 `src/lib/naiModels.ts`. V5 는 `params_version: 4`, `noise_schedule` karras 고정, CFG 5 / rescale 0.4 / 28 steps(아카 V5 기초 가이드 설정). positive 는 가이드 순서 **인원수 > 그림체 > 연도(1.5) > 장면 > complexity(high 2/ultra 0.5) > 퀄리티(가중치) > 마이너스 > nsfw** 로 `buildPositivePrompt` 가 재배열(인원수 태그 hoist, 단일 인물 `solo` 보강, 그림체에 year/complexity 있으면 생략). 네거티브는 V5 전용 `NEGATIVE_PROMPT_V5`(가이드 순서 + `official style, official art`). 인물 상한 32. V4.5 그림체는 기존 손튜닝 파라미터·꼬리 그대로.
 
+> 2026-09-05 (자연어 장면): 구조화 스키마에 **`scene`**(영어 1~2문장) 추가. V5 는 자연어+태그 혼용을 공식 지원(journal: "natural language prompting to the next level", 태그도 그대로)하므로 태그가 못 담는 **관계·행위 흐름·시선·공간 배치**를 문장으로 보강한다. 인물은 역할 명사(the woman/the man)로만 지칭하고 외형·옷은 금지(char_captions 누출 방지). 조립 위치는 base 태그 뒤·complexity 앞(`buildPositivePrompt` 5번째 인자), **V4.5 그림체면 버림**. 상한 400자(`MAX_SCENE_CHARS`, V5 Curated base ~703 토큰 예산 고려). `state` 도 짧은 절 허용으로 완화. 자연어 허용에 맞춰 미성년 하드차단 용어에 teen/schoolgirl/high school 등 우회 표현 추가(`minorSafety.ts`). 디버그 패널에 scene 표시.
+
 - **모델 한정**: 상황 프롬프트 모델을 구조화 출력이 안정적인 **Gemini 계열** 로만 허용
   (`IMAGE_PROMPT_MODELS`/`IMAGE_PROMPT_MODEL_IDS`, 기본 `google/gemini-3.8-flash`). 다른 모델은 JSON 불안정.
 - **구조화 스키마**: `{ base, characters: [{ caption }] }`

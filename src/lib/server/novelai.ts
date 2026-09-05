@@ -187,13 +187,17 @@ export function isResolutionKey(v: unknown): v is ResolutionKey {
  *    단일 인물이면 `solo` 를 보강(가이드: 퀄리티에 영향).
  *  - 연도·complexity 는 그림체가 이미 지정했으면 생략(그림체 의도 우선).
  *  - nsfw 는 맨 뒤(가이드). uncensored 동반.
+ *  - `scene`(V5 전용, 선택): 상황 프롬프트가 낸 **자연어 장면 문장**(관계·행위 흐름·시선·공간 배치).
+ *    V5 는 자연어+태그 혼용을 공식 지원(journal "natural language prompting to the next level", 태그도 그대로).
+ *    태그 장면 바로 뒤·complexity 앞에 넣는다("중요한 건 앞쪽 절반" 원칙 안). V4.5 경로에선 무시.
  * 그림체/상황의 끝 콤마를 정리한 뒤 ', ' 로 잇는다. 그림체가 비면 스타일 태그 없이(하드코딩 기본값 없음).
  */
 export function buildPositivePrompt(
 	stylePrompt: string,
 	situation: string,
 	nsfw = false,
-	model: string = DEFAULT_NAI_MODEL
+	model: string = DEFAULT_NAI_MODEL,
+	scene = ''
 ): string {
 	const style = stylePrompt.trim().replace(/,\s*$/, '').trim();
 	const sit = situation.trim().replace(/,\s*$/, '').trim();
@@ -206,7 +210,8 @@ export function buildPositivePrompt(
 	const styleLower = style.toLowerCase();
 	const year = /\byear\s*20\d\d\b/.test(styleLower) ? '' : YEAR_TAGS_V5;
 	const complexity = /\bcomplexity\b/.test(styleLower) ? '' : COMPLEXITY_V5;
-	const head = [count, style, year, rest, complexity].filter(Boolean).join(', ');
+	const sceneText = scene.trim().replace(/[.,\s]+$/, '').trim();
+	const head = [count, style, year, rest, sceneText, complexity].filter(Boolean).join(', ');
 	const body = head + QUALITY_TAIL_V5;
 	return nsfw ? `${body}, nsfw, uncensored` : body;
 }

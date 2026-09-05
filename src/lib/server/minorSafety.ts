@@ -35,7 +35,28 @@ const MINOR_TERMS = [
 	'age regressed',
 	'age-regressed',
 	'aged down',
-	'aged-down'
+	'aged-down',
+	// 자연어 장면 문장(V5 scene) 허용 이후 늘어나는 우회 표현. 'eighteen' 은 \b 경계로 'teen' 에 안 걸린다.
+	'teen',
+	'teens',
+	'teenager',
+	'teenagers',
+	'teenage',
+	'adolescent',
+	'juvenile',
+	'pubescent',
+	'prepubescent',
+	'schoolgirl',
+	'schoolgirls',
+	'schoolboy',
+	'schoolboys',
+	'school girl',
+	'school boy',
+	'high school',
+	'highschool',
+	'middle school',
+	'grade school',
+	'primary school'
 ];
 
 function escapeRe(s: string): string {

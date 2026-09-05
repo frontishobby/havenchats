@@ -78,6 +78,8 @@ export interface ImageDebug {
 	rawSituation: string;
 	/** 정리 후 base 장면 캡션(배경·인원수·상호작용 태그). 인물 외형은 characters 에. */
 	baseScene?: string;
+	/** 정리 후 자연어 장면 문장(V5 전용 — 관계·행위 흐름·시선·공간 배치). V4.5 그림체면 조립에서 무시. */
+	scene?: string;
 	/** 정리 후 인물별 char_caption(분리). NAI 캐릭터 기능으로 외형 누출 방지. */
 	characters?: string[];
 	/** 상황 프롬프트 호출의 종료 사유(예: stop / length / content-filter). 없으면 null. */

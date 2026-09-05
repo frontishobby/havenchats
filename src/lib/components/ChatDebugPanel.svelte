@@ -368,6 +368,13 @@
 					<p class="muted">없음 → NovelAI 요청을 보내지 않았습니다.</p>
 				{/if}
 
+				<div class="sub">정리 후 자연어 장면 문장 (V5 전용 — V4.5 그림체면 미사용)</div>
+				{#if imageDebug.scene}
+					<pre class="dump small">{imageDebug.scene}</pre>
+				{:else}
+					<p class="muted">없음.</p>
+				{/if}
+
 				<div class="sub">인물별 캡션 (char_captions, {imageDebug.characters?.length ?? 0}명)</div>
 				{#if imageDebug.characters && imageDebug.characters.length > 0}
 					{#each imageDebug.characters as cap, i (i)}

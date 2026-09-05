@@ -785,6 +785,8 @@ const MAX_CHARACTERS = 8;
 const MAX_LEDGER_ENTRIES = 16;
 /** 원장에 박는 고정 외형 태그 최대 길이(자). */
 const MAX_APPEARANCE_CHARS = 300;
+/** 자연어 장면 문장 최대 길이(자). V5 Curated base 예산(~703 토큰)에 그림체+꼬리와 함께 들어가야 해서 짧게. */
+const MAX_SCENE_CHARS = 400;
 
 /** 요청의 상황 프롬프트 모델 검증 — 구조화 출력 안정 모델(Gemini 계열)만. 미허용이면 기본 모델. */
 function pickPromptModel(requested?: string): string {
@@ -796,6 +798,9 @@ function pickPromptModel(requested?: string): string {
 /**
  * 구조화 출력 스키마(generateObject) — NAI V4.5 캐릭터 기능에 맞춰 장면을 분해한다.
  *  - base: 배경·구도·인원수 태그(1girl/2girls/1boy 1girl)·상호작용(source#/target#) 등 전역 캡션.
+ *  - scene: **자연어 장면 문장**(1~2문장, 영어). 태그로 어색한 관계·행위 흐름·시선·공간 배치용. 인물은
+ *    역할 명사로만 지칭(the woman/the man) — 외형·옷은 절대 안 넣어 char_captions 와 충돌·누출을 막는다.
+ *    V5 만 조립에 사용(buildPositivePrompt), V4.5 그림체면 버린다.
  *  - characters[]: 화면에 보이는 인물별로 name/appearance/state 분해.
  *    · name: 외형 원장 대조용 안정 식별자(주인공=char, 유저=user, 그 외 in-story 이름/식별자).
  *    · appearance: 고정 외형(머리·눈·체형·고유특징) — 원장에 박아 턴 간 고정.
@@ -804,12 +809,14 @@ function pickPromptModel(requested?: string): string {
  */
 const SITUATION_SCHEMA = jsonSchema<{
 	base: string;
+	scene: string;
 	characters: { name: string; appearance: string; state: string }[];
 }>({
 	type: 'object',
 	additionalProperties: false,
 	properties: {
 		base: { type: 'string' },
+		scene: { type: 'string' },
 		characters: {
 			type: 'array',
 			items: {
@@ -824,31 +831,33 @@ const SITUATION_SCHEMA = jsonSchema<{
 			}
 		}
 	},
-	required: ['base', 'characters']
+	required: ['base', 'scene', 'characters']
 });
 
 const SITUATION_SYSTEM = [
 	`You convert the latest moment of a Korean roleplay scene into a structured image-generation prompt for NovelAI Diffusion (V4.5/V5, anime illustration), using its MULTI-CHARACTER feature.`,
 	`You are given a [Character] reference sheet for the main roleplay character, an optional [Known characters] roster of people whose fixed appearance was already established earlier in this story, and the [Recent conversation] (the last few turns, oldest to newest, including the user's actions). Depict ONLY the LATEST moment — the final line of the conversation; use the earlier lines purely as context for what is happening right now. Ignore non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
 	``,
-	`Output a JSON object with two keys:`,
+	`Output a JSON object with three keys:`,
 	`  "base": string  — Danbooru-style tags for everything that is NOT an individual character's body/clothes: the SUBJECT COUNT tag (e.g. "1girl", "1boy, 1girl", "2girls"), framing/composition (e.g. "upper body", "cowboy shot", "full body", "from above", "pov"), setting/background, lighting and mood, and INTERACTION action tags between characters using the "source#"/"target#"/"mutual#" prefixes (e.g. "source#hug" on the initiator's intent, "target#hug", "mutual#kiss"). Lowercase, comma-separated.`,
+	`  "scene": string — ONE or TWO plain-English sentences describing the same moment in natural language: who is doing what to whom, where each person is relative to the other and to the setting, where they are looking, and the mood. This complements the tags (the model reads both). Refer to people ONLY by role nouns ("the woman", "the man", "the waitress") — NEVER mention hair, eyes, body type, or clothing here (those belong to the character entries). Do not restate the count tag or camera tags. Example: "The woman straddles the man on the sofa, gripping his collar and staring down at him with a smirk while he leans back against the cushions."`,
 	`  "characters": array — one entry per person VISIBLE in the frame, ordered top-to-bottom / left-to-right. Each entry is { "name", "appearance", "state" }:`,
 	`    - "name": a STABLE identifier for this person, used to keep their look consistent across images. Use the literal "char" for the main roleplay character ({{char}}), and the literal "user" for the user/{{나}}. For anyone else, if they are the SAME person as someone in [Known characters], reuse that EXACT name; otherwise assign a short identifier (their in-story name if any, else a concise descriptor like "waitress").`,
 	`    - "appearance": that person's FIXED physical look as Danbooru tags only, in THIS order — an UNNUMBERED subject word ("girl"/"boy"/"other"), then a body-type class if any (e.g. "mature female", "petite"), then hair color/length/style, eye color, skin, finer body details (e.g. "narrow waist", "large breasts"), and distinctive PERMANENT features. NEVER put clothing, expression, or pose here. For "char" use the [Character] reference. For a person listed in [Known characters], COPY their recorded appearance verbatim. For a brand-new person, invent a plausible consistent appearance.`,
-	`    - "state": that person's CURRENT scene-specific look from the latest moment, in THIS order: clothing or state of undress (e.g. "white blouse, unbuttoned, no bra", "naked, towel") → framing of this person if notable (e.g. "from side") → pose/action from the largest movement to the smallest → expression from the overall emotion to details (e.g. "smile, open mouth, half-closed eyes, looking at viewer"). This is the only part that changes turn to turn. Lowercase, comma-separated.`,
+	`    - "state": that person's CURRENT scene-specific look from the latest moment, in THIS order: clothing or state of undress (e.g. "white blouse, unbuttoned, no bra", "naked, towel") → framing of this person if notable (e.g. "from side") → pose/action from the largest movement to the smallest → expression from the overall emotion to details (e.g. "smile, open mouth, half-closed eyes, looking at viewer"). Mostly tags, but a SHORT clause is fine where a tag is awkward (e.g. "leaning over the desk", "looking back over her shoulder", "one hand on his chest"). This is the only part that changes turn to turn. Lowercase, comma-separated.`,
 	``,
 	`Character rules:`,
 	`- "appearance" must stay identical for the same person across turns (that is what keeps images consistent); only "state" follows the latest scene.`,
 	`- Include the user ("user") as a SEPARATE entry ONLY if they are physically in the frame in this moment (e.g. the two are embracing, the user's body is shown). For typical 1:1 POV shots where only the character is depicted, output just one entry.`,
 	`- The subject COUNT tag in "base" must match the number of character entries (1 entry → "1girl" or "1boy"; 2 entries → e.g. "1boy, 1girl").`,
-	`- Put per-person body/clothes ONLY in "appearance"/"state", never in "base". Put the count tag ONLY in "base", never in a character entry.`,
+	`- Put per-person body/clothes ONLY in "appearance"/"state", never in "base" or "scene". Put the count tag ONLY in "base", never in a character entry.`,
 	``,
 	`General rules:`,
 	`- English only. Focus on the single most recent visual beat, not the whole history.`,
+	`- "base", "appearance" and "state" are tag lists; "scene" is the only place for full sentences.`,
 	`- Do NOT copy the status window, stat block, or any prompt/instruction text from the input — write your own concise tags.`,
 	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, "rating:" tags, or negative terms — those are added separately.`,
-	`- Keep it concise (combined budget is small): "base" short, each character under ~40 tags.`,
+	`- Keep it concise (combined budget is small): "base" short, "scene" at most two sentences, each character under ~40 tags.`,
 	`- NSFW content is allowed and should be described plainly when present.`,
 	`- ABSOLUTE RULE: every person MUST be depicted as an adult (18+). NEVER output any tag or wording depicting minors, children, or age-regressed characters (e.g. loli, shota, child, kid, toddler, "young girl/boy", "little girl/boy"). If the scene implies a minor, depict them as a clear adult instead. This overrides everything else.`
 ].join('\n');
@@ -872,6 +881,21 @@ function sanitizeSituation(raw: string): string {
 		.filter((s) => s && !HANGUL_RE.test(s))
 		.join(', ')
 		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+/**
+ * 자연어 장면 문장 후처리. 문장 안의 콤마는 살려야 하므로 **줄 단위**로만 쪼개 한글 줄을 버리고,
+ * 공백 정리 후 끝의 마침표/콤마를 떼어 낸다(뒤에 ', ' 로 태그가 이어지므로).
+ */
+function sanitizeScene(raw: string): string {
+	return raw
+		.split(/[\r\n]+/)
+		.map((s) => s.trim())
+		.filter((s) => s && !HANGUL_RE.test(s))
+		.join(' ')
+		.replace(/\s+/g, ' ')
+		.replace(/[.,\s]+$/, '')
 		.trim();
 }
 
@@ -1069,6 +1093,7 @@ chatRouter.post('/image/prepare', async (c) => {
 	// 디버그(요청자가 debug 모드일 때만)용 진단값 누적 — 성공·실패 양쪽에서 동봉한다.
 	let situation = ''; // base 와 인물 캡션을 ' | ' 로 합친 표시용
 	let baseScene = '';
+	let sceneText = ''; // 자연어 장면 문장(V5 전용)
 	let charCaptions: string[] = [];
 	let rawSituation = '';
 	let finishReason: string | null = null;
@@ -1085,6 +1110,7 @@ chatRouter.post('/image/prepare', async (c) => {
 					knownCharacters: knownBlock,
 					situation,
 					baseScene,
+					scene: sceneText,
 					characters: charCaptions,
 					rawSituation,
 					finishReason,
@@ -1130,10 +1156,11 @@ chatRouter.post('/image/prepare', async (c) => {
 			maxOutputTokens: 2000 + reasoningHeadroom(promptModel),
 			providerOptions: buildProviderOptions(promptModel, { noThinking: true })
 		});
-		const obj = (result.object ?? {}) as { base?: unknown; characters?: unknown };
+		const obj = (result.object ?? {}) as { base?: unknown; scene?: unknown; characters?: unknown };
 		rawSituation = JSON.stringify(obj);
 		// base·각 인물 캡션을 필드별로 한글/잡음 제거(모델이 상태창을 베껴 넣어도 영어 태그만 남김).
 		baseScene = sanitizeSituation(str(obj.base));
+		sceneText = sanitizeScene(str(obj.scene)).slice(0, MAX_SCENE_CHARS);
 
 		// 인물별: name 으로 원장 대조 → 기존이면 외형 고정(override), 신규면 핀. 최종 캡션 = 외형 + 상태.
 		const turnRef = session.messageCount;
@@ -1170,8 +1197,8 @@ chatRouter.post('/image/prepare', async (c) => {
 			ledgerDirty = true;
 		}
 
-		// 표시용 합본(디버그 패널·빈값 판정). base 와 인물 캡션을 ' | ' 로 잇는다.
-		situation = [baseScene, ...charCaptions].filter(Boolean).join(' | ');
+		// 표시용 합본(디버그 패널·빈값 판정). base·자연어 장면·인물 캡션을 ' | ' 로 잇는다.
+		situation = [baseScene, sceneText, ...charCaptions].filter(Boolean).join(' | ');
 		finishReason = (result.finishReason as string | undefined) ?? null;
 		warnings = result.warnings ?? [];
 		cost = parseGatewayCost(result.providerMetadata);
@@ -1210,8 +1237,9 @@ chatRouter.post('/image/prepare', async (c) => {
 		);
 	}
 
-	// base_caption = (NSFW면) rating + 그림체 + base 장면 + 퀄리티 꼬리. 인물 외형은 char_captions 로 분리.
-	const positive = buildPositivePrompt(stylePrompt, baseScene, isNsfw, naiModel);
+	// base_caption = 인원수 + 그림체 + base 장면 태그 + 자연어 장면(V5) + 퀄리티 꼬리(+nsfw). 인물 외형은 char_captions 로 분리.
+	// 자연어 장면은 positive 에 합쳐지므로 아래 미성년 하드차단이 같이 검사한다.
+	const positive = buildPositivePrompt(stylePrompt, baseScene, isNsfw, naiModel, sceneText);
 
 	// ── 하드 차단 ── 최종 프롬프트에 미성년/아동 코드 용어가 있으면 NovelAI 호출 없이 거부(fail-closed).
 	// 한국법(가상 아동성착취물 형사처벌) 대응의 최종 게이트 — LLM 지시·네거티브와 별개의 결정적 방어선.
