@@ -13,6 +13,7 @@ interface StyleRow {
 	title: string;
 	memo: string | null;
 	prompt: string;
+	model: string;
 	thumbnail_key: string | null;
 	shared: number;
 	created_at: number;
@@ -20,7 +21,7 @@ interface StyleRow {
 	favorited: number;
 }
 
-const COLS = `s.id, s.creator_id, s.title, s.memo, s.prompt, s.thumbnail_key, s.shared, s.created_at, s.updated_at,
+const COLS = `s.id, s.creator_id, s.title, s.memo, s.prompt, s.model, s.thumbnail_key, s.shared, s.created_at, s.updated_at,
 	u.display_name AS creator_name`;
 
 function rowToStyle(r: StyleRow): ArtStyle {
@@ -31,6 +32,7 @@ function rowToStyle(r: StyleRow): ArtStyle {
 		title: r.title,
 		memo: r.memo,
 		prompt: r.prompt,
+		model: r.model,
 		thumbnailUrl: r.thumbnail_key ? `${imgSrc(r.thumbnail_key)}?v=${r.updated_at}` : null,
 		shared: r.shared === 1,
 		favorited: r.favorited === 1,
@@ -149,6 +151,8 @@ export async function createStyle(
 		title: string;
 		memo: string | null;
 		prompt: string;
+		/** NovelAI 모델 id(호출부에서 허용목록 검증). */
+		model: string;
 		thumbnailKey: string | null;
 		shared: boolean;
 		id?: string;
@@ -158,8 +162,8 @@ export async function createStyle(
 	const now = Date.now();
 	await db
 		.prepare(
-			`INSERT INTO art_styles (id, creator_id, title, memo, prompt, thumbnail_key, shared, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			`INSERT INTO art_styles (id, creator_id, title, memo, prompt, model, thumbnail_key, shared, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			id,
@@ -167,6 +171,7 @@ export async function createStyle(
 			input.title,
 			input.memo,
 			input.prompt,
+			input.model,
 			input.thumbnailKey,
 			input.shared ? 1 : 0,
 			now,

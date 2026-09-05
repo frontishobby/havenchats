@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { base64ToBlob } from '$lib/imagePreview';
+	import { NAI_MODELS, DEFAULT_NAI_MODEL, getNaiModel } from '$lib/naiModels';
 
 	let {
 		open = $bindable(),
@@ -14,6 +15,9 @@
 	let style = $state('');
 	let situation = $state('');
 	let resolution = $state<Res>('832x1216');
+	// 이 그림체를 깎는 NovelAI 모델. 저장 시 그림체에 박혀 채팅·썸네일도 같은 모델로 생성된다.
+	let naiModel = $state(DEFAULT_NAI_MODEL);
+	const naiModelInfo = $derived(getNaiModel(naiModel));
 
 	// 장면 미리보기(자유 생성)
 	let previewUrl = $state<string | null>(null);
@@ -50,6 +54,7 @@
 		reset();
 		style = '';
 		situation = '';
+		naiModel = DEFAULT_NAI_MODEL;
 	}
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Escape' && open) close();
@@ -125,7 +130,7 @@
 		if (generating || !style.trim()) return;
 		generating = true;
 		try {
-			await streamGenerate({ style, situation, resolution }, (blob) => {
+			await streamGenerate({ style, situation, resolution, model: naiModel }, (blob) => {
 				revoke(previewUrl);
 				previewUrl = URL.createObjectURL(blob);
 			});
@@ -138,7 +143,7 @@
 		if (thumbGenerating || !style.trim()) return;
 		thumbGenerating = true;
 		try {
-			const finalBlob = await streamGenerate({ style, thumbnail: true }, (blob) => {
+			const finalBlob = await streamGenerate({ style, thumbnail: true, model: naiModel }, (blob) => {
 				revoke(thumbUrl);
 				thumbUrl = URL.createObjectURL(blob);
 			});
@@ -167,6 +172,7 @@
 			fd.append('memo', memo.trim());
 			fd.append('prompt', style.trim());
 			fd.append('shared', shared ? '1' : '0');
+			fd.append('model', naiModel);
 			fd.append('thumbnail', thumbBlob, `thumb.${thumbExt}`);
 			const res = await fetch('/api/styles', { method: 'POST', body: fd });
 			if (res.ok) {
@@ -224,6 +230,20 @@
 				</div>
 
 				<div class="controls">
+					<span class="fl">모델</span>
+					<div class="res-row model-row" role="radiogroup" aria-label="NovelAI 모델">
+						{#each NAI_MODELS as m (m.id)}
+							<button
+								class="res"
+								class:active={naiModel === m.id}
+								role="radio"
+								aria-checked={naiModel === m.id}
+								onclick={() => (naiModel = m.id)}
+							>
+								{m.label}
+							</button>
+						{/each}
+					</div>
 					<label class="fl" for="ws-style">그림체 프롬프트</label>
 					<textarea id="ws-style" rows="4" bind:value={style} placeholder="예: artist:xxx, watercolor, soft lighting …"></textarea>
 					<label class="fl" for="ws-situ">상황 (테스트용 · 저장 안 됨)</label>
@@ -238,7 +258,10 @@
 							{previewUrl ? '다시 생성' : '장면 생성'}
 						</button>
 					</div>
-					<p class="hint">그림체는 모든 이미지에 적용될 스타일 태그예요. 퀄리티·네거티브는 자동 적용됩니다.</p>
+					<p class="hint">
+						그림체는 모든 이미지에 적용될 스타일 태그예요. 퀄리티·네거티브는 모델에 맞춰 자동 적용됩니다.
+						저장하면 <b>{naiModelInfo.label}</b> 그림체로 표시되고, 채팅·썸네일도 이 모델로 생성돼요.
+					</p>
 				</div>
 			</div>
 
@@ -439,6 +462,9 @@
 		display: flex;
 		gap: 8px;
 		margin-top: 10px;
+	}
+	.model-row {
+		margin-top: 0;
 	}
 	.res {
 		flex: 1;

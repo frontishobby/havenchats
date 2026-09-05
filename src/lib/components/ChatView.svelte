@@ -31,6 +31,7 @@
 	import { renderCardHtml } from '$lib/htmlRender';
 	import { personalize as fillPlaceholders } from '$lib/placeholders';
 	import type { ChatMessage, Character, ArtStyle } from '$lib/types';
+	import { getNaiModel } from '$lib/naiModels';
 	import type { ChatDebugSnapshot, ImageDebug } from '$lib/chatDebug';
 	import ChatDebugPanel from '$lib/components/ChatDebugPanel.svelte';
 
@@ -404,6 +405,8 @@
 	});
 	// 드롭다운 트리거 썸네일: 선택된 그림체, 없으면(기본) fallback 썸네일.
 	const trigStyle = $derived(selectedStyle ?? fallbackStyle);
+	// 실제 생성에 쓸 NovelAI 모델 = 고른 그림체(없으면 기본 그림체)에 박힌 모델. 둘 다 없으면 레지스트리 기본.
+	const selectedNaiModel = $derived(getNaiModel(trigStyle?.model).id);
 	let imagePromptModel = $state(DEFAULT_IMG_PROMPT_MODEL); // 상황 프롬프트 생성 모델
 	let imgModelOpen = $state(false); // 이미지 프롬프트 모델 드롭다운 열림
 	let imageEarly = $state(false); // 빠른 생성 우선(스트리밍 중 미리 발사)
@@ -614,6 +617,7 @@
 					recent,
 					resolution: imageResolution,
 					stylePrompt: selectedStylePrompt,
+					naiModel: selectedNaiModel,
 					promptModel: imagePromptModel,
 					replaceId: replaceId || undefined,
 					debug: debug || undefined
@@ -1704,6 +1708,7 @@
 										<span class="style-swatch default">✦</span>
 									{/if}
 									<span class="style-title">{st.title}</span>
+									<span class="style-ver" class:legacy={getNaiModel(st.model).version !== 'v5'}>{getNaiModel(st.model).short}</span>
 									{#if badge}<span class="style-badge">{badge}</span>{/if}
 								</button>
 							</li>
@@ -1723,6 +1728,9 @@
 									<span class="style-swatch default">✦</span>
 								{/if}
 								<span class="style-title">{selectedStyle ? selectedStyle.title : '기본 그림체'}</span>
+								{#if trigStyle}
+									<span class="style-ver" class:legacy={getNaiModel(trigStyle.model).version !== 'v5'}>{getNaiModel(trigStyle.model).short}</span>
+								{/if}
 								<span class="chev">▾</span>
 							</button>
 							{#if styleOpen}
@@ -1741,6 +1749,9 @@
 												<span class="style-swatch default">✦</span>
 											{/if}
 											<span class="style-title">기본 그림체</span>
+											{#if fallbackStyle}
+												<span class="style-ver" class:legacy={getNaiModel(fallbackStyle.model).version !== 'v5'}>{getNaiModel(fallbackStyle.model).short}</span>
+											{/if}
 										</button>
 									</li>
 									{#if recommendedStyle}
@@ -2620,6 +2631,21 @@
 		border-radius: 999px;
 		background: var(--accent);
 		color: #fff;
+	}
+	/* 그림체가 깎인 NovelAI 모델 세대(V5 / V4.5). 구세대는 흐리게. */
+	.style-ver {
+		flex-shrink: 0;
+		font-size: 0.62rem;
+		font-weight: 700;
+		padding: 1px 6px;
+		border-radius: 6px;
+		border: 1px solid var(--accent);
+		color: var(--accent);
+		letter-spacing: 0.02em;
+	}
+	.style-ver.legacy {
+		border-color: var(--border);
+		color: var(--text-faint);
 	}
 	.img-notice {
 		display: flex;

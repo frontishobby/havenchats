@@ -34,6 +34,7 @@ import {
 	upscaleImage,
 	type ResolutionKey
 } from '$lib/server/novelai';
+import { pickNaiModel } from '$lib/naiModels';
 import type { Audience } from '$lib/types';
 import type {
 	AssistCurrentDraft,
@@ -393,7 +394,7 @@ function pickPromptModel(requested?: string): string {
 }
 
 const SITUATION_SYSTEM = [
-	`You convert a Korean character setup sheet into an image-generation prompt for a CHARACTER THUMBNAIL/PORTRAIT (NovelAI Diffusion V4.5, anime illustration).`,
+	`You convert a Korean character setup sheet into an image-generation prompt for a CHARACTER THUMBNAIL/PORTRAIT (NovelAI Diffusion V4.5/V5, anime illustration).`,
 	`You are given the [Character] setup text. Extract the character's fixed physical appearance (count e.g. 1girl/1boy, hair color/length/style, eye color, body type, skin, distinctive features) and a representative outfit. Ignore non-visual text (personality, backstory, rules, command/keyword lists, output-format instructions).`,
 	`Compose a flattering, character-focused portrait: a clear single-subject shot (upper body or cowboy shot), looking at viewer, expression that fits the character, simple or fitting background.`,
 	`Output format: two parts joined by a comma.`,
@@ -431,6 +432,8 @@ interface ThumbBody {
 	nsfw?: boolean;
 	/** 상황 변환 모델(허용목록). 없으면 기본 flash. */
 	model?: string;
+	/** NovelAI 생성 모델 id(고른 그림체에 박힌 값, 허용목록 검증). 없으면 기본. */
+	naiModel?: string;
 }
 
 /** Uint8Array → base64(폴백 최종 프레임 전송용). */
@@ -456,6 +459,7 @@ charactersRouter.post('/thumbnail', async (c) => {
 	const regen = body?.regenSituation === true;
 	const isNsfw = body?.nsfw === true;
 	const model = pickPromptModel(body?.model);
+	const naiModel = pickNaiModel(body?.naiModel);
 
 	// NovelAI 키 — 없으면 안내(클라가 등록 유도).
 	const naiKey = await getDecryptedKey(db, user.id, 'novelai');
@@ -518,7 +522,7 @@ charactersRouter.post('/thumbnail', async (c) => {
 		}
 	}
 
-	const positive = buildPositivePrompt(style, situation, isNsfw);
+	const positive = buildPositivePrompt(style, situation, isNsfw, naiModel);
 
 	// ── 2) NovelAI 스트리밍 생성 ──
 	// NDJSON: 먼저 t:'situation'(편집 input 채움) → t:'frame'(중간) … → t:'final'(최종 base64).
@@ -533,7 +537,8 @@ charactersRouter.post('/thumbnail', async (c) => {
 			try {
 				for await (const b64 of generateImageStream(naiKey, {
 					positive,
-					resolution: THUMB_RESOLUTION
+					resolution: THUMB_RESOLUTION,
+					model: naiModel
 				})) {
 					finalB64 = b64;
 					controller.enqueue(ln({ t: 'frame', img: b64 }));
@@ -548,7 +553,7 @@ charactersRouter.post('/thumbnail', async (c) => {
 				return;
 			}
 			// 폴백: 비스트리밍 생성 → 최종 1장.
-			const gen = await generateImage(naiKey, { positive, resolution: THUMB_RESOLUTION });
+			const gen = await generateImage(naiKey, { positive, resolution: THUMB_RESOLUTION, model: naiModel });
 			if (!gen.ok) {
 				controller.enqueue(ln({ t: 'error', message: gen.message }));
 				controller.close();

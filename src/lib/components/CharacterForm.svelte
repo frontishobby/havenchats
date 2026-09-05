@@ -30,6 +30,7 @@
 		Opening,
 		Visibility
 	} from '$lib/types';
+	import { getNaiModel } from '$lib/naiModels';
 
 	export interface CharacterFormInitial {
 		name: string;
@@ -589,7 +590,7 @@
 		<select class="rec-select" aria-labelledby="rec-style-label" bind:value={recommendedStyleId}>
 			<option value="">지정 안 함</option>
 			{#each myStyles as st (st.id)}
-				<option value={st.id}>{st.title}{st.creatorName ? ` · ${st.creatorName}` : ''}</option>
+				<option value={st.id}>[{getNaiModel(st.model).short}] {st.title}{st.creatorName ? ` · ${st.creatorName}` : ''}</option>
 			{/each}
 		</select>
 		<p class="field-hint">

@@ -220,6 +220,8 @@ export interface ArtStyle {
 	memo: string | null;
 	/** 그림체(스타일) 프롬프트 본문. */
 	prompt: string;
+	/** 이 그림체가 깎인 NovelAI 모델 id(`lib/naiModels.ts`). 채팅·워크숍·썸네일은 이 모델로 생성. */
+	model: string;
 	/** 썸네일 servable URL(`/img/<key>?v=updatedAt`). 없으면 null. */
 	thumbnailUrl: string | null;
 	/** Hub 공개 여부. false=저장(비공개, 본인 채팅 전용), true=공유(Hub 노출). */

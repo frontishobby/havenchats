@@ -3,6 +3,7 @@
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { base64ToBlob, blobToBase64, blobToWebp } from '$lib/imagePreview';
 	import type { ArtStyle } from '$lib/types';
+	import { getNaiModel } from '$lib/naiModels';
 
 	let {
 		description,
@@ -138,6 +139,8 @@
 			const blob = await streamGenerate({
 				description,
 				style: currentStyle?.prompt ?? '',
+				// 그림체에 박힌 NovelAI 모델로 생성(그림체 없음이면 서버 기본).
+				naiModel: currentStyle?.model,
 				situation: regenSituation ? '' : situation.trim(),
 				regenSituation,
 				nsfw
@@ -226,7 +229,7 @@
 		<select id="thumb-style" class="t-select" bind:value={styleId}>
 			<option value="">그림체 없음</option>
 			{#each styles as s (s.id)}
-				<option value={s.id}>{s.title}{s.creatorName ? ` · ${s.creatorName}` : ''}</option>
+				<option value={s.id}>[{getNaiModel(s.model).short}] {s.title}{s.creatorName ? ` · ${s.creatorName}` : ''}</option>
 			{/each}
 		</select>
 	{:else}

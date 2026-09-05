@@ -78,7 +78,7 @@ export interface ImageDebug {
 	rawSituation: string;
 	/** 정리 후 base 장면 캡션(배경·인원수·상호작용 태그). 인물 외형은 characters 에. */
 	baseScene?: string;
-	/** 정리 후 인물별 char_caption(분리). NAI V4.5 캐릭터 기능으로 외형 누출 방지. */
+	/** 정리 후 인물별 char_caption(분리). NAI 캐릭터 기능으로 외형 누출 방지. */
 	characters?: string[];
 	/** 상황 프롬프트 호출의 종료 사유(예: stop / length / content-filter). 없으면 null. */
 	finishReason: string | null;
@@ -92,9 +92,10 @@ export interface ImageDebug {
 	positive: string | null;
 	/** 고정 네거티브 프롬프트. */
 	negative: string;
+	/** NovelAI 생성 모델 id(그림체에 박힌 값). */
 	model: string;
 	resolution: string;
-	/** 고정 생성 파라미터(표시용). */
+	/** 모델별 생성 파라미터(표시용). */
 	params: {
 		sampler: string;
 		scheduler: string;

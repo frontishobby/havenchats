@@ -4,6 +4,7 @@
 	import StyleWorkshopModal from '$lib/components/StyleWorkshopModal.svelte';
 	import { resized } from '$lib/imageUrl';
 	import type { ArtStyle } from '$lib/types';
+	import { getNaiModel } from '$lib/naiModels';
 	import type { MeData } from '$lib/api/pages';
 	import type { PageData } from './$types';
 
@@ -172,6 +173,7 @@
 							{s.favorited ? '★' : '☆'}
 						</button>
 						{#if !s.shared}<span class="priv-badge">비공개</span>{/if}
+						<span class="ver-badge" class:legacy={getNaiModel(s.model).version !== 'v5'}>{getNaiModel(s.model).short}</span>
 					</div>
 					<div class="meta">
 						<strong>{s.title}</strong>
@@ -195,6 +197,7 @@
 			<div class="detail-body">
 				<div class="detail-title">
 					<h2>{s.title}</h2>
+					<span class="ver-tag" class:legacy={getNaiModel(s.model).version !== 'v5'}>{getNaiModel(s.model).label}</span>
 					{#if !s.shared}<span class="priv-tag">비공개</span>{/if}
 				</div>
 				<a class="by-link" href="/user/{s.creatorId}">{s.creatorName ?? '익명'}</a>
@@ -309,6 +312,37 @@
 		background: rgba(0, 0, 0, 0.55);
 		color: #fff;
 		backdrop-filter: blur(2px);
+	}
+	/* 그림체가 깎인 NovelAI 모델 세대 배지(카드 우하단). 구세대(V4.5)는 흐리게. */
+	.ver-badge {
+		position: absolute;
+		right: 6px;
+		bottom: 6px;
+		font-size: 0.62rem;
+		font-weight: 800;
+		padding: 2px 7px;
+		border-radius: 999px;
+		background: var(--accent);
+		color: #fff;
+		letter-spacing: 0.02em;
+	}
+	.ver-badge.legacy {
+		background: rgba(0, 0, 0, 0.55);
+		color: rgba(255, 255, 255, 0.8);
+		backdrop-filter: blur(2px);
+	}
+	.ver-tag {
+		flex-shrink: 0;
+		font-size: 0.68rem;
+		font-weight: 700;
+		padding: 2px 8px;
+		border-radius: 6px;
+		border: 1px solid var(--accent);
+		color: var(--accent);
+	}
+	.ver-tag.legacy {
+		border-color: var(--border);
+		color: var(--text-faint);
 	}
 	.grid {
 		display: grid;

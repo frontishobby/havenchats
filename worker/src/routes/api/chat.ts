@@ -55,10 +55,10 @@ import {
 	isResolutionKey,
 	DEFAULT_RESOLUTION,
 	NEGATIVE_PROMPT,
-	MODEL,
-	IMAGE_PARAMS,
+	imageParamsFor,
 	type ResolutionKey
 } from '$lib/server/novelai';
+import { pickNaiModel } from '$lib/naiModels';
 import { IMAGE_PROMPT_MODEL_IDS, DEFAULT_IMAGE_PROMPT_MODEL_ID } from '$lib/data/models';
 import type { ImageDebug } from '$lib/chatDebug';
 import { loadChatPage } from '$lib/server/chatPageLoad';
@@ -779,8 +779,8 @@ const MAX_DESC_CHARS = 6000;
 /** 최근 대화 블록: 메시지 개수·메시지당 길이 상한(토큰·지연 보호용). */
 const MAX_RECENT_MSGS = 6;
 const MAX_RECENT_MSG_CHARS = 2000;
-/** NAI V4.5 캐릭터 최대 인원(공식 상한 6). 초과분은 잘라낸다. */
-const MAX_CHARACTERS = 6;
+/** 상황 프롬프트가 낼 인물 상한(모델별 상한은 buildGeneratePayload 가 다시 적용 — V4.5=6, V5=32). */
+const MAX_CHARACTERS = 8;
 /** 외형 원장 최대 인원. 초과 시 가장 오래 안 나온 인물부터 evict. */
 const MAX_LEDGER_ENTRIES = 16;
 /** 원장에 박는 고정 외형 태그 최대 길이(자). */
@@ -828,7 +828,7 @@ const SITUATION_SCHEMA = jsonSchema<{
 });
 
 const SITUATION_SYSTEM = [
-	`You convert the latest moment of a Korean roleplay scene into a structured image-generation prompt for NovelAI Diffusion V4.5 (anime illustration), using its MULTI-CHARACTER feature.`,
+	`You convert the latest moment of a Korean roleplay scene into a structured image-generation prompt for NovelAI Diffusion (V4.5/V5, anime illustration), using its MULTI-CHARACTER feature.`,
 	`You are given a [Character] reference sheet for the main roleplay character, an optional [Known characters] roster of people whose fixed appearance was already established earlier in this story, and the [Recent conversation] (the last few turns, oldest to newest, including the user's actions). Depict ONLY the LATEST moment — the final line of the conversation; use the earlier lines purely as context for what is happening right now. Ignore non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
 	``,
 	`Output a JSON object with two keys:`,
@@ -918,6 +918,8 @@ interface ImageRequestBody {
 	stylePrompt?: string;
 	/** 상황 프롬프트를 생성할 LLM 모델 id(허용목록 검증). 없으면 기본 모델. */
 	promptModel?: string;
+	/** NovelAI 생성 모델 id(선택한 그림체에 박힌 값, `lib/naiModels.ts` 허용목록 검증). 없으면 기본. */
+	naiModel?: string;
 	/** 재생성: 이 image_generation 메시지를 제자리(같은 행/순서)에서 덮어쓴다. */
 	replaceId?: string;
 	/** 디버그 모드: 응답에 사용한 프롬프트/파라미터를 동봉. */
@@ -1036,6 +1038,9 @@ chatRouter.post('/image/prepare', async (c) => {
 		: DEFAULT_RESOLUTION;
 	const stylePrompt = (body?.stylePrompt ?? '').slice(0, MAX_STYLE_CHARS);
 	const promptModel = pickPromptModel(body?.promptModel);
+	// 그림체에 박힌 NovelAI 모델(허용목록 검증). 그림체 세대에 맞는 params_version·퀄리티 꼬리로 조립된다.
+	const naiModel = pickNaiModel(body?.naiModel);
+	const naiParams = imageParamsFor(naiModel);
 
 	// NovelAI 키 등록 여부만 확인(평문은 /api/keys/novelai/token 으로 클라가 별도 수령).
 	if (!(await getKeyStatus(db, user.id, 'novelai')).registered) {
@@ -1088,14 +1093,14 @@ chatRouter.post('/image/prepare', async (c) => {
 					stylePrompt,
 					positive,
 					negative: NEGATIVE_PROMPT,
-					model: MODEL,
+					model: naiModel,
 					resolution,
 					params: {
-						sampler: IMAGE_PARAMS.sampler,
-						scheduler: IMAGE_PARAMS.scheduler,
-						steps: IMAGE_PARAMS.steps,
-						cfgScale: IMAGE_PARAMS.cfgScale,
-						cfgRescale: IMAGE_PARAMS.cfgRescale
+						sampler: naiParams.sampler,
+						scheduler: naiParams.scheduler,
+						steps: naiParams.steps,
+						cfgScale: naiParams.cfgScale,
+						cfgRescale: naiParams.cfgRescale
 					}
 				}
 			: undefined;
@@ -1206,7 +1211,7 @@ chatRouter.post('/image/prepare', async (c) => {
 	}
 
 	// base_caption = (NSFW면) rating + 그림체 + base 장면 + 퀄리티 꼬리. 인물 외형은 char_captions 로 분리.
-	const positive = buildPositivePrompt(stylePrompt, baseScene, isNsfw);
+	const positive = buildPositivePrompt(stylePrompt, baseScene, isNsfw, naiModel);
 
 	// ── 하드 차단 ── 최종 프롬프트에 미성년/아동 코드 용어가 있으면 NovelAI 호출 없이 거부(fail-closed).
 	// 한국법(가상 아동성착취물 형사처벌) 대응의 최종 게이트 — LLM 지시·네거티브와 별개의 결정적 방어선.
@@ -1235,7 +1240,7 @@ chatRouter.post('/image/prepare', async (c) => {
 	}
 
 	const res: ImagePrepareResponse = {
-		payload: buildGeneratePayload(positive, charCaptions, resolution),
+		payload: buildGeneratePayload(positive, charCaptions, resolution, naiModel),
 		cost: cost ?? null,
 		debug: makeDebug(positive)
 	};

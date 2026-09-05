@@ -32,6 +32,8 @@ export interface StyleGenerateRequest {
 	situation?: string;
 	resolution?: string;
 	thumbnail?: boolean;
+	/** NovelAI 모델 id(`lib/naiModels.ts` 허용목록). 없으면 기본(V5 Full). */
+	model?: string;
 }
 
 /**

@@ -25,6 +25,7 @@ import {
 	THUMBNAIL_SITUATION,
 	type ResolutionKey
 } from '$lib/server/novelai';
+import { pickNaiModel } from '$lib/naiModels';
 import type {
 	StylesPageData,
 	StylesForChatData,
@@ -76,6 +77,8 @@ stylesRouter.post('/', async (c) => {
 	const prompt = String(form.get('prompt') ?? '').trim().slice(0, MAX_PROMPT);
 	// shared: '0'=저장(비공개), 그 외=공유(Hub). 기본 공유.
 	const shared = String(form.get('shared') ?? '1') !== '0';
+	// 그림체가 깎인 NovelAI 모델(허용목록 검증, 미허용이면 기본 V5).
+	const model = pickNaiModel(form.get('model'));
 	const thumb = form.get('thumbnail');
 
 	if (!title) return c.json({ error: 'title required' }, 400);
@@ -105,6 +108,7 @@ stylesRouter.post('/', async (c) => {
 		title,
 		memo: memoRaw || null,
 		prompt,
+		model,
 		thumbnailKey: key,
 		shared
 	});
@@ -165,6 +169,7 @@ stylesRouter.post('/generate', async (c) => {
 		: isResolutionKey(body?.resolution)
 			? body.resolution
 			: THUMB_RESOLUTION;
+	const model = pickNaiModel(body?.model);
 
 	const naiKey = await getDecryptedKey(db, user.id, 'novelai');
 	if (!naiKey) {
@@ -175,7 +180,7 @@ stylesRouter.post('/generate', async (c) => {
 	}
 
 	// 그림체 미리보기/썸네일은 항상 SFW(rating:nsfw 미적용).
-	const positive = buildPositivePrompt(style, situation, false);
+	const positive = buildPositivePrompt(style, situation, false, model);
 
 	// NDJSON 스트림: 중간 프레임(t:frame) → 최종(t:final, base64). 스트리밍 실패 시 비스트리밍 폴백.
 	const enc = new TextEncoder();
@@ -184,7 +189,7 @@ stylesRouter.post('/generate', async (c) => {
 		async start(controller) {
 			let finalB64: string | null = null;
 			try {
-				for await (const b64 of generateImageStream(naiKey, { positive, resolution })) {
+				for await (const b64 of generateImageStream(naiKey, { positive, resolution, model })) {
 					finalB64 = b64;
 					controller.enqueue(ln({ t: 'frame', img: b64 }));
 				}
@@ -198,7 +203,7 @@ stylesRouter.post('/generate', async (c) => {
 				return;
 			}
 			// 폴백: 비스트리밍 생성 → 최종 1장.
-			const gen = await generateImage(naiKey, { positive, resolution });
+			const gen = await generateImage(naiKey, { positive, resolution, model });
 			if (!gen.ok) {
 				controller.enqueue(ln({ t: 'error', message: gen.message }));
 				controller.close();

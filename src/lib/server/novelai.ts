@@ -10,6 +10,8 @@
  * Workers 런타임 = Web 표준만. ZIP 해제는 DecompressionStream('deflate-raw') 로 처리.
  */
 
+import { DEFAULT_NAI_MODEL, getNaiModel } from '$lib/naiModels';
+
 const SUBSCRIPTION_URL = 'https://api.novelai.net/user/subscription';
 const GENERATE_URL = 'https://image.novelai.net/ai/generate-image';
 const UPSCALE_URL = 'https://api.novelai.net/ai/upscale';
@@ -58,16 +60,27 @@ export async function verifySubscription(token: string): Promise<VerifyResult> {
 // 고정 프롬프트/파라미터 (docs/realtime-image.md)
 // ─────────────────────────────────────────────────────────────
 
-/** 상황 프롬프트 뒤에 항상 붙는 퀄리티 꼬리(앞 콤마 포함). */
+/** 상황 프롬프트 뒤에 항상 붙는 퀄리티 꼬리(앞 콤마 포함) — V4.5 용(손튜닝). */
 export const QUALITY_TAIL =
 	', -4::artist collaboration, year 2025, year 2024, -3::spoken bubble, text, cross-section::, rating:explicit, {{{-3::censored, photo inset, stomach deformation}}}, {{{-3::small lines::}}}, 1.5::balanced contrast::, -2::simple illustration::, -1::censored::, best quality, amazing quality, very aesthetic, intricate detail, highres, incredibly absurdres';
+
+/**
+ * V5 용 퀄리티 꼬리. NovelAI V5 공식 퀄리티 프리셋(`very aesthetic, amazing quality, no text`)을 기본으로,
+ * V4.5 꼬리에서 세대 무관한 억제 항목(말풍선/검열/단순화)만 가볍게 유지한다. V5 는 V4.5 와 태그 반응이
+ * 달라 V4.5 꼬리(year 태그·balanced contrast 등)를 그대로 쓰면 화풍이 틀어진다.
+ */
+export const QUALITY_TAIL_V5 =
+	', -3::spoken bubble, text::, -2::simple illustration::, -1::censored::, very aesthetic, amazing quality, no text, best quality, highres';
+
+/** 모델별 퀄리티 꼬리. */
+export function qualityTailFor(model: string): string {
+	return getNaiModel(model).version === 'v5' ? QUALITY_TAIL_V5 : QUALITY_TAIL;
+}
 
 /** 고정 네거티브 프롬프트. 맨 앞 아동 코드 차단 태그는 미성년 묘사 억제(하드 차단과 병행). */
 export const NEGATIVE_PROMPT =
 	'child, loli, shota, toddler, infant, baby, young child, age regression, ' +
 	'text, logo, signature, watermark, too many watermarks, chili inset, 0.4::artist:nameo (judgemasterkou), artist:matsunaga kouyou::, artist collaboration, chibi, 1990s (style), bad anatomy, distorted anatomy, disfigured, bad hands, missing finger, extra digits, mutation, extra arms, extra legs, long neck, bad feet, very displeasing, undetailed eyes, multiple views, negative space, blank page, variant set, large variant set, 4koma, 2koma, oekaki, halftone, screentone, artistic error, film grain, scan artifacts, jpeg artifacts, chromatic aberration, dithering, disorganized colors, lowres, worst quality, bad quality, cheesy, sloppiness, unfinished, Incomplete, ai-generated';
-
-export const MODEL = 'nai-diffusion-4-5-full';
 
 /**
  * 그림체 Hub 썸네일용 고정 표준 장면(SFW). 모든 그림체를 같은 장면으로 렌더해 카드 비교가 일관되게.
@@ -76,14 +89,39 @@ export const MODEL = 'nai-diffusion-4-5-full';
 export const THUMBNAIL_SITUATION =
 	'1girl, white_background, black_hair, red_eyes, white_shirt, black_skirt, standing, upper_body, slight_smile, braided_bangs, straight_hair';
 
-/** 고정 생성 파라미터(docs/realtime-image.md). 디버그 표시·요청 바디 공용. */
-export const IMAGE_PARAMS = {
+export interface ImageParams {
+	sampler: string;
+	scheduler: string;
+	steps: number;
+	cfgScale: number;
+	cfgRescale: number;
+}
+
+/** V4.5 고정 생성 파라미터(docs/realtime-image.md, 손튜닝). */
+export const IMAGE_PARAMS: ImageParams = {
 	sampler: 'k_euler_ancestral',
 	scheduler: 'karras',
 	steps: 28,
 	cfgScale: 5.8,
 	cfgRescale: 0.28
-} as const;
+};
+
+/**
+ * V5 생성 파라미터. NovelAI V5 기본값(scale 7, cfg_rescale 0, euler_a + karras 고정)을 따르되
+ * steps 는 Opus 무료 상한(28)까지 올린다. V5 는 noise_schedule 을 karras 로만 받는다.
+ */
+export const IMAGE_PARAMS_V5: ImageParams = {
+	sampler: 'k_euler_ancestral',
+	scheduler: 'karras',
+	steps: 28,
+	cfgScale: 7,
+	cfgRescale: 0
+};
+
+/** 모델별 생성 파라미터(디버그 표시·요청 바디 공용). */
+export function imageParamsFor(model: string): ImageParams {
+	return getNaiModel(model).version === 'v5' ? IMAGE_PARAMS_V5 : IMAGE_PARAMS;
+}
 
 /** 허용 해상도(가로×세로). 임의 값 주입 방지. */
 export const RESOLUTIONS = {
@@ -98,19 +136,20 @@ export function isResolutionKey(v: unknown): v is ResolutionKey {
 }
 
 /**
- * 최종 positive 프롬프트 조립: (NSFW면) rating:nsfw + 그림체 + 상황 + 퀄리티 꼬리.
+ * 최종 positive 프롬프트 조립: (NSFW면) rating:nsfw + 그림체 + 상황 + 퀄리티 꼬리(모델별).
  * 그림체/상황의 끝 콤마를 정리한 뒤 ', ' 로 잇고, 퀄리티 꼬리(앞 콤마 포함)를 붙인다.
  * 그림체가 비면 스타일 태그 없이 상황+퀄리티만(하드코딩 기본값 없음). nsfw=true 면 맨 앞에 rating:nsfw.
  */
 export function buildPositivePrompt(
 	stylePrompt: string,
 	situation: string,
-	nsfw = false
+	nsfw = false,
+	model: string = DEFAULT_NAI_MODEL
 ): string {
 	const style = stylePrompt.trim().replace(/,\s*$/, '').trim();
 	const sit = situation.trim().replace(/,\s*$/, '').trim();
 	const head = [style, sit].filter(Boolean).join(', ');
-	const body = head + QUALITY_TAIL;
+	const body = head + qualityTailFor(model);
 	return nsfw ? `rating:nsfw, uncensored, ${body}` : body;
 }
 
@@ -135,29 +174,38 @@ const AUTO_CENTER = [{ x: 0, y: 0 }];
  * generate / generate-stream 공용 요청 바디.
  *
  * `charCaptions` 가 비면(기본) 단일 base_caption 만 쓰는 기존 동작과 동일(char_captions:[]).
- * 인물별 캡션을 주면 NAI V4.5 **캐릭터 기능**(char_captions 분리)으로 외형 누출(머리색·옷 bleeding)
- * 을 막는다. 위치는 항상 AUTO(use_coords:false) — 순서(use_order)+상호작용 태그로만 제어한다.
+ * 인물별 캡션을 주면 NAI V4.5/V5 **캐릭터 기능**(char_captions 분리)으로 외형 누출(머리색·옷 bleeding)
+ * 을 막는다. 모델(`model`)은 그림체에 박힌 id(lib/naiModels.ts 허용목록) — V5 는 params_version 4. 위치는 항상 AUTO(use_coords:false) — 순서(use_order)+상호작용 태그로만 제어한다.
  * 음수 프롬프트의 char_captions 는 양수와 **개수를 맞춰**(빈 캡션) 안정성을 확보한다.
  */
-export function buildGeneratePayload(positive: string, charCaptions: string[], resolution: ResolutionKey) {
+export function buildGeneratePayload(
+	positive: string,
+	charCaptions: string[],
+	resolution: ResolutionKey,
+	model: string = DEFAULT_NAI_MODEL
+) {
 	const { width, height } = RESOLUTIONS[resolution];
+	const spec = getNaiModel(model);
+	const params = imageParamsFor(spec.id);
 	// 0 ~ 2^32-1 시드(Workers: crypto.getRandomValues).
 	const seed = crypto.getRandomValues(new Uint32Array(1))[0];
-	const chars = charCaptions.map((c) => c.trim()).filter(Boolean);
+	// 모델별 인물 상한(V4.5=6, V5=32). 초과분은 잘라낸다.
+	const chars = charCaptions.map((c) => c.trim()).filter(Boolean).slice(0, spec.maxCharacters);
 	const posCharCaptions = chars.map((c) => ({ char_caption: c, centers: AUTO_CENTER }));
 	// 음수는 인물별 별도 UC 없이 개수만 맞춘 빈 캡션(전역 네거티브는 base_caption 에).
 	const negCharCaptions = chars.map(() => ({ char_caption: '', centers: AUTO_CENTER }));
 	return {
 		input: positive,
-		model: MODEL,
+		model: spec.id,
 		action: 'generate',
 		parameters: {
-			params_version: 3,
+			// V5 는 프런트가 4 를 보낸다(3 도 수용). V4.5 는 기존 그대로 3.
+			params_version: spec.version === 'v5' ? 4 : 3,
 			width,
 			height,
-			scale: IMAGE_PARAMS.cfgScale,
-			sampler: IMAGE_PARAMS.sampler,
-			steps: IMAGE_PARAMS.steps,
+			scale: params.cfgScale,
+			sampler: params.sampler,
+			steps: params.steps,
 			n_samples: 1,
 			ucPreset: 0,
 			qualityToggle: false, // 퀄리티 태그를 프롬프트에 직접 포함하므로 자동 토글 끔
@@ -166,8 +214,8 @@ export function buildGeneratePayload(positive: string, charCaptions: string[], r
 			controlnet_strength: 1,
 			legacy: false,
 			add_original_image: true,
-			cfg_rescale: IMAGE_PARAMS.cfgRescale,
-			noise_schedule: IMAGE_PARAMS.scheduler,
+			cfg_rescale: params.cfgRescale,
+			noise_schedule: params.scheduler, // V5 는 karras 만 허용(프런트도 강제)
 			legacy_v3_extend: false,
 			skip_cfg_above_sigma: null,
 			seed,
@@ -187,9 +235,9 @@ export function buildGeneratePayload(positive: string, charCaptions: string[], r
 
 export async function generateImage(
 	token: string,
-	opts: { positive: string; charCaptions?: string[]; resolution: ResolutionKey }
+	opts: { positive: string; charCaptions?: string[]; resolution: ResolutionKey; model?: string }
 ): Promise<GenerateResult> {
-	const payload = buildGeneratePayload(opts.positive, opts.charCaptions ?? [], opts.resolution);
+	const payload = buildGeneratePayload(opts.positive, opts.charCaptions ?? [], opts.resolution, opts.model);
 
 	let res: Response;
 	try {
@@ -307,9 +355,9 @@ function base64ToBytes(b64: string): Uint8Array {
  */
 export async function* generateImageStream(
 	token: string,
-	opts: { positive: string; charCaptions?: string[]; resolution: ResolutionKey }
+	opts: { positive: string; charCaptions?: string[]; resolution: ResolutionKey; model?: string }
 ): AsyncGenerator<string, void, unknown> {
-	const payload = buildGeneratePayload(opts.positive, opts.charCaptions ?? [], opts.resolution);
+	const payload = buildGeneratePayload(opts.positive, opts.charCaptions ?? [], opts.resolution, opts.model);
 	const res = await fetch(STREAM_URL, {
 		method: 'POST',
 		headers: {
