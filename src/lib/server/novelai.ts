@@ -14,7 +14,7 @@ import { DEFAULT_NAI_MODEL, getNaiModel } from '$lib/naiModels';
 
 const SUBSCRIPTION_URL = 'https://api.novelai.net/user/subscription';
 const GENERATE_URL = 'https://image.novelai.net/ai/generate-image';
-const UPSCALE_URL = 'https://api.novelai.net/ai/upscale';
+const UPSCALE_URL = 'https://image.novelai.net/ai/upscale'; // api.novelai.net/ai/upscale 은 404(이미지 API 는 image.novelai.net 으로 이전)
 
 /** NovelAI 구독 등급. 3 = Opus. */
 export const OPUS_TIER = 3;
@@ -79,8 +79,13 @@ export const QUALITY_TAIL_V5 =
 /** V5 complexity 태그(가이드 저자 설정: high 3 / ultra 0.5 → 여기선 high 2 로 완화). 그림체에 complexity 있으면 생략. */
 export const COMPLEXITY_V5 = '2::high complexity::, 0.5::ultra complexity::';
 
-/** V5 연도 태그(가이드: year 2025·2026 각 1.5). 그림체에 year 태그가 이미 있으면 생략. */
-export const YEAR_TAGS_V5 = '1.5::year 2025::, 1.5::year 2026::';
+/**
+ * V5 연도 태그. 그림체에 year 태그가 이미 있으면 생략.
+ * **가중치 금지**: `1.5::year 2025::, 1.5::year 2026::` 로 주입하면 작가 가중치가 높은 그림체(1.6~2.5 ×
+ * 여러 명)에서 이미지가 통째로 노이즈로 무너진다(2026-09-05 실측 — 선 강함·윤기말랑. complexity 가중치는
+ * 무해, cfg_rescale·nsfw 무관, 무가중 연도로 바꾸면 정상). year 는 무가중으로만 넣는다.
+ */
+export const YEAR_TAGS_V5 = 'year 2025, year 2026';
 
 /** 모델별 퀄리티 꼬리. */
 export function qualityTailFor(model: string): string {
@@ -419,7 +424,9 @@ function base64ToBytes(b64: string): Uint8Array {
 
 /**
  * NovelAI 스트리밍 생성(SSE). 각 이벤트의 base64 이미지(중간 프리뷰 → 최종)를 순서대로 yield.
- * **마지막 yield 가 최종 이미지**. 엔드포인트/포맷 미지원·무프레임이면 throw → 호출부가 비스트리밍 폴백.
+ * **마지막 yield 가 최종 이미지**. 이벤트에 `event_type` 이 있으면 `final` 을 받은 뒤에만 정상 종료하고,
+ * 최종 없이 스트림이 끊기면(중간 JPEG 프리뷰 = 디노이즈 초기 노이즈만 남는 상태) throw → 호출부가
+ * 비스트리밍(ZIP) 폴백으로 진짜 최종 이미지를 받는다. 엔드포인트/포맷 미지원·무프레임도 throw.
  */
 export async function* generateImageStream(
 	token: string,
@@ -443,6 +450,18 @@ export async function* generateImageStream(
 	const dec = new TextDecoder();
 	let buf = '';
 	let yielded = 0;
+	let typed = false; // event_type 을 가진 이벤트를 하나라도 봤는가
+	let sawFinal = false;
+	const consume = function* (evt: string) {
+		const parsed = parseEventImage(evt);
+		if (!parsed) return;
+		if (parsed.type) typed = true;
+		if (parsed.type === 'error') throw new Error(`NovelAI stream error: ${parsed.message ?? ''}`);
+		if (!parsed.b64) return;
+		if (parsed.type === 'final') sawFinal = true;
+		yielded++;
+		yield parsed.b64;
+	};
 	while (true) {
 		const { done, value } = await reader.read();
 		if (done) break;
@@ -451,23 +470,19 @@ export async function* generateImageStream(
 		while ((sep = buf.indexOf('\n\n')) >= 0) {
 			const evt = buf.slice(0, sep);
 			buf = buf.slice(sep + 2);
-			const b64 = parseEventImage(evt);
-			if (b64) {
-				yielded++;
-				yield b64;
-			}
+			yield* consume(evt);
 		}
 	}
-	const tail = parseEventImage(buf);
-	if (tail) {
-		yielded++;
-		yield tail;
-	}
+	yield* consume(buf);
 	if (yielded === 0) throw new Error('stream had no image frames');
+	if (typed && !sawFinal) throw new Error('stream ended without final frame');
 }
 
-/** SSE 이벤트 블록에서 base64 이미지 추출(data: 라인 합치기 → JSON.image|img|data 또는 raw base64). */
-function parseEventImage(evt: string): string | null {
+/**
+ * SSE 이벤트 블록 해석(data: 라인 합치기 → JSON 또는 raw base64).
+ * JSON 이면 `event_type`(intermediate|final|error) 과 image|img|b64|data|image_b64 중 base64 를 꺼낸다.
+ */
+function parseEventImage(evt: string): { b64: string | null; type: string | null; message?: string } | null {
 	const data = evt
 		.split('\n')
 		.filter((l) => l.startsWith('data:'))
@@ -477,16 +492,18 @@ function parseEventImage(evt: string): string | null {
 	if (data.startsWith('{')) {
 		try {
 			const obj = JSON.parse(data) as Record<string, unknown>;
+			const type = typeof obj.event_type === 'string' ? obj.event_type : null;
+			const message = typeof obj.message === 'string' ? obj.message : undefined;
 			for (const k of ['image', 'img', 'b64', 'data', 'image_b64']) {
 				const v = obj[k];
-				if (typeof v === 'string' && v.length > 64) return v;
+				if (typeof v === 'string' && v.length > 64) return { b64: v, type, message };
 			}
-			return null;
+			return { b64: null, type, message };
 		} catch {
 			return null;
 		}
 	}
-	return data.length > 64 && /^[A-Za-z0-9+/=_-]+$/.test(data) ? data : null;
+	return data.length > 64 && /^[A-Za-z0-9+/=_-]+$/.test(data) ? { b64: data, type: null } : null;
 }
 
 /** 이미지 매직바이트로 포맷 판별(webp/png/jpeg). 알 수 없으면 png 로 간주. */
