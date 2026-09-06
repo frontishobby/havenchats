@@ -888,31 +888,70 @@ function canvasHint(resolution: ResolutionKey): string {
 
 /**
  * '1명 고정' 힌트 — 상황 프롬프트 user 메시지 끝에 부착. 주인공 1명만 그리게 하고, 상대(유저·NPC)와
- * 상호작용 중이면 POV/프레임 밖 처리로 인원을 늘리지 않게 한다. LLM 이 어겨도 enforceSolo 가 후처리.
+ * 상호작용 중이면 POV/프레임 밖 처리로 인원을 늘리지 않게 한다. LLM 이 어겨도 enforceCountBase 가 후처리.
  */
 const SOLO_HINT = `[Solo] Depict EXACTLY ONE person. Normally that is the main roleplay character ("char"); if the main character is not an embodied person (AI, voice, narrator, system, object), draw the single most visually important person in this moment instead (e.g. the person being addressed or examined). Output exactly ONE entry in "characters" and put a single-subject count tag ("1girl"/"1boy") plus "solo" in "base". NEVER draw the user or any other person. If that person is interacting with someone, shoot it from the other one's point of view ("pov"; partial-view tags such as "pov hands" are fine) or crop the other person out of frame, and write "scene" about the depicted person alone (what they are doing, where they are looking). Do not use source#/target#/mutual# interaction tags.`;
 
 /**
- * '1명 고정' 후처리 — base 의 인원수·상호작용·다인 태그를 제거하고, 남긴 인물의 외형(첫 단어
- * girl/boy/other)에 맞는 단일 count 태그 + "solo" 를 앞에 붙인다.
+ * '1명 고정 + 남성 1명 허용' 힌트 — 기본은 주인공 1명이지만, 장면상 상대 남성의 몸이 실제로 프레임에
+ * 필요하면(포옹·삽입·애무 등 신체 접촉이 그림의 핵심) 남성 1명(보통 유저/{{나}})만 추가로 허용.
+ * 최대 2명·그중 남성은 1명. 어겨도 enforceCountBase/pickSoloEntries 가 후처리.
  */
-function enforceSoloBase(base: string, appearance: string): string {
+const SOLO_MALE_HINT = `[Solo+1] Depict the main roleplay character ("char") as the single focus (if the main character is not an embodied person, draw the single most visually important person in this moment instead). By DEFAULT output ONE entry only, shooting any partner from their point of view ("pov"; "pov hands"/"pov crotch" are fine) or cropping them out of frame. ONLY when the latest moment is a close physical interaction where the man's body MUST be in the frame for the picture to make sense (embracing, kissing, sex/penetration, groping, carrying, pinning down), you may ADD exactly ONE male — the male lead, normally the user ("user") or the man she is interacting with — as a second entry, and then use "1boy, 1girl" as the count tag with source#/target#/mutual# interaction tags. NEVER draw a third person, never add a second woman, and never add the man for a mere conversation, walking, or distant scene.`;
+
+/** 외형 캡션의 성별 분류(스키마: appearance 첫 단어가 girl/boy/other, 폴백으로 본문 검색). */
+function subjectOf(appearance: string): 'girl' | 'boy' | 'other' {
+	const first = appearance.split(',')[0]?.trim().toLowerCase() ?? '';
+	if (/^(girl|woman|female)\b/.test(first)) return 'girl';
+	if (/^(boy|man|male)\b/.test(first)) return 'boy';
+	if (/\b(girl|woman|female)\b/i.test(appearance)) return 'girl';
+	if (/\b(boy|man|male)\b/i.test(appearance)) return 'boy';
+	return 'other';
+}
+
+/**
+ * '1명 고정' 인물 선별 — LLM 이 여러 인물을 냈어도 상한만 남긴다. 'char' 를 강제하지 않는 이유 —
+ * 주인공이 육체 없는 AI/내레이터형이면 char 엔트리가 기기·물체로 그려진다(태블릿 서기 AI 실측).
+ * 누구를 그릴지는 [Solo] 힌트를 받은 LLM 의 선택(첫 엔트리)을 따른다.
+ * allowMale 이면 '남성 아닌 첫 인물 + 남성 첫 인물' 최대 2명(원래 순서 유지). 남성 아닌 인물이 없으면 첫 1명.
+ */
+function pickSoloEntries<T>(entries: T[], appearanceOf: (e: T) => string, allowMale: boolean): T[] {
+	if (entries.length <= 1) return entries;
+	if (!allowMale) return [entries[0]];
+	const primary = entries.find((e) => subjectOf(appearanceOf(e)) !== 'boy');
+	if (!primary) return [entries[0]];
+	const male = entries.find((e) => e !== primary && subjectOf(appearanceOf(e)) === 'boy');
+	return entries.filter((e) => e === primary || e === male);
+}
+
+/**
+ * '1명 고정' 후처리 — base 의 인원수·다인 태그를 제거하고, 남긴 인물들의 외형에 맞는 count 태그를
+ * 앞에 붙인다. 1명이면 "1girl, solo" + 상호작용(source#/target#) 태그 제거, 2명이면 "1boy, 1girl"
+ * (상호작용 태그는 유지 — 두 사람의 동작 지정에 필요).
+ */
+function enforceCountBase(base: string, appearances: string[]): string {
+	const single = appearances.length <= 1;
 	const tags = base
 		.split(',')
 		.map((t) => t.trim())
 		.filter(Boolean)
 		.filter(
 			(t) =>
-				!/^\d+\s*(girl|boy|other)s?$/i.test(t) &&
-				!/^(source|target|mutual)#/i.test(t) &&
+				!/^\d+\+?\s*(girl|boy|other)s?$/i.test(t) &&
+				!(single && /^(source|target|mutual)#/i.test(t)) &&
 				!/^(solo|multiple (girls|boys|others)|couple|group|duo|trio)$/i.test(t)
 		);
-	const subject = /\b(girl|woman|female)\b/i.test(appearance)
-		? '1girl'
-		: /\b(boy|man|male)\b/i.test(appearance)
-			? '1boy'
-			: '1other';
-	return [subject, 'solo', ...tags].join(', ');
+	const subjects = (appearances.length ? appearances : ['']).map(subjectOf);
+	const count = (k: 'girl' | 'boy' | 'other') => subjects.filter((x) => x === k).length;
+	const head: string[] = [];
+	for (const k of ['boy', 'girl', 'other'] as const) {
+		const n = count(k);
+		if (n === 1) head.push(`1${k}`);
+		else if (n > 1) head.push(`${n}${k}s`);
+	}
+	if (!head.length) head.push('1other');
+	if (single) head.push('solo');
+	return [...head, ...tags].join(', ');
 }
 
 const SITUATION_SYSTEM = [
@@ -1020,6 +1059,8 @@ interface ImageRequestBody {
 	replaceId?: string;
 	/** 1명 고정: 주인공 1명만 그린다(여러 인물이 나오면 NAI 디테일이 깨지는 것 방지). */
 	solo?: boolean;
+	/** 1명 고정 중 '남성 1명 추가 허용': 신체 접촉 장면이면 상대 남성(보통 유저) 1명까지 함께 그린다. */
+	soloMale?: boolean;
 	/** 디버그 모드: 응답에 사용한 프롬프트/파라미터를 동봉. */
 	debug?: boolean;
 }
@@ -1099,6 +1140,7 @@ chatRouter.post('/image/prepare', async (c) => {
 	// 재생성 대상(있으면): 소유·세션·역할 검증(commit 에서 다시 검증하지만 여기서 빨리 거른다).
 	const replaceId = typeof body?.replaceId === 'string' ? body.replaceId : '';
 	const solo = body?.solo === true; // 1명 고정
+	const soloMale = solo && body?.soloMale === true; // 1명 고정 + 필요시 남성 1명 추가
 	if (replaceId) {
 		const target = await getOwnedMessage(db, replaceId, user.id);
 		if (!target || target.sessionId !== sessionId || target.role !== 'image_generation') {
@@ -1207,6 +1249,7 @@ chatRouter.post('/image/prepare', async (c) => {
 					model: naiModel,
 					resolution,
 					solo,
+					soloMale,
 					params: {
 						sampler: naiParams.sampler,
 						scheduler: naiParams.scheduler,
@@ -1232,7 +1275,7 @@ chatRouter.post('/image/prepare', async (c) => {
 		promptParts.push(sceneBlock);
 		// 캔버스 방향 힌트(system 은 고정 prefix 라 user 쪽에 붙임). 가로형이면 옆으로 넓은 구도를 유도.
 		promptParts.push(canvasHint(resolution));
-		if (solo) promptParts.push(SOLO_HINT);
+		if (solo) promptParts.push(soloMale ? SOLO_MALE_HINT : SOLO_HINT);
 		const userPrompt = promptParts.join('\n\n');
 		// 게이트웨이가 일시적 503/500 을 자동 재시도하지 않으므로 직접 백오프 재시도한다.
 		const result = await generateObjectWithRetry({
@@ -1255,10 +1298,14 @@ chatRouter.post('/image/prepare', async (c) => {
 		// 인물별: name 으로 원장 대조 → 기존이면 외형 고정(override), 신규면 핀. 최종 캡션 = 외형 + 상태.
 		const turnRef = session.messageCount;
 		let rawChars = (Array.isArray(obj.characters) ? obj.characters : []).slice(0, MAX_CHARACTERS);
-		// 1명 고정: LLM 이 여러 인물을 냈어도 첫 엔트리만 남긴다. 'char' 를 강제하지 않는 이유 —
-		// 주인공이 육체 없는 AI/내레이터형이면 char 엔트리가 기기·물체로 그려진다(태블릿 서기 AI 실측).
-		// 누구를 그릴지는 [Solo] 힌트를 받은 LLM 의 선택(첫 엔트리)을 따른다.
-		if (solo && rawChars.length > 1) rawChars = [rawChars[0]];
+		// 1명 고정: LLM 이 여러 인물을 냈어도 상한만 남긴다(남성 허용이면 주인공 + 남성 1명까지).
+		if (solo) {
+			rawChars = pickSoloEntries(
+				rawChars,
+				(e) => str((e as { appearance?: unknown })?.appearance),
+				soloMale
+			);
+		}
 		charCaptions = [];
 		for (const cc of rawChars) {
 			const entry = cc as { name?: unknown; appearance?: unknown; outfit?: unknown; state?: unknown };
@@ -1291,8 +1338,8 @@ chatRouter.post('/image/prepare', async (c) => {
 			if (caption) charCaptions.push(caption);
 		}
 
-		// 1명 고정: base 의 인원수·상호작용 태그를 1인 기준으로 정리("1girl, solo, …").
-		if (solo) baseScene = enforceSoloBase(baseScene, charCaptions[0] ?? '');
+		// 1명 고정: base 의 인원수·상호작용 태그를 남긴 인원 기준으로 정리("1girl, solo, …" / "1boy, 1girl, …").
+		if (solo) baseScene = enforceCountBase(baseScene, charCaptions);
 
 		// 원장 상한 초과 시 가장 오래 안 나온 인물부터 제거(LRU evict).
 		if (evictLedger(ledger, MAX_LEDGER_ENTRIES)) ledgerDirty = true;

@@ -103,6 +103,8 @@ export interface ImageDebug {
 	resolution: string;
 	/** 1명 고정 토글 상태. */
 	solo: boolean;
+	/** 1명 고정 중 '남성 1명 추가 허용' 상태. */
+	soloMale: boolean;
 	/** 모델별 생성 파라미터(표시용). */
 	params: {
 		sampler: string;

@@ -75,6 +75,7 @@
 	const IMG_PROMPT_MODEL_KEY = 'haven:img:promptModel';
 	const IMG_EARLY_KEY = 'haven:img:early';
 	const IMG_SOLO_KEY = 'haven:img:solo';
+	const IMG_SOLO_MALE_KEY = 'haven:img:soloMale';
 	/** 켜진 모듈 id 목록(JSON 배열, 순서 유지) — 전역 설정(다른 채팅 설정과 동일하게 localStorage). */
 	const MODULES_ACTIVE_KEY = 'haven:modules:active';
 	const IMG_IGNORE_ASSETS_KEY = 'haven:img:ignoreAssets';
@@ -480,6 +481,7 @@
 	let imgModelOpen = $state(false); // 이미지 프롬프트 모델 드롭다운 열림
 	let imageEarly = $state(false); // 빠른 생성 우선(스트리밍 중 미리 발사)
 	let imageSolo = $state(false); // 1명 고정(주인공만 그림 — 다인 장면 디테일 붕괴 방지)
+	let imageSoloMale = $state(false); // 1명 고정 중 남성 1명 추가 허용(신체 접촉 장면에서 상대 남성)
 	let ignoreCharacterAssets = $state(false); // 캐릭터 내장 이미지(장면·감정 스프라이트) 표시 안 함
 	let naiKeyRegistered = $state<boolean | null>(null); // null=미확인, false=미등록, true=등록됨
 	let naiStatusLoading = $state(false);
@@ -526,6 +528,7 @@
 		if (savedPM && IMAGE_PROMPT_MODEL_IDS.has(savedPM)) imagePromptModel = savedPM;
 		imageEarly = localStorage.getItem(IMG_EARLY_KEY) === '1';
 		imageSolo = localStorage.getItem(IMG_SOLO_KEY) === '1';
+		imageSoloMale = localStorage.getItem(IMG_SOLO_MALE_KEY) === '1';
 		ignoreCharacterAssets = localStorage.getItem(IMG_IGNORE_ASSETS_KEY) === '1';
 		// 켜진 모듈 복원(전역). 유효성은 서버(접근 검증)와 모달 로드 시 정리.
 		try {
@@ -607,6 +610,9 @@
 	});
 	$effect(() => {
 		localStorage.setItem(IMG_SOLO_KEY, imageSolo ? '1' : '0');
+	});
+	$effect(() => {
+		localStorage.setItem(IMG_SOLO_MALE_KEY, imageSoloMale ? '1' : '0');
 	});
 	$effect(() => {
 		localStorage.setItem(IMG_IGNORE_ASSETS_KEY, ignoreCharacterAssets ? '1' : '0');
@@ -806,6 +812,7 @@
 					promptModel: imagePromptModel,
 					replaceId: replaceId || undefined,
 					solo: imageSolo || undefined,
+					soloMale: (imageSolo && imageSoloMale) || undefined,
 					debug: debug || undefined
 				})
 			});
@@ -2356,6 +2363,28 @@
 							시점(POV)이나 프레임 밖으로 처리해요. 여러 인물이 함께 나오면 디테일이 깨질 때 켜세요.
 						</p>
 					</div>
+
+					{#if imageSolo}
+						<div class="setting">
+							<div class="setting-row">
+								<span class="field-label" id="img-solo-male-label">남성 1명 추가 허용</span>
+								<button
+									class="switch"
+									class:on={imageSoloMale}
+									role="switch"
+									aria-checked={imageSoloMale}
+									aria-labelledby="img-solo-male-label"
+									onclick={() => (imageSoloMale = !imageSoloMale)}
+								>
+									<span class="knob"></span>
+								</button>
+							</div>
+							<p class="setting-hint">
+								기본은 캐릭터 1명이지만, 포옹·정사처럼 <strong>상대 남성의 몸이 꼭 필요한 장면</strong>이면
+								남성 1명(보통 '나')까지 함께 그립니다. 최대 2명, 다른 인물은 계속 제외해요.
+							</p>
+						</div>
+					{/if}
 				{/if}
 
 				<div class="setting">
