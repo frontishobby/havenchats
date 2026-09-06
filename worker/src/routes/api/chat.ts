@@ -884,7 +884,7 @@ function canvasHint(resolution: ResolutionKey): string {
  * '1명 고정' 힌트 — 상황 프롬프트 user 메시지 끝에 부착. 주인공 1명만 그리게 하고, 상대(유저·NPC)와
  * 상호작용 중이면 POV/프레임 밖 처리로 인원을 늘리지 않게 한다. LLM 이 어겨도 enforceSolo 가 후처리.
  */
-const SOLO_HINT = `[Solo] Depict EXACTLY ONE person: the main roleplay character ("char"). Output exactly ONE entry in "characters" and put a single-subject count tag ("1girl"/"1boy") plus "solo" in "base". NEVER draw the user or any other person. If the character is interacting with someone, shoot it from that person's point of view ("pov"; partial-view tags such as "pov hands" are fine) or crop the other person out of frame, and write "scene" about the character alone (what they are doing, where they are looking). Do not use source#/target#/mutual# interaction tags.`;
+const SOLO_HINT = `[Solo] Depict EXACTLY ONE person. Normally that is the main roleplay character ("char"); if the main character is not an embodied person (AI, voice, narrator, system, object), draw the single most visually important person in this moment instead (e.g. the person being addressed or examined). Output exactly ONE entry in "characters" and put a single-subject count tag ("1girl"/"1boy") plus "solo" in "base". NEVER draw the user or any other person. If that person is interacting with someone, shoot it from the other one's point of view ("pov"; partial-view tags such as "pov hands" are fine) or crop the other person out of frame, and write "scene" about the depicted person alone (what they are doing, where they are looking). Do not use source#/target#/mutual# interaction tags.`;
 
 /**
  * '1명 고정' 후처리 — base 의 인원수·상호작용·다인 태그를 제거하고, 남긴 인물의 외형(첫 단어
@@ -925,6 +925,7 @@ const SITUATION_SYSTEM = [
 	`Character rules:`,
 	`- "appearance" must stay identical for the same person across turns (that is what keeps images consistent); "outfit" changes only when the story changes it; "state" follows the latest scene.`,
 	`- Include the user ("user") as a SEPARATE entry ONLY if they are physically in the frame in this moment (e.g. the two are embracing, the user's body is shown). For typical 1:1 POV shots where only the character is depicted, output just one entry.`,
+	`- If the main roleplay character is NOT an embodied person — a disembodied AI, a voice, a narrator/game master, a system, a device or an object — do NOT create a character entry for it and never invent a body for it. Depict the actual people present in the scene instead (e.g. the person being addressed or examined), and mention the device/object only in "base"/"scene" as part of the setting if it matters. Character entries are for human(oid) people only.`,
 	`- The subject COUNT tag in "base" must match the number of character entries (1 entry → "1girl" or "1boy"; 2 entries → e.g. "1boy, 1girl").`,
 	`- Put per-person body/clothes ONLY in "appearance"/"outfit"/"state", never in "base" or "scene". Put the count tag ONLY in "base", never in a character entry.`,
 	HIDDEN_FEATURE_RULE,
@@ -1242,14 +1243,10 @@ chatRouter.post('/image/prepare', async (c) => {
 		// 인물별: name 으로 원장 대조 → 기존이면 외형 고정(override), 신규면 핀. 최종 캡션 = 외형 + 상태.
 		const turnRef = session.messageCount;
 		let rawChars = (Array.isArray(obj.characters) ? obj.characters : []).slice(0, MAX_CHARACTERS);
-		// 1명 고정: LLM 이 여러 인물을 냈어도 주인공(char) 엔트리 하나만 남긴다(없으면 첫 엔트리).
-		if (solo && rawChars.length > 1) {
-			const main = rawChars.find((cc) => {
-				const k = normalizeKey(str((cc as { name?: unknown }).name));
-				return k === 'char' || k === normalizeKey(charLabel);
-			});
-			rawChars = [main ?? rawChars[0]];
-		}
+		// 1명 고정: LLM 이 여러 인물을 냈어도 첫 엔트리만 남긴다. 'char' 를 강제하지 않는 이유 —
+		// 주인공이 육체 없는 AI/내레이터형이면 char 엔트리가 기기·물체로 그려진다(태블릿 서기 AI 실측).
+		// 누구를 그릴지는 [Solo] 힌트를 받은 LLM 의 선택(첫 엔트리)을 따른다.
+		if (solo && rawChars.length > 1) rawChars = [rawChars[0]];
 		charCaptions = [];
 		for (const cc of rawChars) {
 			const entry = cc as { name?: unknown; appearance?: unknown; outfit?: unknown; state?: unknown };
