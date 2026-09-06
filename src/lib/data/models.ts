@@ -36,12 +36,20 @@ export const MODELS: ModelOption[] = [
 export const DEFAULT_MODEL_ID = 'deepseek/deepseek-v4-flash-0731';
 
 /**
- * 캐릭터 제작 보조(assist)에 허용하는 모델 — 구조화 출력(generateObject)이 안정적인 것만.
- * Claude Opus 5 · GPT-5.6 Sol · GLM 5.3 Flash. (Gemini Flash 는 제외 — NSFW 설정 입력을
- * content-filter 로 빈 응답 처리하는 경우가 있음. DeepSeek 계열은 긴 JSON 출력이 불안정)
+ * 캐릭터 제작 보조(assist)에 허용하는 모델 — 구조화 출력(streamObject)이 안정적인 것만.
+ * Claude Opus 5 · GPT-5.6 Sol · DeepSeek V4 Pro · GLM 5.3 Flash. (Gemini Flash 는 제외 — NSFW 설정 입력을
+ * content-filter 로 빈 응답 처리하는 경우가 있음.)
+ * DeepSeek V4 Pro 는 NSFW 설정을 거부하지 않는 상위 모델로 추가(2026-09-07 실측: NSFW 러프 입력 4/4 정상 JSON,
+ * 30~35s, thinking 끔·스키마는 시스템 주입 호환 모드). Opus·Sol 은 NSFW 설정 입력을 거부하는 경우가 있어
+ * 검열 회피용 대안. DeepSeek V4 Flash 는 length 실패가 잦아 제외.
  * MODELS(채팅 목록)의 부분집합이므로 getModel 로 조회 가능.
  */
-const ASSIST_MODEL_ID_LIST = ['anthropic/claude-opus-5', 'openai/gpt-5.6-sol', 'zai/glm-5.3-flash'];
+const ASSIST_MODEL_ID_LIST = [
+	'anthropic/claude-opus-5',
+	'openai/gpt-5.6-sol',
+	'deepseek/deepseek-v4-pro-0813',
+	'zai/glm-5.3-flash'
+];
 export const ASSIST_MODELS: ModelOption[] = ASSIST_MODEL_ID_LIST.map((id) => {
 	const m = MODELS.find((x) => x.id === id);
 	if (!m) throw new Error(`assist 모델이 MODELS 에 없음: ${id}`);
