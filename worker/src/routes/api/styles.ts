@@ -8,6 +8,7 @@ import {
 	getStyleOwner,
 	deleteStyle,
 	setShared,
+	updateStyle,
 	addFavorite,
 	removeFavorite,
 	styleExists,
@@ -250,7 +251,8 @@ stylesRouter.get('/:id', async (c) => {
 	return c.json({ style });
 });
 
-// ── PATCH /:id — 공개 여부 변경(소유자만) ──────────────────────────
+// ── PATCH /:id — 소유자만. multipart=내용 수정(제목·메모·프롬프트·모델·네거티브·퀄리티·썸네일 선택),
+//    JSON={shared}=공개 여부 변경 ──────────────────────────────────
 stylesRouter.patch('/:id', async (c) => {
 	const user = requireUser(c);
 	const db = c.env.DB;
@@ -260,6 +262,42 @@ stylesRouter.patch('/:id', async (c) => {
 	const owner = await getStyleOwner(db, id);
 	if (!owner) return c.json({ error: 'not found' }, 404);
 	if (owner.creatorId !== user.id) return c.json({ error: 'forbidden' }, 403);
+
+	if ((c.req.header('content-type') ?? '').includes('multipart/form-data')) {
+		const form = await c.req.formData();
+		const title = String(form.get('title') ?? '').trim().slice(0, MAX_TITLE);
+		const memo = String(form.get('memo') ?? '').trim().slice(0, MAX_MEMO) || null;
+		const prompt = String(form.get('prompt') ?? '').trim().slice(0, MAX_PROMPT);
+		const model = pickNaiModel(form.get('model'));
+		const negative = String(form.get('negative') ?? '').trim().slice(0, MAX_EXTRA_PROMPT) || null;
+		const quality = String(form.get('quality') ?? '').trim().slice(0, MAX_EXTRA_PROMPT) || null;
+		if (!title) return c.json({ error: 'title required' }, 400);
+		if (!prompt) return c.json({ error: 'prompt required' }, 400);
+
+		// 썸네일은 선택(없으면 기존 유지). 있으면 같은 id 키로 덮어쓰고, 확장자가 바뀌면 옛 키 삭제.
+		let thumbnailKey: string | undefined;
+		const thumb = form.get('thumbnail');
+		if (thumb instanceof Blob && thumb.size > 0) {
+			const bucket = c.env.IMAGES;
+			if (!bucket) return c.json({ error: 'storage unavailable' }, 500);
+			if (thumb.size > MAX_THUMB_BYTES) return c.json({ error: 'thumbnail too large' }, 413);
+			const ext = EXT_BY_TYPE[thumb.type] ?? 'webp';
+			thumbnailKey = `style/${id}.${ext}`;
+			try {
+				await bucket.put(thumbnailKey, await thumb.arrayBuffer(), {
+					httpMetadata: { contentType: thumb.type || 'image/webp' }
+				});
+				if (owner.thumbnailKey && owner.thumbnailKey !== thumbnailKey) {
+					await bucket.delete(owner.thumbnailKey).catch(() => {});
+				}
+			} catch (e) {
+				console.error('[styles] R2 put 실패(수정):', e);
+				return c.json({ error: 'storage', message: '썸네일 저장 실패' }, 500);
+			}
+		}
+		await updateStyle(db, id, { title, memo, prompt, model, negative, quality, thumbnailKey });
+		return c.json({ id });
+	}
 
 	const body = (await c.req.json().catch(() => null)) as { shared?: boolean } | null;
 	if (typeof body?.shared !== 'boolean') return c.json({ error: 'bad request' }, 400);

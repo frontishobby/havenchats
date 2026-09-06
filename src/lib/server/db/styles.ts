@@ -190,6 +190,40 @@ export async function createStyle(
 	return id;
 }
 
+/** 그림체 내용 수정(소유권은 호출부에서 확인). thumbnailKey 를 넘기면 썸네일 키도 교체. */
+export async function updateStyle(
+	db: D1Database,
+	id: string,
+	input: {
+		title: string;
+		memo: string | null;
+		prompt: string;
+		model: string;
+		negative: string | null;
+		quality: string | null;
+		thumbnailKey?: string;
+	}
+): Promise<void> {
+	const now = Date.now();
+	if (input.thumbnailKey) {
+		await db
+			.prepare(
+				`UPDATE art_styles SET title = ?, memo = ?, prompt = ?, model = ?, negative = ?, quality = ?, thumbnail_key = ?, updated_at = ?
+				 WHERE id = ?`
+			)
+			.bind(input.title, input.memo, input.prompt, input.model, input.negative, input.quality, input.thumbnailKey, now, id)
+			.run();
+		return;
+	}
+	await db
+		.prepare(
+			`UPDATE art_styles SET title = ?, memo = ?, prompt = ?, model = ?, negative = ?, quality = ?, updated_at = ?
+			 WHERE id = ?`
+		)
+		.bind(input.title, input.memo, input.prompt, input.model, input.negative, input.quality, now, id)
+		.run();
+}
+
 /** 공개 여부 변경(저장↔공유). 소유권은 호출부에서 확인. */
 export async function setShared(db: D1Database, id: string, shared: boolean): Promise<void> {
 	await db

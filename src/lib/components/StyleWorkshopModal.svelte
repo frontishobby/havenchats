@@ -2,11 +2,33 @@
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { base64ToBlob, blobToWebp } from '$lib/imagePreview';
 	import { NAI_MODELS, DEFAULT_NAI_MODEL, getNaiModel } from '$lib/naiModels';
+	import type { ArtStyle } from '$lib/types';
 
 	let {
 		open = $bindable(),
+		edit = null,
 		onPublished
-	}: { open: boolean; onPublished?: () => void } = $props();
+	}: {
+		open: boolean;
+		/** 수정 대상 그림체(본인 소유). 있으면 필드를 채워 열고 저장 시 PATCH. null 이면 새로 만들기. */
+		edit?: ArtStyle | null;
+		onPublished?: () => void;
+	} = $props();
+	const isEdit = $derived(!!edit);
+
+	// 수정 모드로 열릴 때 기존 값 채움(썸네일은 기존 URL 미리보기, 새로 안 만들면 그대로 유지).
+	$effect(() => {
+		if (!open || !edit) return;
+		style = edit.prompt;
+		negative = edit.negative ?? '';
+		quality = edit.quality ?? '';
+		extrasOpen = !!(edit.negative || edit.quality);
+		naiModel = getNaiModel(edit.model).id;
+		title = edit.title;
+		memo = edit.memo ?? '';
+		thumbUrl = edit.thumbnailUrl;
+		thumbBlob = null;
+	});
 
 	const RESOLUTIONS = ['832x1216', '1024x1024'] as const;
 	type Res = (typeof RESOLUTIONS)[number];
@@ -51,7 +73,7 @@
 		publishing = false;
 	}
 	function revoke(u: string | null) {
-		if (u) URL.revokeObjectURL(u);
+		if (u && u.startsWith('blob:')) URL.revokeObjectURL(u);
 	}
 	function close() {
 		open = false;
@@ -180,10 +202,12 @@
 		}
 	}
 
-	const canPublish = $derived(!!style.trim() && !!title.trim() && !!thumbBlob);
+	// 새로 만들기는 썸네일 필수, 수정은 기존 썸네일 유지 가능.
+	const canPublish = $derived(!!style.trim() && !!title.trim() && (isEdit || !!thumbBlob));
 
 	async function publish(shared: boolean) {
-		if (publishing || !canPublish || !thumbBlob) return;
+		if (publishing || !canPublish) return;
+		if (!isEdit && !thumbBlob) return;
 		publishing = shared ? 'share' : 'save';
 		error = null;
 		try {
@@ -191,12 +215,14 @@
 			fd.append('title', title.trim());
 			fd.append('memo', memo.trim());
 			fd.append('prompt', style.trim());
-			fd.append('shared', shared ? '1' : '0');
 			fd.append('model', naiModel);
 			fd.append('negative', negative.trim());
 			fd.append('quality', quality.trim());
-			fd.append('thumbnail', thumbBlob, `thumb.${thumbExt}`);
-			const res = await fetch('/api/styles', { method: 'POST', body: fd });
+			if (!isEdit) fd.append('shared', shared ? '1' : '0');
+			if (thumbBlob) fd.append('thumbnail', thumbBlob, `thumb.${thumbExt}`);
+			const res = isEdit
+				? await fetch(`/api/styles/${edit!.id}`, { method: 'PATCH', body: fd })
+				: await fetch('/api/styles', { method: 'POST', body: fd });
 			if (res.ok) {
 				onPublished?.();
 				close();
@@ -230,7 +256,7 @@
 			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="head">
-				<h2>그림체 깎기</h2>
+				<h2>{isEdit ? '그림체 수정' : '그림체 깎기'}</h2>
 				<button class="close" onclick={close} aria-label="닫기">✕</button>
 			</div>
 
@@ -313,7 +339,7 @@
 
 			<!-- 2) 저장 / 공유 -->
 			<div class="share-sec">
-				<div class="share-head">저장 / 공유</div>
+				<div class="share-head">{isEdit ? '수정 저장' : '저장 / 공유'}</div>
 				<label class="fl" for="ws-title">제목</label>
 				<input id="ws-title" type="text" maxlength="60" bind:value={title} placeholder="그림체 이름" />
 				<label class="fl" for="ws-memo">메모 <span class="opt">(선택)</span></label>
@@ -330,7 +356,7 @@
 					</div>
 					<div class="thumb-side">
 						<span class="fl">썸네일</span>
-						<p class="hint">마음에 들 때까지 다시 눌러 고르세요.</p>
+						<p class="hint">{isEdit ? '새로 만들지 않으면 기존 썸네일을 유지해요.' : '마음에 들 때까지 다시 눌러 고르세요.'}</p>
 						<button class="ghost sm" onclick={generateThumb} disabled={thumbGenerating || !style.trim()}>
 							{thumbUrl ? '썸네일 다시' : '썸네일 생성'}
 						</button>
@@ -340,15 +366,21 @@
 				{#if error}<p class="err">{error}</p>{/if}
 
 				<div class="actions">
-					<button class="ghost" onclick={() => publish(false)} disabled={!!publishing || !canPublish}>
-						{publishing === 'save' ? '저장 중…' : '저장 (나만)'}
-					</button>
-					<button class="primary" onclick={() => publish(true)} disabled={!!publishing || !canPublish}>
-						{publishing === 'share' ? '공유 중…' : '공유 (Hub)'}
-					</button>
+					{#if isEdit}
+						<button class="primary" onclick={() => publish(false)} disabled={!!publishing || !canPublish}>
+							{publishing ? '저장 중…' : '수정 저장'}
+						</button>
+					{:else}
+						<button class="ghost" onclick={() => publish(false)} disabled={!!publishing || !canPublish}>
+							{publishing === 'save' ? '저장 중…' : '저장 (나만)'}
+						</button>
+						<button class="primary" onclick={() => publish(true)} disabled={!!publishing || !canPublish}>
+							{publishing === 'share' ? '공유 중…' : '공유 (Hub)'}
+						</button>
+					{/if}
 				</div>
 				{#if !canPublish}
-					<p class="hint center">제목과 썸네일을 준비하면 저장·공유할 수 있어요.</p>
+					<p class="hint center">{isEdit ? '제목과 그림체 프롬프트는 비울 수 없어요.' : '제목과 썸네일을 준비하면 저장·공유할 수 있어요.'}</p>
 				{/if}
 			</div>
 		</div>

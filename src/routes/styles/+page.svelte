@@ -31,6 +31,10 @@
 	);
 
 	let workshopOpen = $state(false);
+	let editing = $state<ArtStyle | null>(null); // 워크숍 수정 대상(본인 그림체)
+	$effect(() => {
+		if (!workshopOpen) editing = null;
+	});
 	let selected = $state<ArtStyle | null>(null);
 	let busy = $state<string | null>(null);
 	let promptOpen = $state(false);
@@ -64,6 +68,12 @@
 			openLogin();
 			return;
 		}
+		workshopOpen = true;
+	}
+
+	function editStyle(s: ArtStyle) {
+		editing = s;
+		selected = null;
 		workshopOpen = true;
 	}
 
@@ -228,6 +238,7 @@
 								Hub에 공유
 							</button>
 						{/if}
+						<button class="edit-btn" onclick={() => editStyle(s)} disabled={busy === s.id}>수정</button>
 						<button class="del-btn" onclick={() => remove(s)} disabled={busy === s.id}>삭제</button>
 					{:else}
 						<button
@@ -245,7 +256,7 @@
 	</div>
 {/if}
 
-<StyleWorkshopModal bind:open={workshopOpen} {onPublished} />
+<StyleWorkshopModal bind:open={workshopOpen} edit={editing} {onPublished} />
 
 <style>
 	.hub {
@@ -591,6 +602,19 @@
 		border-color: var(--accent);
 		background: var(--accent-soft);
 		color: var(--accent);
+	}
+	.edit-btn {
+		padding: 10px 16px;
+		border-radius: var(--radius-sm);
+		border: 1px solid var(--border);
+		background: transparent;
+		color: var(--text-dim);
+		font-weight: 700;
+		font-size: 0.85rem;
+	}
+	.edit-btn:hover:not(:disabled) {
+		color: var(--text);
+		border-color: var(--text-dim);
 	}
 	.del-btn {
 		padding: 10px 16px;
