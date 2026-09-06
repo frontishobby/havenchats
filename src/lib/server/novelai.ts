@@ -98,9 +98,26 @@ export function qualityTailFor(model: string): string {
 	return getNaiModel(model).version === 'v5' ? QUALITY_TAIL_V5 : QUALITY_TAIL;
 }
 
+/** 태그 문자열 정리: 양끝 공백·콤마 제거. 빈 문자열이면 ''. */
+function trimTags(v: string | null | undefined): string {
+	return (v ?? '').trim().replace(/^[,\s]+|[,\s]+$/g, '').trim();
+}
+
+/**
+ * 실제 적용할 퀄리티 꼬리(앞 콤마 포함). 그림체에 사용자 퀄리티 프롬프트(`art_styles.quality`)가 있으면
+ * 모델별 고정 꼬리를 **그 값으로 대체**, 없으면 모델별 고정 꼬리.
+ */
+export function resolveQualityTail(model: string, custom?: string | null): string {
+	const q = trimTags(custom);
+	return q ? `, ${q}` : qualityTailFor(model);
+}
+
+/** 네거티브 맨 앞에 항상 붙는 아동 코드 차단 태그(미성년 묘사 억제, 하드 차단과 병행). 사용자 네거티브에도 강제. */
+export const MINOR_BLOCK_NEGATIVE = 'child, loli, shota, toddler, infant, baby, young child, age regression, ';
+
 /** 고정 네거티브 프롬프트(V4.5). 맨 앞 아동 코드 차단 태그는 미성년 묘사 억제(하드 차단과 병행). */
 export const NEGATIVE_PROMPT =
-	'child, loli, shota, toddler, infant, baby, young child, age regression, ' +
+	MINOR_BLOCK_NEGATIVE +
 	'text, logo, signature, watermark, too many watermarks, chili inset, 0.4::artist:nameo (judgemasterkou), artist:matsunaga kouyou::, artist collaboration, chibi, 1990s (style), bad anatomy, distorted anatomy, disfigured, bad hands, missing finger, extra digits, mutation, extra arms, extra legs, long neck, bad feet, very displeasing, undetailed eyes, multiple views, negative space, blank page, variant set, large variant set, 4koma, 2koma, oekaki, halftone, screentone, artistic error, film grain, scan artifacts, jpeg artifacts, chromatic aberration, dithering, disorganized colors, lowres, worst quality, bad quality, cheesy, sloppiness, unfinished, Incomplete, ai-generated';
 
 /**
@@ -108,7 +125,7 @@ export const NEGATIVE_PROMPT =
  * `official style, official art` 는 V5 에서 그림체에 과도하게 영향을 줘 배제가 권장됨. 아동 차단 태그는 항상 맨 앞.
  */
 export const NEGATIVE_PROMPT_V5 =
-	'child, loli, shota, toddler, infant, baby, young child, age regression, ' +
+	MINOR_BLOCK_NEGATIVE +
 	// 기본 오류
 	'bad anatomy, distorted anatomy, disfigured, bad hands, missing finger, extra digits, mutation, extra arms, extra legs, long neck, bad feet, lowres, worst quality, bad quality, blurry, very displeasing, undetailed eyes, chibi, ' +
 	// 세밀한 오류(글자·레이아웃)
@@ -120,8 +137,13 @@ export const NEGATIVE_PROMPT_V5 =
 	// 원하지 않는 요소
 	'cheesy, ai-generated';
 
-/** 모델별 네거티브 프롬프트. */
-export function negativeFor(model: string): string {
+/**
+ * 모델별 네거티브 프롬프트. 그림체에 사용자 네거티브(`art_styles.negative`)가 있으면 고정 네거티브를
+ * **그 값으로 대체**하되 아동 차단 접두(`MINOR_BLOCK_NEGATIVE`)는 항상 앞에 붙인다.
+ */
+export function negativeFor(model: string, custom?: string | null): string {
+	const n = trimTags(custom);
+	if (n) return MINOR_BLOCK_NEGATIVE + n;
 	return getNaiModel(model).version === 'v5' ? NEGATIVE_PROMPT_V5 : NEGATIVE_PROMPT;
 }
 
@@ -191,6 +213,8 @@ export function isResolutionKey(v: unknown): v is ResolutionKey {
  *  - `scene`(V5 전용, 선택): 상황 프롬프트가 낸 **자연어 장면 문장**(관계·행위 흐름·시선·공간 배치).
  *    V5 는 자연어+태그 혼용을 공식 지원(journal "natural language prompting to the next level", 태그도 그대로).
  *    태그 장면 바로 뒤·complexity 앞에 넣는다("중요한 건 앞쪽 절반" 원칙 안). V4.5 경로에선 무시.
+ *  - `quality`(선택): 그림체의 사용자 퀄리티 프롬프트. 있으면 모델별 고정 퀄리티 꼬리를 이 값으로 대체
+ *    (`resolveQualityTail`). V5 의 연도·complexity 자동 주입은 그림체 **또는** 퀄리티 프롬프트에 이미 있으면 생략.
  * 그림체/상황의 끝 콤마를 정리한 뒤 ', ' 로 잇는다. 그림체가 비면 스타일 태그 없이(하드코딩 기본값 없음).
  */
 export function buildPositivePrompt(
@@ -198,22 +222,24 @@ export function buildPositivePrompt(
 	situation: string,
 	nsfw = false,
 	model: string = DEFAULT_NAI_MODEL,
-	scene = ''
+	scene = '',
+	quality?: string | null
 ): string {
 	const style = stylePrompt.trim().replace(/,\s*$/, '').trim();
 	const sit = situation.trim().replace(/,\s*$/, '').trim();
+	const tail = resolveQualityTail(model, quality);
 	if (getNaiModel(model).version !== 'v5') {
 		const head = [style, sit].filter(Boolean).join(', ');
-		const body = head + QUALITY_TAIL;
+		const body = head + tail;
 		return nsfw ? `rating:nsfw, uncensored, ${body}` : body;
 	}
 	const { count, rest } = hoistCountTags(sit);
-	const styleLower = style.toLowerCase();
+	const styleLower = `${style} ${trimTags(quality)}`.toLowerCase();
 	const year = /\byear\s*20\d\d\b/.test(styleLower) ? '' : YEAR_TAGS_V5;
 	const complexity = /\bcomplexity\b/.test(styleLower) ? '' : COMPLEXITY_V5;
 	const sceneText = scene.trim().replace(/[.,\s]+$/, '').trim();
 	const head = [count, style, year, rest, sceneText, complexity].filter(Boolean).join(', ');
-	const body = head + QUALITY_TAIL_V5;
+	const body = head + tail;
 	return nsfw ? `${body}, nsfw, uncensored` : body;
 }
 
@@ -262,16 +288,19 @@ const AUTO_CENTER = [{ x: 0, y: 0 }];
  * 인물별 캡션을 주면 NAI V4.5/V5 **캐릭터 기능**(char_captions 분리)으로 외형 누출(머리색·옷 bleeding)
  * 을 막는다. 모델(`model`)은 그림체에 박힌 id(lib/naiModels.ts 허용목록) — V5 는 params_version 4. 위치는 항상 AUTO(use_coords:false) — 순서(use_order)+상호작용 태그로만 제어한다.
  * 음수 프롬프트의 char_captions 는 양수와 **개수를 맞춰**(빈 캡션) 안정성을 확보한다.
+ * `negative`(선택): 그림체의 사용자 네거티브. 있으면 고정 네거티브 대체(아동 차단 접두는 유지, `negativeFor`).
  */
 export function buildGeneratePayload(
 	positive: string,
 	charCaptions: string[],
 	resolution: ResolutionKey,
-	model: string = DEFAULT_NAI_MODEL
+	model: string = DEFAULT_NAI_MODEL,
+	negative?: string | null
 ) {
 	const { width, height } = RESOLUTIONS[resolution];
 	const spec = getNaiModel(model);
 	const params = imageParamsFor(spec.id);
+	const uc = negativeFor(spec.id, negative);
 	// 0 ~ 2^32-1 시드(Workers: crypto.getRandomValues).
 	const seed = crypto.getRandomValues(new Uint32Array(1))[0];
 	// 모델별 인물 상한(V4.5=6, V5=32). 초과분은 잘라낸다.
@@ -304,25 +333,37 @@ export function buildGeneratePayload(
 			legacy_v3_extend: false,
 			skip_cfg_above_sigma: null,
 			seed,
-			negative_prompt: negativeFor(spec.id),
+			negative_prompt: uc,
 			v4_prompt: {
 				caption: { base_caption: positive, char_captions: posCharCaptions },
 				use_coords: false,
 				use_order: true
 			},
 			v4_negative_prompt: {
-				caption: { base_caption: negativeFor(spec.id), char_captions: negCharCaptions },
+				caption: { base_caption: uc, char_captions: negCharCaptions },
 				legacy_uc: false
 			}
 		}
 	};
 }
 
-export async function generateImage(
-	token: string,
-	opts: { positive: string; charCaptions?: string[]; resolution: ResolutionKey; model?: string }
-): Promise<GenerateResult> {
-	const payload = buildGeneratePayload(opts.positive, opts.charCaptions ?? [], opts.resolution, opts.model);
+export interface GenerateOpts {
+	positive: string;
+	charCaptions?: string[];
+	resolution: ResolutionKey;
+	model?: string;
+	/** 그림체의 사용자 네거티브(선택). 없으면 모델별 고정 네거티브. */
+	negative?: string | null;
+}
+
+export async function generateImage(token: string, opts: GenerateOpts): Promise<GenerateResult> {
+	const payload = buildGeneratePayload(
+		opts.positive,
+		opts.charCaptions ?? [],
+		opts.resolution,
+		opts.model,
+		opts.negative
+	);
 
 	let res: Response;
 	try {
@@ -443,9 +484,15 @@ function base64ToBytes(b64: string): Uint8Array {
  */
 export async function* generateImageStream(
 	token: string,
-	opts: { positive: string; charCaptions?: string[]; resolution: ResolutionKey; model?: string }
+	opts: GenerateOpts
 ): AsyncGenerator<string, void, unknown> {
-	const payload = buildGeneratePayload(opts.positive, opts.charCaptions ?? [], opts.resolution, opts.model);
+	const payload = buildGeneratePayload(
+		opts.positive,
+		opts.charCaptions ?? [],
+		opts.resolution,
+		opts.model,
+		opts.negative
+	);
 	const res = await fetch(STREAM_URL, {
 		method: 'POST',
 		headers: {

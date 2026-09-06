@@ -407,6 +407,11 @@
 		if (imageStyleId) return selectedStyle?.prompt ?? '';
 		return fallbackStyle?.prompt ?? '';
 	});
+	// 실제 적용 그림체(선택 없으면 fallback)의 선택 네거티브/퀄리티 프롬프트. 없으면 서버가 모델별 고정값 사용.
+	const selectedStyleExtras = $derived.by(() => {
+		const s = imageStyleId ? selectedStyle : fallbackStyle;
+		return { negative: s?.negative ?? null, quality: s?.quality ?? null };
+	});
 	// 드롭다운 트리거 썸네일: 선택된 그림체, 없으면(기본) fallback 썸네일.
 	const trigStyle = $derived(selectedStyle ?? fallbackStyle);
 	// 실제 생성에 쓸 NovelAI 모델 = 고른 그림체(없으면 기본 그림체)에 박힌 모델. 둘 다 없으면 레지스트리 기본.
@@ -724,6 +729,8 @@
 					resolution: imageResolution,
 					stylePrompt: selectedStylePrompt,
 					naiModel: selectedNaiModel,
+					styleNegative: selectedStyleExtras.negative,
+					styleQuality: selectedStyleExtras.quality,
 					promptModel: imagePromptModel,
 					replaceId: replaceId || undefined,
 					solo: imageSolo || undefined,

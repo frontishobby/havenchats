@@ -95,6 +95,9 @@ export interface ThumbnailRequest {
 	style?: string;
 	/** NovelAI 생성 모델 id(고른 그림체에 박힌 값, 허용목록 검증). */
 	naiModel?: string;
+	/** 그림체의 선택 네거티브/퀄리티 프롬프트(`art_styles.negative/quality`). 비면 모델별 고정값. */
+	styleNegative?: string | null;
+	styleQuality?: string | null;
 	/** 제작자의 자연어 연출 지시(한국어 OK). 어떤 장면·누가 몇 명 나오는지. 비면 주인공 단독 초상. */
 	direction?: string;
 	/** 편집된 구조화 프롬프트. 있고 regen 이 아니면 LLM 을 거치지 않고 그대로 사용. */

@@ -171,6 +171,8 @@
 				style: currentStyle?.prompt ?? '',
 				// 그림체에 박힌 NovelAI 모델로 생성(그림체 없음이면 서버 기본).
 				naiModel: currentStyle?.model,
+				styleNegative: currentStyle?.negative ?? null,
+				styleQuality: currentStyle?.quality ?? null,
 				direction: direction.trim(),
 				prompt: needLlm
 					? undefined

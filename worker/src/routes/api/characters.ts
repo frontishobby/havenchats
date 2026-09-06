@@ -591,6 +591,9 @@ charactersRouter.post('/thumbnail', async (c) => {
 	const isNsfw = body?.nsfw === true;
 	const model = pickPromptModel(body?.model);
 	const naiModel = pickNaiModel(body?.naiModel);
+	// 그림체의 선택 네거티브/퀄리티(비면 모델별 고정값).
+	const styleNegative = (body?.styleNegative ?? '').slice(0, MAX_STYLE_CHARS);
+	const styleQuality = (body?.styleQuality ?? '').slice(0, MAX_STYLE_CHARS);
 
 	// NovelAI 키 — 없으면 안내(클라가 등록 유도).
 	const naiKey = await getDecryptedKey(db, user.id, 'novelai');
@@ -676,7 +679,7 @@ charactersRouter.post('/thumbnail', async (c) => {
 	}
 
 	// base_caption = 인원수 + 그림체 + base 태그 + 자연어 장면(V5) + 퀄리티 꼬리(+nsfw). 인물은 char_captions.
-	const positive = buildPositivePrompt(style, prompt.base, isNsfw, naiModel, prompt.scene);
+	const positive = buildPositivePrompt(style, prompt.base, isNsfw, naiModel, prompt.scene, styleQuality);
 	const charCaptions = prompt.characters;
 
 	// ── 하드 차단 ── 최종 프롬프트(base+인물 캡션)에 미성년 용어가 있으면 NovelAI 호출 없이 거부.
@@ -708,7 +711,8 @@ charactersRouter.post('/thumbnail', async (c) => {
 					positive,
 					charCaptions,
 					resolution: THUMB_RESOLUTION,
-					model: naiModel
+					model: naiModel,
+					negative: styleNegative
 				})) {
 					finalB64 = b64;
 					controller.enqueue(ln({ t: 'frame', img: b64 }));
@@ -727,7 +731,8 @@ charactersRouter.post('/thumbnail', async (c) => {
 				positive,
 				charCaptions,
 				resolution: THUMB_RESOLUTION,
-				model: naiModel
+				model: naiModel,
+				negative: styleNegative
 			});
 			if (!gen.ok) {
 				controller.enqueue(ln({ t: 'error', message: gen.message }));

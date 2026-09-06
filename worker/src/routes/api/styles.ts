@@ -42,6 +42,8 @@ import type {
 const MAX_TITLE = 60;
 const MAX_MEMO = 500;
 const MAX_PROMPT = 1500;
+/** 선택 네거티브/퀄리티 프롬프트 상한(그림체 프롬프트와 동일). */
+const MAX_EXTRA_PROMPT = 1500;
 const MAX_THUMB_BYTES = 4 * 1024 * 1024;
 const EXT_BY_TYPE: Record<string, string> = {
 	'image/webp': 'webp',
@@ -79,6 +81,9 @@ stylesRouter.post('/', async (c) => {
 	const shared = String(form.get('shared') ?? '1') !== '0';
 	// 그림체가 깎인 NovelAI 모델(허용목록 검증, 미허용이면 기본 V5).
 	const model = pickNaiModel(form.get('model'));
+	// 선택 네거티브/퀄리티(빈값 → null = 모델별 고정값 사용).
+	const negative = String(form.get('negative') ?? '').trim().slice(0, MAX_EXTRA_PROMPT) || null;
+	const quality = String(form.get('quality') ?? '').trim().slice(0, MAX_EXTRA_PROMPT) || null;
 	const thumb = form.get('thumbnail');
 
 	if (!title) return c.json({ error: 'title required' }, 400);
@@ -109,6 +114,8 @@ stylesRouter.post('/', async (c) => {
 		memo: memoRaw || null,
 		prompt,
 		model,
+		negative,
+		quality,
 		thumbnailKey: key,
 		shared
 	});
@@ -170,6 +177,8 @@ stylesRouter.post('/generate', async (c) => {
 			? body.resolution
 			: THUMB_RESOLUTION;
 	const model = pickNaiModel(body?.model);
+	const negative = (body?.negative ?? '').slice(0, MAX_EXTRA_PROMPT);
+	const quality = (body?.quality ?? '').slice(0, MAX_EXTRA_PROMPT);
 
 	const naiKey = await getDecryptedKey(db, user.id, 'novelai');
 	if (!naiKey) {
@@ -179,8 +188,8 @@ stylesRouter.post('/generate', async (c) => {
 		);
 	}
 
-	// 그림체 미리보기/썸네일은 항상 SFW(rating:nsfw 미적용).
-	const positive = buildPositivePrompt(style, situation, false, model);
+	// 그림체 미리보기/썸네일은 항상 SFW(rating:nsfw 미적용). 사용자 퀄리티/네거티브가 있으면 고정값 대체.
+	const positive = buildPositivePrompt(style, situation, false, model, '', quality);
 
 	// NDJSON 스트림: 중간 프레임(t:frame) → 최종(t:final, base64). 스트리밍 실패 시 비스트리밍 폴백.
 	const enc = new TextEncoder();
@@ -189,7 +198,7 @@ stylesRouter.post('/generate', async (c) => {
 		async start(controller) {
 			let finalB64: string | null = null;
 			try {
-				for await (const b64 of generateImageStream(naiKey, { positive, resolution, model })) {
+				for await (const b64 of generateImageStream(naiKey, { positive, resolution, model, negative })) {
 					finalB64 = b64;
 					controller.enqueue(ln({ t: 'frame', img: b64 }));
 				}
@@ -203,7 +212,7 @@ stylesRouter.post('/generate', async (c) => {
 				return;
 			}
 			// 폴백: 비스트리밍 생성 → 최종 1장.
-			const gen = await generateImage(naiKey, { positive, resolution, model });
+			const gen = await generateImage(naiKey, { positive, resolution, model, negative });
 			if (!gen.ok) {
 				controller.enqueue(ln({ t: 'error', message: gen.message }));
 				controller.close();

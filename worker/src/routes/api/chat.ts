@@ -1007,6 +1007,9 @@ interface ImageRequestBody {
 	promptModel?: string;
 	/** NovelAI 생성 모델 id(선택한 그림체에 박힌 값, `lib/naiModels.ts` 허용목록 검증). 없으면 기본. */
 	naiModel?: string;
+	/** 그림체의 선택 네거티브/퀄리티 프롬프트(`art_styles.negative/quality`). 비면 모델별 고정값. */
+	styleNegative?: string | null;
+	styleQuality?: string | null;
 	/** 재생성: 이 image_generation 메시지를 제자리(같은 행/순서)에서 덮어쓴다. */
 	replaceId?: string;
 	/** 1명 고정: 주인공 1명만 그린다(여러 인물이 나오면 NAI 디테일이 깨지는 것 방지). */
@@ -1131,6 +1134,9 @@ chatRouter.post('/image/prepare', async (c) => {
 	// 그림체에 박힌 NovelAI 모델(허용목록 검증). 그림체 세대에 맞는 params_version·퀄리티 꼬리로 조립된다.
 	const naiModel = pickNaiModel(body?.naiModel);
 	const naiParams = imageParamsFor(naiModel);
+	// 그림체의 선택 네거티브/퀄리티(비면 모델별 고정값). 퀄리티는 positive 꼬리 대체, 네거티브는 아동 차단 접두 뒤 대체.
+	const styleNegative = (body?.styleNegative ?? '').slice(0, MAX_STYLE_CHARS);
+	const styleQuality = (body?.styleQuality ?? '').slice(0, MAX_STYLE_CHARS);
 
 	// NovelAI 키 등록 여부만 확인(평문은 /api/keys/novelai/token 으로 클라가 별도 수령).
 	if (!(await getKeyStatus(db, user.id, 'novelai')).registered) {
@@ -1191,7 +1197,7 @@ chatRouter.post('/image/prepare', async (c) => {
 					llmError,
 					stylePrompt,
 					positive,
-					negative: negativeFor(naiModel),
+					negative: negativeFor(naiModel, styleNegative),
 					model: naiModel,
 					resolution,
 					solo,
@@ -1328,7 +1334,7 @@ chatRouter.post('/image/prepare', async (c) => {
 
 	// base_caption = 인원수 + 그림체 + base 장면 태그 + 자연어 장면(V5) + 퀄리티 꼬리(+nsfw). 인물 외형은 char_captions 로 분리.
 	// 자연어 장면은 positive 에 합쳐지므로 아래 미성년 하드차단이 같이 검사한다.
-	const positive = buildPositivePrompt(stylePrompt, baseScene, isNsfw, naiModel, sceneText);
+	const positive = buildPositivePrompt(stylePrompt, baseScene, isNsfw, naiModel, sceneText, styleQuality);
 
 	// ── 하드 차단 ── 최종 프롬프트에 미성년/아동 코드 용어가 있으면 NovelAI 호출 없이 거부(fail-closed).
 	// 한국법(가상 아동성착취물 형사처벌) 대응의 최종 게이트 — LLM 지시·네거티브와 별개의 결정적 방어선.
@@ -1357,7 +1363,7 @@ chatRouter.post('/image/prepare', async (c) => {
 	}
 
 	const res: ImagePrepareResponse = {
-		payload: buildGeneratePayload(positive, charCaptions, resolution, naiModel),
+		payload: buildGeneratePayload(positive, charCaptions, resolution, naiModel, styleNegative),
 		cost: cost ?? null,
 		debug: makeDebug(positive)
 	};

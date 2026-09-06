@@ -34,6 +34,10 @@ export interface StyleGenerateRequest {
 	thumbnail?: boolean;
 	/** NovelAI 모델 id(`lib/naiModels.ts` 허용목록). 없으면 기본(V5 Full). */
 	model?: string;
+	/** 선택 네거티브 프롬프트(비면 모델별 고정 네거티브). */
+	negative?: string;
+	/** 선택 퀄리티 프롬프트(비면 모델별 고정 퀄리티 꼬리). */
+	quality?: string;
 }
 
 /**

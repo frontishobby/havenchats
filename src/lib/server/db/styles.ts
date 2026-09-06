@@ -14,6 +14,8 @@ interface StyleRow {
 	memo: string | null;
 	prompt: string;
 	model: string;
+	negative: string | null;
+	quality: string | null;
 	thumbnail_key: string | null;
 	shared: number;
 	created_at: number;
@@ -21,7 +23,7 @@ interface StyleRow {
 	favorited: number;
 }
 
-const COLS = `s.id, s.creator_id, s.title, s.memo, s.prompt, s.model, s.thumbnail_key, s.shared, s.created_at, s.updated_at,
+const COLS = `s.id, s.creator_id, s.title, s.memo, s.prompt, s.model, s.negative, s.quality, s.thumbnail_key, s.shared, s.created_at, s.updated_at,
 	u.display_name AS creator_name`;
 
 function rowToStyle(r: StyleRow): ArtStyle {
@@ -33,6 +35,8 @@ function rowToStyle(r: StyleRow): ArtStyle {
 		memo: r.memo,
 		prompt: r.prompt,
 		model: r.model,
+		negative: r.negative || null,
+		quality: r.quality || null,
 		thumbnailUrl: r.thumbnail_key ? `${imgSrc(r.thumbnail_key)}?v=${r.updated_at}` : null,
 		shared: r.shared === 1,
 		favorited: r.favorited === 1,
@@ -153,6 +157,9 @@ export async function createStyle(
 		prompt: string;
 		/** NovelAI 모델 id(호출부에서 허용목록 검증). */
 		model: string;
+		/** 선택 네거티브/퀄리티 프롬프트(빈값은 null 로 저장). */
+		negative: string | null;
+		quality: string | null;
 		thumbnailKey: string | null;
 		shared: boolean;
 		id?: string;
@@ -162,8 +169,8 @@ export async function createStyle(
 	const now = Date.now();
 	await db
 		.prepare(
-			`INSERT INTO art_styles (id, creator_id, title, memo, prompt, model, thumbnail_key, shared, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			`INSERT INTO art_styles (id, creator_id, title, memo, prompt, model, negative, quality, thumbnail_key, shared, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			id,
@@ -172,6 +179,8 @@ export async function createStyle(
 			input.memo,
 			input.prompt,
 			input.model,
+			input.negative,
+			input.quality,
 			input.thumbnailKey,
 			input.shared ? 1 : 0,
 			now,

@@ -210,7 +210,17 @@
 					<span>그림체 프롬프트</span>
 					<span class="chev" class:open={promptOpen}>›</span>
 				</button>
-				{#if promptOpen}<pre class="prompt">{s.prompt}</pre>{/if}
+				{#if promptOpen}
+					<pre class="prompt">{s.prompt}</pre>
+					{#if s.quality}
+						<div class="prompt-sub">퀄리티</div>
+						<pre class="prompt">{s.quality}</pre>
+					{/if}
+					{#if s.negative}
+						<div class="prompt-sub">네거티브</div>
+						<pre class="prompt">{s.negative}</pre>
+					{/if}
+				{/if}
 				<div class="detail-actions">
 					{#if isOwner(s)}
 						{#if !s.shared}
@@ -542,6 +552,11 @@
 	}
 	.prompt-toggle .chev.open {
 		transform: rotate(90deg);
+	}
+	.prompt-sub {
+		margin-top: 8px;
+		font-size: 0.72rem;
+		color: var(--text-dim, #999);
 	}
 	.prompt {
 		margin: 4px 0 0;

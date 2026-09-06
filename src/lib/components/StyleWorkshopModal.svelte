@@ -14,6 +14,10 @@
 	// 그림체(저장될 스타일 프롬프트) · 상황(테스트용)
 	let style = $state('');
 	let situation = $state('');
+	// 선택 네거티브/퀄리티 프롬프트(비면 모델별 고정값 사용). 그림체와 함께 저장된다.
+	let negative = $state('');
+	let quality = $state('');
+	let extrasOpen = $state(false);
 	let resolution = $state<Res>('832x1216');
 	// 이 그림체를 깎는 NovelAI 모델. 저장 시 그림체에 박혀 채팅·썸네일도 같은 모델로 생성된다.
 	let naiModel = $state(DEFAULT_NAI_MODEL);
@@ -54,6 +58,9 @@
 		reset();
 		style = '';
 		situation = '';
+		negative = '';
+		quality = '';
+		extrasOpen = false;
 		naiModel = DEFAULT_NAI_MODEL;
 	}
 	function onKey(e: KeyboardEvent) {
@@ -130,10 +137,13 @@
 		if (generating || !style.trim()) return;
 		generating = true;
 		try {
-			await streamGenerate({ style, situation, resolution, model: naiModel }, (blob) => {
-				revoke(previewUrl);
-				previewUrl = URL.createObjectURL(blob);
-			});
+			await streamGenerate(
+				{ style, situation, resolution, model: naiModel, negative, quality },
+				(blob) => {
+					revoke(previewUrl);
+					previewUrl = URL.createObjectURL(blob);
+				}
+			);
 		} finally {
 			generating = false;
 		}
@@ -143,10 +153,13 @@
 		if (thumbGenerating || !style.trim()) return;
 		thumbGenerating = true;
 		try {
-			const finalBlob = await streamGenerate({ style, thumbnail: true, model: naiModel }, (blob) => {
-				revoke(thumbUrl);
-				thumbUrl = URL.createObjectURL(blob);
-			});
+			const finalBlob = await streamGenerate(
+				{ style, thumbnail: true, model: naiModel, negative, quality },
+				(blob) => {
+					revoke(thumbUrl);
+					thumbUrl = URL.createObjectURL(blob);
+				}
+			);
 			if (finalBlob) {
 				// 업로드용 webp 변환(채팅·캐릭터 썸네일과 동일). 실패 시 원본(보통 PNG) 그대로.
 				let upload = finalBlob;
@@ -180,6 +193,8 @@
 			fd.append('prompt', style.trim());
 			fd.append('shared', shared ? '1' : '0');
 			fd.append('model', naiModel);
+			fd.append('negative', negative.trim());
+			fd.append('quality', quality.trim());
 			fd.append('thumbnail', thumbBlob, `thumb.${thumbExt}`);
 			const res = await fetch('/api/styles', { method: 'POST', body: fd });
 			if (res.ok) {
@@ -255,6 +270,30 @@
 					<textarea id="ws-style" rows="4" bind:value={style} placeholder="예: artist:xxx, watercolor, soft lighting …"></textarea>
 					<label class="fl" for="ws-situ">상황 (테스트용 · 저장 안 됨)</label>
 					<textarea id="ws-situ" rows="2" bind:value={situation} placeholder="예: 1girl, smile, outdoors"></textarea>
+					<button class="extras-toggle" onclick={() => (extrasOpen = !extrasOpen)} aria-expanded={extrasOpen}>
+						<span class="chev" class:open={extrasOpen}>›</span>
+						<span>퀄리티 · 네거티브 <span class="opt">(선택)</span></span>
+						{#if !extrasOpen && (negative.trim() || quality.trim())}<span class="badge">지정됨</span>{/if}
+					</button>
+					{#if extrasOpen}
+						<label class="fl" for="ws-quality">퀄리티 프롬프트 <span class="opt">(비면 모델 기본 꼬리)</span></label>
+						<textarea
+							id="ws-quality"
+							rows="2"
+							maxlength="1500"
+							bind:value={quality}
+							placeholder="예: 1.3::very aesthetic, masterpiece::, no text, -1::multiple views::"
+						></textarea>
+						<label class="fl" for="ws-negative">네거티브 프롬프트 <span class="opt">(비면 모델 기본 네거티브)</span></label>
+						<textarea
+							id="ws-negative"
+							rows="2"
+							maxlength="1500"
+							bind:value={negative}
+							placeholder="예: lowres, bad anatomy, bad hands, text, watermark"
+						></textarea>
+						<p class="hint">지정하면 모델 기본값을 통째로 대체해요. 네거티브 앞의 미성년 차단 태그는 항상 유지됩니다.</p>
+					{/if}
 					<div class="res-row">
 						{#each RESOLUTIONS as r (r)}
 							<button class="res" class:active={resolution === r} onclick={() => (resolution = r)}>{r}</button>
@@ -266,7 +305,7 @@
 						</button>
 					</div>
 					<p class="hint">
-						그림체는 모든 이미지에 적용될 스타일 태그예요. 퀄리티·네거티브는 모델에 맞춰 자동 적용됩니다.
+						그림체는 모든 이미지에 적용될 스타일 태그예요. 퀄리티·네거티브는 비워두면 모델에 맞춰 자동 적용됩니다.
 						저장하면 <b>{naiModelInfo.label}</b> 그림체로 표시되고, 채팅·썸네일도 이 모델로 생성돼요.
 					</p>
 				</div>
@@ -440,6 +479,35 @@
 	}
 	.fl:first-child {
 		margin-top: 0;
+	}
+	.extras-toggle {
+		margin-top: 10px;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 0;
+		background: none;
+		border: 0;
+		color: var(--text-dim, #aaa);
+		font-size: 0.82rem;
+		cursor: pointer;
+	}
+	.extras-toggle:hover {
+		color: var(--text, #eee);
+	}
+	.extras-toggle .chev {
+		display: inline-block;
+		transition: transform 0.15s;
+	}
+	.extras-toggle .chev.open {
+		transform: rotate(90deg);
+	}
+	.extras-toggle .badge {
+		font-size: 0.7rem;
+		padding: 1px 6px;
+		border-radius: 999px;
+		background: var(--accent, #6c5ce7);
+		color: #fff;
 	}
 	.opt {
 		color: var(--text-faint);

@@ -227,6 +227,10 @@ export interface ArtStyle {
 	prompt: string;
 	/** 이 그림체가 깎인 NovelAI 모델 id(`lib/naiModels.ts`). 채팅·워크숍·썸네일은 이 모델로 생성. */
 	model: string;
+	/** 선택 네거티브 프롬프트. null 이면 모델별 고정 네거티브. 있으면 아동 차단 접두 뒤에 이 값이 대체 적용. */
+	negative: string | null;
+	/** 선택 퀄리티 프롬프트(positive 꼬리). null 이면 모델별 고정 퀄리티 꼬리. 있으면 꼬리를 이 값으로 대체. */
+	quality: string | null;
 	/** 썸네일 servable URL(`/img/<key>?v=updatedAt`). 없으면 null. */
 	thumbnailUrl: string | null;
 	/** Hub 공개 여부. false=저장(비공개, 본인 채팅 전용), true=공유(Hub 노출). */
