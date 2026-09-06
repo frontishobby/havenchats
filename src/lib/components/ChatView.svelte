@@ -371,6 +371,13 @@
 	// ── 실시간 이미지 생성 설정/상태 ──
 	let showImageSettings = $state(false); // 이미지 설정 모달
 
+	// ── 모바일 헤더 메뉴 ── 좁은 화면에선 버튼 4개 대신 ⚙ 하나 → 드롭다운(입력 필터/모듈/실시간 이미지/채팅 설정).
+	let showHeaderMenu = $state(false);
+	function pickHeaderMenu(open: () => void) {
+		showHeaderMenu = false;
+		open();
+	}
+
 	// ── 모듈(재사용 프롬프트) ── 켜진 id 는 매 전송에 moduleIds 로 보내고, 서버가 프롬프트 맨 끝에 첨부한다.
 	let showModuleSettings = $state(false); // 모듈 모달
 	let activeModuleIds = $state<string[]>([]); // 켜진 모듈 id(순서 유지)
@@ -1468,7 +1475,8 @@
 
 	function onWindowKey(e: KeyboardEvent) {
 		if (e.key !== 'Escape') return;
-		if (modelOpen) modelOpen = false;
+		if (showHeaderMenu) showHeaderMenu = false;
+		else if (modelOpen) modelOpen = false;
 		else if (filterModelOpen) filterModelOpen = false;
 		else if (imgModelOpen) imgModelOpen = false;
 		else if (styleOpen) styleOpen = false;
@@ -1521,6 +1529,7 @@
 			</div>
 		</button>
 		<div class="header-right">
+			<div class="header-actions">
 			<button
 				class="settings-btn"
 				class:active={filterActive}
@@ -1625,6 +1634,64 @@
 					/>
 				</svg>
 			</button>
+			</div>
+			<div class="header-menu-wrap">
+				<button
+					class="settings-btn menu-btn"
+					class:active={showHeaderMenu}
+					onclick={() => (showHeaderMenu = !showHeaderMenu)}
+					aria-label="설정 메뉴"
+					aria-haspopup="menu"
+					aria-expanded={showHeaderMenu}
+				>
+					<svg
+						viewBox="0 0 24 24"
+						width="18"
+						height="18"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<circle cx="12" cy="12" r="3" />
+						<path
+							d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+						/>
+					</svg>
+					{#if filterActive || moduleActiveCount > 0 || imageEnabled}<span class="menu-dot"></span>{/if}
+				</button>
+				{#if showHeaderMenu}
+					<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+					<div class="menu-backdrop" onclick={() => (showHeaderMenu = false)} role="presentation"></div>
+					<ul class="header-menu" role="menu">
+						<li>
+							<button role="menuitem" onclick={() => pickHeaderMenu(toggleFilterSettings)}>
+								<span>입력 필터</span>
+								{#if filterActive}<span class="menu-state">켜짐</span>{/if}
+							</button>
+						</li>
+						<li>
+							<button role="menuitem" onclick={() => pickHeaderMenu(toggleModuleSettings)}>
+								<span>모듈</span>
+								{#if moduleActiveCount > 0}<span class="menu-state">{moduleActiveCount}개</span>{/if}
+							</button>
+						</li>
+						<li>
+							<button role="menuitem" onclick={() => pickHeaderMenu(toggleImageSettings)}>
+								<span>실시간 이미지</span>
+								{#if imageEnabled}<span class="menu-state">켜짐</span>{/if}
+							</button>
+						</li>
+						<li>
+							<button role="menuitem" onclick={() => pickHeaderMenu(toggleSettings)}>
+								<span>채팅 설정</span>
+							</button>
+						</li>
+					</ul>
+				{/if}
+			</div>
 		</div>
 	</header>
 
@@ -3864,6 +3931,81 @@
 	}
 	.local-warn strong {
 		color: var(--text);
+	}
+
+	/* 모바일 헤더 메뉴: 좁은 화면에서 버튼 4개를 숨기고 ⚙ 하나 + 드롭다운으로 대체 */
+	.header-actions {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.header-menu-wrap {
+		position: relative;
+		display: none;
+	}
+	@media (max-width: 640px) {
+		.header-actions {
+			display: none;
+		}
+		.header-menu-wrap {
+			display: block;
+		}
+	}
+	.menu-dot {
+		position: absolute;
+		top: 2px;
+		right: 2px;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--accent);
+		border: 2px solid var(--bg-card);
+	}
+	.settings-btn.active .menu-dot {
+		background: #fff;
+		border-color: var(--accent);
+	}
+	.menu-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 40;
+	}
+	.header-menu {
+		position: absolute;
+		top: calc(100% + 6px);
+		right: 0;
+		z-index: 41;
+		min-width: 170px;
+		margin: 0;
+		padding: 6px;
+		list-style: none;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+	}
+	.header-menu button {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 10px 12px;
+		border: none;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--text);
+		font-size: 0.88rem;
+		font-weight: 600;
+		text-align: left;
+	}
+	.header-menu button:hover {
+		background: var(--bg-elev);
+	}
+	.menu-state {
+		font-size: 0.7rem;
+		font-weight: 800;
+		color: var(--accent);
 	}
 
 	/* 헤더 버튼 우상단 개수 배지(켜진 모듈 수) */
