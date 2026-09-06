@@ -26,6 +26,8 @@ export interface ChatDebugSnapshot {
 	/** 이번 턴 주입된 로어 블록(없으면 null). */
 	loreBlock: string | null;
 	lorebookEntryCount: number;
+	/** 이번 턴 프롬프트 맨 끝에 첨부된 모듈 블록(없으면 null). */
+	modulesBlock: string | null;
 	/** 모델에 실제로 보낸 메시지 배열(지침·로어 포함). */
 	messages: Array<{ role: string; content: string; tokens: number }>;
 	/** 입력 가드 적용 후 window(메시지 단위 seq·토큰). */

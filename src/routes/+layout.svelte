@@ -129,6 +129,7 @@
 		{/if}
 		<nav>
 			<a class="hub-link" href="/styles">그림체 Hub</a>
+			<a class="hub-link" href="/modules">모듈 Hub</a>
 			{#if me?.user}
 				<div class="user-menu" bind:this={menuRef}>
 					<button

@@ -42,6 +42,11 @@ export interface ChatRequestBody {
 	 * (입력창이 빈 상태로 전송 버튼을 누르면 클라가 보낸다)
 	 */
 	continue?: boolean;
+	/**
+	 * 켜진 모듈 id 목록(순서 유지). 서버가 접근 가능한 것(공유 or 본인 소유)만 골라
+	 * 프롬프트 가장 마지막([응답 지침] 뒤)에 첨부한다. 상한 MAX_ACTIVE_MODULES.
+	 */
+	moduleIds?: string[];
 }
 
 // ── 입력 제안(말풍선 버튼): 다음에 유저가 할 법한 행동·대사 3개 ─────────────

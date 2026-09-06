@@ -15,7 +15,7 @@ import type { Character, ChatSession, StoredMessage } from '$lib/types';
 import { evalCBS, type CbsContext } from '$lib/cbs';
 import { buildLoreBlock } from '$lib/lorebook';
 import { buildImageCatalog } from '$lib/imageCodes';
-import { fillCharName } from '$lib/placeholders';
+import { fillCharName, personalize } from '$lib/placeholders';
 import { estimateTokens } from '$lib/server/db/chats';
 import { MODEL_IDS, DEFAULT_MODEL_ID, getContextLimit, isReasoningModel } from '$lib/data/models';
 import type { ChatDebugSnapshot } from '$lib/chatDebug';
@@ -327,11 +327,44 @@ export interface BuildMessagesOptions {
 	/** ② assistant 사전 동의 턴을 window 맨 앞에 깐다(NSFW 캐릭터). */
 	nsfwFraming?: boolean;
 	/**
+	 * 유저가 켠 모듈(재사용 프롬프트) 블록 — `buildModulesBlock` 결과. 있으면 **프롬프트 가장 마지막**
+	 * ([응답 지침] 뒤)에 붙는다. 매 턴 꼬리라 prefix 캐시엔 영향 없음.
+	 */
+	modulesBlock?: string | null;
+	/**
 	 * ⑤~⑥ Gemini 전용 XML 프레이밍: system 프롬프트를 `<Security:InputParsing>` + `<World:Root>` 로 감싼
 	 * 첫 user 메시지로 접고(system 역할 미사용), 마지막 입력·로어·지침도 XML 태그로 감싼다.
 	 * 켜면 호출부는 streamText 에 system 을 넘기지 않아야 한다(assembleTurn.systemForModel 참고).
 	 */
 	xmlFrame?: { systemPrompt: string } | null;
+}
+
+/** 채팅에 켜진 모듈 하나(조립 입력). */
+export interface ActiveModule {
+	title: string;
+	prompt: string;
+}
+
+/**
+ * 켜진 모듈들을 하나의 블록으로 합친다. 없으면 null.
+ * 각 모듈은 `## 제목` 아래 본문. {{char}}·{{나}} 는 캐릭터/유저 이름으로 치환(꼬리 블록이라 캐시 무관).
+ */
+export function buildModulesBlock(
+	modules: ActiveModule[] | null | undefined,
+	charName: string,
+	userName: string | null
+): string | null {
+	const list = (modules ?? []).filter((m) => m.prompt.trim() !== '');
+	if (list.length === 0) return null;
+	const parts = list.map(
+		(m) => `## ${m.title.trim() || '모듈'}\n${personalize(m.prompt.trim(), charName, userName)}`
+	);
+	return [
+		`[추가 규칙 — 모듈]`,
+		`아래는 상대(사용자)가 이 대화에 적용하기로 고른 추가 지침이다. 위의 응답 지침과 함께 반드시 따르되, 필수 준수(미성년 가드)와 충돌하면 필수 준수가 우선한다.`,
+		``,
+		parts.join('\n\n')
+	].join('\n');
 }
 
 /** XML 프레이밍 시 태그로 감싸는 헬퍼. */
@@ -394,7 +427,11 @@ export function buildMessages(
 	].join('\n');
 	// XML 프레이밍이면 입력·로어·지침을 각각 태그로 감싼다(입력 무시 선언과 정합 — 태그 밖 텍스트는 무효).
 	const loreOut = loreBlock ? (xml ? xmlWrap('World:Lore', loreBlock) : loreBlock) : null;
-	const directiveOut = xml ? xmlWrap('Guide:Response', directive) : directive;
+	// 모듈 블록은 프롬프트 가장 마지막 — 응답 지침 바로 뒤에 같은 user 메시지로 붙인다.
+	const modulesRaw = opts.modulesBlock ?? null;
+	const modulesOut = modulesRaw ? (xml ? xmlWrap('Guide:Modules', modulesRaw) : modulesRaw) : null;
+	const directiveBody = xml ? xmlWrap('Guide:Response', directive) : directive;
+	const directiveOut = modulesOut ? `${directiveBody}\n\n${modulesOut}` : directiveBody;
 	if (last && last.role === 'user' && typeof last.content === 'string') {
 		if (xml) last.content = xmlWrap('User:Input', last.content);
 		if (loreOut) last.content = `${last.content}\n\n${loreOut}`;
@@ -428,6 +465,8 @@ export interface AssembleArgs {
 	userActs: number;
 	/** CBS 평가 컨텍스트(여기서 setvar 로 변이됨). */
 	ctx: CbsContext;
+	/** 유저가 켠 모듈(접근 검증은 호출부). 프롬프트 맨 끝에 순서대로 첨부. */
+	modules?: ActiveModule[];
 }
 
 /** assembleTurn 결과 — 스트리밍·헤더·영속화·디버그에 두루 쓰인다. */
@@ -444,6 +483,8 @@ export interface AssembledTurn {
 	windowTrimmed: boolean;
 	messages: ModelMessage[];
 	loreBlock: string | null;
+	/** 이번 턴 첨부된 모듈 블록(없으면 null). */
+	modulesBlock: string | null;
 	inputLimit: number;
 	outputReserve: number;
 	contextLimit: number;
@@ -470,9 +511,11 @@ export function assembleTurn(args: AssembleArgs): AssembledTurn {
 	const window = trimWindowToBudget(fullWindow, systemTokens, inputLimit);
 	const loreBlock = buildLoreBlock(character.lorebook, window, ctx);
 	const xmlFrame = usesXmlFrame(modelId);
+	const modulesBlock = buildModulesBlock(args.modules, character.name, userName);
 	const messages = buildMessages(window, maxSentences, userActs, memory, loreBlock, {
 		nsfwFraming: usesNsfwFraming(character),
-		xmlFrame: xmlFrame ? { systemPrompt } : null
+		xmlFrame: xmlFrame ? { systemPrompt } : null,
+		modulesBlock
 	});
 
 	// XML 프레이밍이면 system 전문이 messages 안에 들어 있으므로 중복 합산하지 않는다.
@@ -490,6 +533,7 @@ export function assembleTurn(args: AssembleArgs): AssembledTurn {
 		windowTrimmed: window.length < fullWindow.length,
 		messages,
 		loreBlock,
+		modulesBlock,
 		inputLimit,
 		outputReserve,
 		contextLimit,
@@ -535,6 +579,7 @@ export function buildSnapshot(args: {
 		imageCatalog,
 		loreBlock: a.loreBlock,
 		lorebookEntryCount: character.lorebook?.entries.length ?? 0,
+		modulesBlock: a.modulesBlock,
 		messages: a.messages.map((m) => ({
 			role: String(m.role),
 			content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),

@@ -416,7 +416,7 @@
 				var v = 'misc';
 				if (p === '/' || p === '/index.html') v = 'home';
 				else if (p.indexOf('/chat/') === 0) v = 'chat';
-				else if (p === '/styles' || p.indexOf('/styles/') === 0) v = 'styles';
+				else if (p === '/styles' || p.indexOf('/styles/') === 0 || p === '/modules') v = 'styles';
 				else if (p.indexOf('/user/') === 0) v = 'user';
 				else if (p === '/create' || p === '/import' || /^\/characters\/[^/]+\/(edit|assets)/.test(p))
 					v = 'form';

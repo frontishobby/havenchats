@@ -35,7 +35,8 @@
 	import { compileScripts, makeAssetResolver, evalDisplayLine } from '$lib/import/displayScripts';
 	import { renderCardHtml } from '$lib/htmlRender';
 	import { personalize as fillPlaceholders } from '$lib/placeholders';
-	import type { ChatMessage, Character, ArtStyle } from '$lib/types';
+	import type { ChatMessage, Character, ArtStyle, PromptModule } from '$lib/types';
+	import { MAX_ACTIVE_MODULES, type ModulesForChatData } from '$lib/api/modules';
 	import { getNaiModel } from '$lib/naiModels';
 	import type { ChatDebugSnapshot, ImageDebug } from '$lib/chatDebug';
 	import ChatDebugPanel from '$lib/components/ChatDebugPanel.svelte';
@@ -74,6 +75,8 @@
 	const IMG_PROMPT_MODEL_KEY = 'haven:img:promptModel';
 	const IMG_EARLY_KEY = 'haven:img:early';
 	const IMG_SOLO_KEY = 'haven:img:solo';
+	/** 켜진 모듈 id 목록(JSON 배열, 순서 유지) — 전역 설정(다른 채팅 설정과 동일하게 localStorage). */
+	const MODULES_ACTIVE_KEY = 'haven:modules:active';
 	const IMG_IGNORE_ASSETS_KEY = 'haven:img:ignoreAssets';
 	// '빠른 생성 우선': 스트리밍 응답이 이만큼(자) 도달하면 마지막 부분을 포기하고 이미지를 미리 발사.
 	const IMG_EARLY_TRIGGER_CHARS = 600;
@@ -368,6 +371,56 @@
 	// ── 실시간 이미지 생성 설정/상태 ──
 	let showImageSettings = $state(false); // 이미지 설정 모달
 
+	// ── 모듈(재사용 프롬프트) ── 켜진 id 는 매 전송에 moduleIds 로 보내고, 서버가 프롬프트 맨 끝에 첨부한다.
+	let showModuleSettings = $state(false); // 모듈 모달
+	let activeModuleIds = $state<string[]>([]); // 켜진 모듈 id(순서 유지)
+	let myModules = $state<PromptModule[]>([]); // 내가 만든 모듈
+	let favModules = $state<PromptModule[]>([]); // 즐겨찾기 모듈(내 것 제외)
+	let modulesLoaded = $state(false);
+	let modulesLoading = $state(false);
+	const moduleCandidates = $derived<PromptModule[]>([...myModules, ...favModules]);
+	// 켜진 것 중 후보 목록에 없는 id(삭제됐거나 즐겨찾기 해제됨) — 목록 로드 후 조용히 정리.
+	const moduleActiveCount = $derived(activeModuleIds.length);
+	function isModuleActive(id: string): boolean {
+		return activeModuleIds.includes(id);
+	}
+	function toggleModule(id: string) {
+		if (activeModuleIds.includes(id)) {
+			activeModuleIds = activeModuleIds.filter((x) => x !== id);
+			return;
+		}
+		if (activeModuleIds.length >= MAX_ACTIVE_MODULES) return;
+		activeModuleIds = [...activeModuleIds, id];
+	}
+	async function loadModules() {
+		if (modulesLoaded || modulesLoading) return;
+		modulesLoading = true;
+		try {
+			const res = await fetch('/api/modules/forchat');
+			if (res.ok) {
+				const d = (await res.json()) as ModulesForChatData;
+				myModules = d.saved ?? [];
+				favModules = d.favorites ?? [];
+				modulesLoaded = true;
+				// 후보에 없는 id 는 정리(삭제·즐겨찾기 해제·타인 비공개 전환).
+				const known = new Set([...myModules, ...favModules].map((m) => m.id));
+				const cleaned = activeModuleIds.filter((id) => known.has(id));
+				if (cleaned.length !== activeModuleIds.length) activeModuleIds = cleaned;
+			}
+		} catch (e) {
+			console.error(e);
+		} finally {
+			modulesLoading = false;
+		}
+	}
+	function toggleModuleSettings() {
+		showModuleSettings = !showModuleSettings;
+		if (showModuleSettings) loadModules();
+	}
+	function closeModuleSettings() {
+		showModuleSettings = false;
+	}
+
 	// ── 입력 필터 ── 켜고 지시문이 있으면 send() 가 /api/chat/rewrite 로 원문을 변환한 뒤 전송한다.
 	let filterEnabled = $state(false);
 	let filterPrompt = $state(''); // 변환 지시 한 줄(예: "무협지 풍으로")
@@ -467,6 +520,15 @@
 		imageEarly = localStorage.getItem(IMG_EARLY_KEY) === '1';
 		imageSolo = localStorage.getItem(IMG_SOLO_KEY) === '1';
 		ignoreCharacterAssets = localStorage.getItem(IMG_IGNORE_ASSETS_KEY) === '1';
+		// 켜진 모듈 복원(전역). 유효성은 서버(접근 검증)와 모달 로드 시 정리.
+		try {
+			const raw = JSON.parse(localStorage.getItem(MODULES_ACTIVE_KEY) ?? '[]') as unknown;
+			if (Array.isArray(raw)) {
+				activeModuleIds = raw.filter((x): x is string => typeof x === 'string').slice(0, MAX_ACTIVE_MODULES);
+			}
+		} catch {
+			/* 손상된 값은 무시 */
+		}
 		// 입력 필터 설정 복원(전역).
 		filterEnabled = localStorage.getItem(FILTER_ENABLED_KEY) === '1';
 		filterPrompt = (localStorage.getItem(FILTER_PROMPT_KEY) ?? '').slice(0, FILTER_PROMPT_MAX);
@@ -544,6 +606,9 @@
 	});
 	$effect(() => {
 		localStorage.setItem(FILTER_ENABLED_KEY, filterEnabled ? '1' : '0');
+	});
+	$effect(() => {
+		localStorage.setItem(MODULES_ACTIVE_KEY, JSON.stringify(activeModuleIds));
 	});
 	$effect(() => {
 		localStorage.setItem(FILTER_PROMPT_KEY, filterPrompt);
@@ -1210,6 +1275,7 @@
 					assistantMsgId,
 					memory: newSessionMemory,
 					inputCost,
+					moduleIds: activeModuleIds.length ? activeModuleIds : undefined,
 					debug: debug || undefined
 				})
 			});
@@ -1409,6 +1475,7 @@
 		else if (showSettings) showSettings = false;
 		else if (showImageSettings) closeImageSettings();
 		else if (showFilterSettings) closeFilterSettings();
+		else if (showModuleSettings) closeModuleSettings();
 	}
 
 	function autoGrow() {
@@ -1484,6 +1551,31 @@
 					<path d="M21 16h-4" />
 					<path d="M11 3H9" />
 				</svg>
+			</button>
+			<button
+				class="settings-btn"
+				class:active={moduleActiveCount > 0}
+				onclick={toggleModuleSettings}
+				aria-label="모듈"
+				aria-expanded={showModuleSettings}
+				title="모듈 — 재사용 프롬프트를 골라 프롬프트 끝에 첨부"
+			>
+				<svg
+					viewBox="0 0 24 24"
+					width="18"
+					height="18"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path
+						d="M19.4 13.4a1.7 1.7 0 0 0-1.4-.4h-.5a1 1 0 0 1-1-1V9.5a1.5 1.5 0 0 0-1.5-1.5H12.5a1 1 0 0 1-1-1V6a2 2 0 1 0-4 0v1a1 1 0 0 1-1 1H5a1.5 1.5 0 0 0-1.5 1.5V11a1 1 0 0 0 1 1h1a2 2 0 1 1 0 4h-1a1 1 0 0 0-1 1v2.5A1.5 1.5 0 0 0 5 21h2.5a1 1 0 0 0 1-1v-1a2 2 0 1 1 4 0v1a1 1 0 0 0 1 1H16a1.5 1.5 0 0 0 1.5-1.5V17a1 1 0 0 1 1-1h.5a1.7 1.7 0 0 0 1.4-.4 1.8 1.8 0 0 0 0-2.2Z"
+					/>
+				</svg>
+				{#if moduleActiveCount > 0}<span class="btn-badge">{moduleActiveCount}</span>{/if}
 			</button>
 			<button
 				class="settings-btn"
@@ -1864,6 +1956,79 @@
 						<p class="setting-hint">변환은 짧은 호출이라 채팅 모델과 달라도 돼요. 비용은 보낸 글 옆에 표시됩니다.</p>
 					</div>
 				{/if}
+			</div>
+		</div>
+	{/if}
+
+	{#if showModuleSettings}
+		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+		<div class="modal-backdrop" onclick={closeModuleSettings} role="presentation">
+			<div
+				class="modal"
+				role="dialog"
+				aria-modal="true"
+				aria-label="모듈"
+				tabindex="-1"
+				onclick={(e) => e.stopPropagation()}
+			>
+				<div class="modal-head">
+					<h2>모듈</h2>
+					<button class="modal-close" onclick={closeModuleSettings} aria-label="닫기">✕</button>
+				</div>
+				<p class="setting-hint">
+					출력 규칙 같은 <strong>재사용 지침</strong>을 골라 켜면 매 응답의 프롬프트 <strong>맨 끝</strong>에
+					순서대로 붙습니다. 최대 {MAX_ACTIVE_MODULES}개.
+				</p>
+
+				{#if modulesLoading && !modulesLoaded}
+					<p class="summary-empty">불러오는 중…</p>
+				{:else if moduleCandidates.length === 0}
+					<p class="summary-empty">
+						쓸 수 있는 모듈이 없어요. <a href="/modules">모듈 Hub</a>에서 만들거나 즐겨찾기해 보세요.
+					</p>
+				{:else}
+					{#snippet moduleGroup(title: string, items: PromptModule[])}
+						{#if items.length > 0}
+							<div class="setting">
+								<div class="setting-row">
+									<span class="field-label">{title}</span>
+								</div>
+								<ul class="module-list">
+									{#each items as m (m.id)}
+										{@const on = isModuleActive(m.id)}
+										<li>
+											<button
+												class="module-item"
+												class:on
+												onclick={() => toggleModule(m.id)}
+												disabled={!on && activeModuleIds.length >= MAX_ACTIVE_MODULES}
+												aria-pressed={on}
+												title={m.memo ?? m.title}
+											>
+												<span class="module-check" aria-hidden="true">{on ? '✓' : ''}</span>
+												<span class="module-text">
+													<span class="module-title">{m.title}</span>
+													{#if m.memo}<span class="module-memo">{m.memo}</span>{/if}
+												</span>
+												{#if on}
+													<span class="module-order">{activeModuleIds.indexOf(m.id) + 1}</span>
+												{/if}
+											</button>
+										</li>
+									{/each}
+								</ul>
+							</div>
+						{/if}
+					{/snippet}
+					{@render moduleGroup('내 모듈', myModules)}
+					{@render moduleGroup('즐겨찾기', favModules)}
+				{/if}
+				<p class="setting-hint">
+					<a href="/modules">모듈 Hub</a>에서 만들거나 즐겨찾기해 골라보세요.
+					{#if moduleActiveCount > 0}
+						<button class="link-btn" onclick={() => (activeModuleIds = [])}>모두 끄기</button>
+					{/if}
+				</p>
 			</div>
 		</div>
 	{/if}
@@ -2475,6 +2640,7 @@
 			{model}
 			{maxSentences}
 			{userActs}
+			moduleIds={activeModuleIds}
 			draftText={input}
 			{streaming}
 		/>
@@ -3698,5 +3864,106 @@
 	}
 	.local-warn strong {
 		color: var(--text);
+	}
+
+	/* 헤더 버튼 우상단 개수 배지(켜진 모듈 수) */
+	.settings-btn {
+		position: relative;
+	}
+	.btn-badge {
+		position: absolute;
+		top: -4px;
+		right: -4px;
+		min-width: 16px;
+		height: 16px;
+		padding: 0 4px;
+		border-radius: 999px;
+		background: var(--bg-card);
+		border: 1px solid var(--accent);
+		color: var(--accent);
+		font-size: 0.62rem;
+		font-weight: 800;
+		line-height: 14px;
+		text-align: center;
+	}
+	.settings-btn.active .btn-badge {
+		background: #fff;
+	}
+
+	/* 모듈 선택 목록 */
+	.module-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.module-item {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 8px 10px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--bg-elev);
+		color: var(--text);
+		text-align: left;
+		transition: border-color 0.12s ease, background 0.12s ease;
+	}
+	.module-item:hover:not(:disabled) {
+		border-color: var(--text-faint);
+	}
+	.module-item.on {
+		border-color: var(--accent);
+		background: var(--accent-soft);
+	}
+	.module-item:disabled {
+		opacity: 0.5;
+	}
+	.module-check {
+		flex-shrink: 0;
+		width: 18px;
+		height: 18px;
+		border-radius: 5px;
+		border: 1px solid var(--border);
+		background: var(--bg-card);
+		color: #fff;
+		font-size: 0.72rem;
+		font-weight: 800;
+		display: grid;
+		place-items: center;
+	}
+	.module-item.on .module-check {
+		background: var(--accent);
+		border-color: var(--accent);
+	}
+	.module-text {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.module-title {
+		font-size: 0.85rem;
+		font-weight: 700;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.module-memo {
+		font-size: 0.72rem;
+		color: var(--text-dim);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.module-order {
+		flex-shrink: 0;
+		font-size: 0.68rem;
+		font-weight: 800;
+		color: var(--accent);
 	}
 </style>

@@ -52,6 +52,7 @@ worker/               # ⭐ Cloudflare Worker(Hono) — 백엔드 API + 정적 S
         chat.ts       # /api/chat 전체: POST '/'(스트리밍)·rewrite(입력 필터)·recent·session·messages·memory·summary·vars·image/prepare·image/commit·inspect·page(채팅페이지 데이터)
         characters.ts # 생성/수정/삭제/promote/assist/thumbnail + GET edit-data·assets-data(구 로더)
         styles.ts     # 그림체 Hub API + GET page(구 로더)
+        modules.ts    # 모듈 Hub API(재사용 프롬프트: 목록·생성·수정·삭제·즐겨찾기·page·forchat)
         keys.ts       # /api/keys/gateway·/novelai (GET/POST/DELETE) + /novelai/token(클라 직접 호출용 평문 수령)
         profile.ts    # /api/profile (POST)
         import.ts     # charx import(관리자)
@@ -68,9 +69,9 @@ src/                  # SvelteKit 정적 SPA(프론트엔드 only)
     novelaiClient.ts  # 클라 전용: NovelAI 직접 호출(msgpack 스트림·ZIP 폴백·webp 변환·토큰 캐시)
     api/              # ⭐ Worker↔SPA 공용 (alias 로 worker 도 import)
       load.ts         # loadJson(fetch,path) — 클라 로더 공용 GET(401/error·{redirect} 처리)
-      pages·chat·characters·styles·keys·profile·admin·import.ts  # 요청·응답 공용 타입
+      pages·chat·characters·styles·modules·keys·profile·admin·import.ts  # 요청·응답 공용 타입(modules: MAX_ACTIVE_MODULES=8)
     data/models.ts    # 모델 목록+아이콘+contextLimit+허용목록(MODEL_IDS)
-    components/        # (변경 없음) CharacterCard/DetailModal/Form/ImagesModal/Sidebar/LoginModal/ProfileModal/ApiKeyModal/StyleWorkshopModal …
+    components/        # (변경 없음) CharacterCard/DetailModal/Form/ImagesModal/Sidebar/LoginModal/ProfileModal/ApiKeyModal/StyleWorkshopModal/ModuleEditorModal …
     state/            # loginModal/profileModal/apiKeyModal.svelte.ts (공유 $state)
     server/           # ⭐ Worker 에서만 사용(SPA 번들 제외). wrangler alias($lib)·$env shim 으로 번들
       env.ts          # $env/dynamic/private|public shim + setRuntime/getRuntimeEnv/getExecutionCtx
@@ -79,7 +80,7 @@ src/                  # SvelteKit 정적 SPA(프론트엔드 only)
       auth.ts crypto.ts novelai.ts characters.ts characterForm.ts imageStore.ts images.ts(getImages→env.IMAGES)
       credits.ts notify.ts recentChats.ts chatPageLoad.ts chatAssembly.ts minorSafety.ts nsfwUnlock.ts cloudflare.ts cfPricing.ts importCharx.ts
       imagePrompt.ts    # 이미지 상황 프롬프트 공용(구조화 스키마 SCENE_PROMPT_SCHEMA·sanitizeTags/Scene·ADULT_ONLY_RULE·HIDDEN_FEATURE_RULE/stripHiddenFeatures — 옷 입은 장면이면 유두·음모·배 문신 등 가려지는 특징을 appearance 에서 제거, NAI 가 특징 보여주려 벗기는 것 방지) — 채팅 이미지·썸네일 공용
-      db/ users.ts characters.ts chats.ts userKeys.ts styles.ts admin.ts  remote.ts(getDB→env.DB 직결)
+      db/ users.ts characters.ts chats.ts userKeys.ts styles.ts modules.ts admin.ts  remote.ts(getDB→env.DB 직결)
   routes/             # 전부 클라 렌더(.svelte) + universal 로더(+page.ts/+layout.ts, ssr=false)
     +layout.{svelte,ts}   # ssr=false + /api/me 로드(유저·사이드바·크레딧)
     +page.{svelte,ts}     # 메인 그리드 — /api/home
@@ -90,6 +91,7 @@ src/                  # SvelteKit 정적 SPA(프론트엔드 only)
     user/[id]/+page.{svelte,ts}               # /api/user/:id
     chat/[id]/+page.{svelte,ts}               # /api/chat/page (하위 /session/[sessionId]·/debug 동일 로더)
     styles/+page.{svelte,ts}                  # /api/styles/page
+    modules/+page.{svelte,ts}                 # /api/modules/page (모듈 Hub)
     admin/…                                    # overview/infra/stats/users/[id] (관리자) — /api/admin/*
 wrangler.jsonc        # Worker 설정: main, assets(run_worker_first·SPA fallback), alias($lib·$env), D1·R2 바인딩
 migrations/           # D1 마이그레이션
@@ -106,6 +108,7 @@ static/favicon.svg, static/models/*.avif
 - **user_keys**: `(user_id, provider)` PK, `ciphertext`(**AES-GCM 양방향 암호화** `base64url(iv‖ct)` — 평문 미저장), `meta`(JSON 검증 스냅샷: NovelAI `{tier,active,isOpus}`), `created_at`/`updated_at`. provider 현재 `'novelai'`. 복호화 키는 `KEY_SECRET`(폴백 `AUTH_SECRET`)에서 파생.
 - **art_styles**(그림체 Hub): `id`(uuid PK), `creator_id`→users, `title`, `memo`, `prompt`(화풍 태그), `model`(NovelAI 모델 id, 기본 `nai-diffusion-4-5-full` — 기존 행=V4.5), `negative`/`quality`(NULL 허용, 선택 네거티브·퀄리티 프롬프트 — 0026), `thumbnail_key`(R2 `style/<id>.<ext>` — 고정 표준 장면 SFW 썸네일), `created_at`/`updated_at`
 - **art_style_favorites**: `(user_id, style_id)` PK — 채팅 이미지 모달에서 고를 수 있는 후보. `characters.recommended_style_id`(추가됨): 제작자 추천 그림체.
+- **prompt_modules**(모듈 Hub, 0027): `id`(uuid PK), `creator_id`→users, `title`, `memo`(표시용, 프롬프트 미포함), `prompt`(본문, ≤4000자), `shared`(1=Hub 공개/0=비공개), `created_at`/`updated_at`. **prompt_module_favorites**: `(user_id, module_id)` PK — 채팅 모듈 모달 후보(내 것 + 즐겨찾기).
 - 세션 id = 내부 user uuid. 프로필 완료 = `display_name` 존재. 오프닝(greeting)은 세션 시작 시 seq=1 메시지로 저장(세션별 앵커). **캐릭터 데이터는 세션에 스냅샷하지 않음** — characters 테이블이 source of truth.
 
 ## 구현된 기능
@@ -123,6 +126,7 @@ static/favicon.svg, static/models/*.avif
 - **입력 필터**(채팅 헤더 🪄 버튼, 🖼 왼쪽): 켜면 컴포저 위에 **지시 한 줄**(예: "무협지 풍으로")이 나타나고, 전송 시 클라가 먼저 `POST /api/chat/rewrite`(`RewriteRequestBody`)로 원문을 보내 서버가 **캐릭터 description(참고)·요약·최근 대화 꼬리(8개)·유저 페르소나**를 system 에 넣고 `generateText`(noThinking) 로 지시 문체로 **다시 쓴 입력문**을 받은 뒤, 그 텍스트로 `/api/chat` 을 호출한다(DB 에는 변환문이 user 메시지로 저장. 변환 비용은 `inputCost` 로 되돌려 보내 user 행 `cost` 에 기록·버블 옆 표시). 변환 중엔 유저 버블에 pending 표시, 실패 시 버블 제거·입력 복원·에러 표시. 변환 모델은 **채팅 모델 목록(MODELS) 전체** 선택 가능(기본 DeepSeek V4 Flash), 설정은 localStorage(`haven:filter:*`). 규칙: 의도·행동·대사 보존, 캐릭터 반응 대필 금지, 분량 ≤1.5배, 미성년 가드.
 - **실시간 이미지 생성(NovelAI)**: 채팅 헤더 🖼 버튼으로 켜면(localStorage) 매 assistant 턴 직후 클라가 ① `POST /api/chat/image/prepare` → 서버가 LLM(`generateObject` **구조화 출력**)으로 마지막 응답을 `{ base, scene, characters[{name, appearance, outfit, state}] }` 로 분해(인물 캡션 = 외형 + **outfit**(복장/노출 — 세션 `outfits` 복장 원장으로 턴 간 유지) + state(포즈·표정). `scene`=자연어 장면 1~2문장, V5 만 조립에 사용·V4.5 는 버림. 이 비용이 메시지 cost)·미성년 하드차단·**NovelAI 요청 바디**(`buildGeneratePayload`) 반환 → ② **브라우저가 `image.novelai.net` 을 직접 호출**(`lib/novelaiClient.ts`: `/ai/generate-image-stream` + `parameters.stream='msgpack'` → 4B 길이 프리픽스 + msgpack, intermediate=JPEG 프리뷰·final=PNG. 실패 시 `/ai/generate-image` ZIP 폴백(fflate). 토큰은 `GET /api/keys/novelai/token` 으로 받아 메모리에만) → 최종 PNG 를 **webp 변환**(`lib/imagePreview.ts blobToWebp`: canvas.toBlob → WebKit(사파리·iOS 전 브라우저)은 webp 인코딩 미지원이라 `lib/webpEncode.worker.ts` 의 libwebp WASM(`@jsquash/webp`, ~100KB br) 워커로 폴백. 그림체 워크숍 썸네일·캐릭터 썸네일도 동일 함수) → ③ `POST /api/chat/image/commit?sessionId&replaceId&assistantMsgId&cost` 에 바이너리 업로드 → R2(`chatimg/<sessionId>/<id>.<ext>`) 저장 + `role=image_generation` 메시지 영속. **Worker 는 NovelAI 프레임을 만지지 않는다**(무료 플랜 CPU 10ms 대응 — 예전 서버 SSE→NDJSON 재전송은 요청당 CPU 0.4~1.2s). **NAI 모델은 그림체에 박힌 값**(`art_styles.model`, 허용목록 `lib/naiModels.ts`: V5 Full(기본)·V5 Curated·V4.5 Full — 2026-08-21 V5 출시, 기존 그림체는 마이그레이션 0024 기본값으로 V4.5 마킹). 워크숍 미리보기·썸네일·채팅(`naiModel`) 모두 고른 그림체의 모델로 요청하고, `buildGeneratePayload`가 모델별 `params_version`(V5=4)·CFG(`imageParamsFor`)·퀄리티 꼬리(`qualityTailFor`)를 고른다. NAI **멀티 캐릭터 기능**(`char_captions` 인물별 분리 → 속성 누출 방지), 위치는 AUTO(`use_coords:false`+`use_order`), 인물 최대 V4.5=6·V5=32(모델별 상한), {{나}}는 프레임에 보일 때만 별도 엔트리. **상황 프롬프트 모델은 구조화 출력 안정 + NSFW 비거부 모델로 한정**(`IMAGE_PROMPT_MODELS`: GLM 5.3 Flash(기본)·MiniMax M3 — MODELS 와 별개 목록, `findImagePromptModel` 로 조회. Gemini Flash 는 BLOCK_NONE 에도 노골적 장면 content-filter 라 제외). 해상도(세로 832×1216/정사각 1024×1024/가로 1216×832 — 가로형이면 상황 프롬프트 user 끝에 `[Canvas] LANDSCAPE` 구도 힌트 부착)·**1명 고정**(`solo`, localStorage `haven:img:solo` — 다인 장면에서 NAI 디테일 붕괴 방지. user 끝에 `[Solo]` 힌트(주인공 1명·POV/프레임 밖 처리) + 서버 후처리: 인물 엔트리를 첫 1개로 자르고(`char` 강제 X — 주인공이 육체 없는 AI/내레이터형이면 기기가 그려지는 실측) `enforceSoloBase` 로 base 의 인원수·source#/target# 태그 제거 후 `1girl/1boy, solo` 강제. 상황 프롬프트 공통 규칙에 '비육체 주인공은 인물 엔트리 금지, 장면의 실제 인물을 그림' 추가)·**그림체(즐겨찾기에서 택1)**·상황프롬프트 모델·'빠른 생성 우선'은 헤더 모달에서 설정. NSFW 캐릭터면 base_caption 앞에 `rating:nsfw`. 미성년 하드차단은 base+모든 인물 캡션 합본 검사. 캐릭터 description 통짜를 외형 레퍼런스로 LLM 에 주입. 키는 **프로필 메뉴 > API 키 관리**에서 등록(NovelAI **Opus 등급** 검증(`api.novelai.net` 은 CORS 불가 → 서버) 후 암호화 저장). 고정 프롬프트/파라미터·검증·서버측 ZIP 해제는 `lib/server/novelai.ts`. 썸네일(`characters/thumbnail`)·그림체(`styles/generate`)는 아직 서버 NDJSON 스트림 경로(`generateImageStream`). Gemini 는 `gateway.order:['google','vertex']` 페일오버 — **google(AI Studio) 우선**: Vertex 는 Gemini 3.8+ 에서 NSFW 허용 지시가 든 프롬프트를 입력 단계에서 content-filter 차단(빈 응답, 페일오버 안 탐).
 - **그림체 Hub**(`/styles`): 유저가 화풍(스타일) 프롬프트를 만들어 공유·즐겨찾기. **깎기 워크숍**(`StyleWorkshopModal`)에서 화풍+상황(테스트)으로 자기 NovelAI 키로 미리보기 생성 → 공유 시 제목·메모 + **고정 표준 장면**(`THUMBNAIL_SITUATION`, SFW)으로 일관 썸네일 리롤·결정 → R2 저장. 카드(썸네일+제목+작성자) 클릭 시 상세(프롬프트+즐겨찾기). **선택 퀄리티·네거티브 프롬프트**(워크숍 접이식 섹션, `art_styles.negative/quality`): 비면 모델별 고정 `QUALITY_TAIL(_V5)`/`NEGATIVE_PROMPT(_V5)`, 있으면 **통째로 대체**(`resolveQualityTail`/`negativeFor(model, custom)`) — 단 네거티브 앞 아동 차단 접두(`MINOR_BLOCK_NEGATIVE`)는 항상 유지, V5 연도·complexity 자동 주입은 그림체 또는 퀄리티에 이미 있으면 생략. 워크숍 미리보기·썸네일·채팅(`styleNegative/styleQuality`)·캐릭터 썸네일 모두 고른 그림체의 값을 보낸다. 채팅 이미지 모달은 즐겨찾기 그림체 중 택1(캐릭터 추천 그림체 상단). 캐릭터 제작 폼에서 추천 그림체 지정 가능. 본인 그림체는 상세의 '수정'으로 같은 워크숍 모달을 채워 열어 수정(`edit` prop → `PATCH /api/styles/:id` multipart, 썸네일은 선택·미첨부 시 유지, 공개 여부는 그대로. JSON `{shared}` PATCH 는 공개 토글). API: `/api/styles*`(목록·생성·수정·상세·삭제·즐겨찾기·`mine`·`generate`).
+- **모듈 Hub**(`/modules`): 캐릭터 무관·재사용 가능한 **일반 지침**(출력 규칙 추가, 문체, 금기 등)을 만들어 공유·즐겨찾기(`ModuleEditorModal`: 제목·메모·본문·공개 토글, JSON `POST/PATCH /api/modules(/:id)`, `{shared}` 만 보내면 공개 토글). 채팅 헤더 🧩 버튼(설정 왼쪽) 모달에서 **내 모듈 + 즐겨찾기** 중 여러 개를 켜고 끔(최대 `MAX_ACTIVE_MODULES`=8, 켠 순서 번호 표시, localStorage `haven:modules:active` JSON 배열 — 전역 설정). 전송 시 `moduleIds` 로 보내면 서버가 `getModulesForChat`(공유 or 본인 소유만, 클라 순서 유지)로 해석해 `assembleTurn({modules})` → `buildModulesBlock`(`[추가 규칙 — 모듈]` 헤더 + `## 제목`/본문, `{{char}}`·`{{나}}` 치환) → **프롬프트 가장 마지막**: `[응답 지침]` 뒤 같은 user 메시지에 부착(이어가기 턴도 동일, XML 프레임이면 `<Guide:Modules>`). 꼬리 블록이라 prefix 캐시 무영향. 디버그 스냅샷 `modulesBlock`·패널 '모듈' 섹션, `/api/chat/inspect` 도 `moduleIds` 수용.
 - **인증**: Google 로그인 → **이메일 화이트리스트(테스트용)** → 프로필 모달(이름/페르소나/취향/아바타) → DB 저장. 네비바 이름 클릭 시 재편집.
 - **게이팅**: 채팅 전송·`/api/chat`·캐릭터 생성/수정은 **로그인 필수(서버 검증)**, NSFW는 비로그인 접근 차단.
 

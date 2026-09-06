@@ -12,6 +12,7 @@
 		model,
 		maxSentences,
 		userActs,
+		moduleIds = [],
 		draftText,
 		streaming
 	}: {
@@ -26,6 +27,8 @@
 		model: string;
 		maxSentences: number;
 		userActs: number;
+		/** 채팅에서 켜진 모듈 id(미리보기 조립에 동일 적용). */
+		moduleIds?: string[];
 		/** 작성 중 입력(미리보기에서 "다음 메시지"로 가상 주입). */
 		draftText: string;
 		streaming: boolean;
@@ -64,6 +67,7 @@
 					model,
 					maxSentences,
 					userActs,
+					moduleIds,
 					varsOverride: opts?.varsOverride
 				})
 			});
@@ -514,6 +518,16 @@
 			{#if view.imageCatalog}
 				<div class="sub">장면 이미지 카탈로그</div>
 				<pre class="dump small">{view.imageCatalog}</pre>
+			{/if}
+		</details>
+
+		<!-- 모듈(프롬프트 맨 끝 첨부) -->
+		<details class="sec">
+			<summary>모듈 <span class="count">{view.modulesBlock ? '첨부됨' : '없음'}</span></summary>
+			{#if view.modulesBlock}
+				<pre class="dump small">{view.modulesBlock}</pre>
+			{:else}
+				<p class="muted">이번 턴 첨부된 모듈 없음.</p>
 			{/if}
 		</details>
 

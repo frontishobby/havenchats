@@ -241,6 +241,27 @@ export interface ArtStyle {
 	updatedAt: number;
 }
 
+/**
+ * 모듈(재사용 프롬프트) — 출력 규칙 추가 같은 캐릭터 무관·범용 지시문.
+ * 유저가 채팅에서 여러 개를 골라 켜면 매 턴 프롬프트 맨 끝([응답 지침] 뒤)에 순서대로 첨부된다.
+ */
+export interface PromptModule {
+	id: string;
+	creatorId: string;
+	creatorName: string | null;
+	title: string;
+	/** 설명/메모(Hub 표시용, 프롬프트엔 미포함). */
+	memo: string | null;
+	/** 모듈 본문(프롬프트에 첨부되는 텍스트). */
+	prompt: string;
+	/** Hub 공개 여부. false=비공개(본인 채팅 전용). */
+	shared: boolean;
+	/** 현재 유저가 즐겨찾기했는지. */
+	favorited: boolean;
+	createdAt: number;
+	updatedAt: number;
+}
+
 export type Role = 'user' | 'assistant' | 'image_generation';
 
 export interface ChatMessage {

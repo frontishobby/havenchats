@@ -33,6 +33,8 @@ import { pinSceneCodes } from '$lib/imageCodes';
 import { personalize } from '$lib/placeholders';
 import { notifyServerError } from '$lib/server/notify';
 import { getDecryptedKey, getKeyStatus } from '$lib/server/db/userKeys';
+import { getModulesForChat } from '$lib/server/db/modules';
+import { MAX_ACTIVE_MODULES } from '$lib/api/modules';
 import {
 	assembleTurn,
 	buildSnapshot,
@@ -214,6 +216,9 @@ chatRouter.post('/', async (c) => {
 	const scriptStateBefore = JSON.stringify(session.scriptState ?? {});
 	const varsBefore = { ...(session.scriptState ?? {}) };
 
+	// 켜진 모듈(재사용 프롬프트) — 접근 가능한 것(공유 or 본인 소유)만, 클라 순서대로. 프롬프트 맨 끝에 첨부.
+	const modules = await getModulesForChat(db, pickModuleIds(body.moduleIds), userId);
+
 	// ── 한 턴 조립(공유 로직) ── system/messages/토큰예산을 한 번에. ctx.vars 는 CBS 로 변이된다.
 	// 입력 하드가드(오래된 window trim)·로어북 주입·응답 지침 부착이 모두 여기서 일어난다.
 	const assembled = assembleTurn({
@@ -226,7 +231,8 @@ chatRouter.post('/', async (c) => {
 		modelId,
 		maxSentences,
 		userActs,
-		ctx
+		ctx,
+		modules
 	});
 	const { window, messages, inputTokensEst, outputReserve, inputLimit } = assembled;
 	if (assembled.windowTrimmed) {
@@ -275,7 +281,7 @@ chatRouter.post('/', async (c) => {
 	};
 
 	console.log(
-		`[chat] session=${session.id} character=${character.id} model=${modelId} window=${window.length} inputEst=${inputTokensEst} summarized=${session.summaryUptoSeq > 0}${continueTurn ? ' continue=1' : ''}`
+		`[chat] session=${session.id} character=${character.id} model=${modelId} window=${window.length} inputEst=${inputTokensEst} summarized=${session.summaryUptoSeq > 0}${continueTurn ? ' continue=1' : ''}${modules.length ? ` modules=${modules.length}` : ''}`
 	);
 
 	// AI SDK v6 의 textStream 은 에러를 throw 하지 않고 빈 스트림으로 끝나므로
@@ -1481,6 +1487,20 @@ interface InspectBody {
 	userActs?: number;
 	/** 저장하지 않고 이 변수로 평가해 미리보기(변수 조작 실험용). */
 	varsOverride?: Record<string, string>;
+	/** 켜진 모듈 id 목록(/api/chat 과 동일 규칙). */
+	moduleIds?: string[];
+}
+
+/** 클라가 보낸 모듈 id 목록 정규화 — 문자열만·중복 제거·상한(MAX_ACTIVE_MODULES). 순서 유지. */
+function pickModuleIds(v: unknown): string[] {
+	if (!Array.isArray(v)) return [];
+	const out: string[] = [];
+	for (const x of v) {
+		if (typeof x !== 'string' || !x || x.length > 64 || out.includes(x)) continue;
+		out.push(x);
+		if (out.length >= MAX_ACTIVE_MODULES) break;
+	}
+	return out;
 }
 
 /** 클라가 보고한 비용(USD)을 검증 — 유한·0 초과·상식적 상한(1턴 $1) 안일 때만 채택. */
@@ -1891,6 +1911,7 @@ chatRouter.post('/inspect', async (c) => {
 		now: Date.now()
 	};
 
+	const modules = await getModulesForChat(db, pickModuleIds(body.moduleIds), userId);
 	const assembled = assembleTurn({
 		character,
 		fullWindow,
@@ -1901,7 +1922,8 @@ chatRouter.post('/inspect', async (c) => {
 		modelId,
 		maxSentences,
 		userActs,
-		ctx
+		ctx,
+		modules
 	});
 
 	const snapshot = buildSnapshot({
