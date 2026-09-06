@@ -320,6 +320,7 @@
 					</div>
 					<div><span>model</span><b class="mono">{imageDebug.model}</b></div>
 					<div><span>해상도</span><b class="mono">{imageDebug.resolution}</b></div>
+					<div><span>1명 고정</span><b class="mono">{imageDebug.solo ? 'on' : 'off'}</b></div>
 					<div><span>sampler</span><b class="mono">{imageDebug.params.sampler}</b></div>
 					<div><span>scheduler</span><b class="mono">{imageDebug.params.scheduler}</b></div>
 					<div><span>steps</span><b class="mono">{imageDebug.params.steps}</b></div>

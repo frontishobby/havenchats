@@ -228,7 +228,7 @@ chatRouter.post('/', async (c) => {
 		userActs,
 		ctx
 	});
-	const { systemPrompt, window, messages, inputTokensEst, outputReserve, inputLimit } = assembled;
+	const { window, messages, inputTokensEst, outputReserve, inputLimit } = assembled;
 	if (assembled.windowTrimmed) {
 		console.warn(
 			`[chat] input guard trimmed window ${fullWindow.length}→${window.length} (model=${modelId}, limit=${inputLimit})`
@@ -286,7 +286,8 @@ chatRouter.post('/', async (c) => {
 		model: gateway(modelId),
 		// system = [제작자 프롬프트 + 상대 정보 + 가드레일] (고정 prefix)
 		//          + (요약 있으면) "지금까지의 이야기" 블록. 요약 갱신 때만 변함 → 대부분 캐시 hit.
-		system: systemPrompt,
+		// Gemini 는 XML 프레이밍으로 system 을 첫 user 메시지에 접어 보내므로 undefined(chatAssembly 참고).
+		system: assembled.systemForModel,
 		// live window 만 전송(오래된 맥락은 summary 가 대체) → input 토큰 상한.
 		messages,
 		providerOptions: buildProviderOptions(modelId),
@@ -879,6 +880,35 @@ function canvasHint(resolution: ResolutionKey): string {
 	return `[Canvas] PORTRAIT ${width}x${height} (tall). Vertical compositions are fine (full body, standing).`;
 }
 
+/**
+ * '1명 고정' 힌트 — 상황 프롬프트 user 메시지 끝에 부착. 주인공 1명만 그리게 하고, 상대(유저·NPC)와
+ * 상호작용 중이면 POV/프레임 밖 처리로 인원을 늘리지 않게 한다. LLM 이 어겨도 enforceSolo 가 후처리.
+ */
+const SOLO_HINT = `[Solo] Depict EXACTLY ONE person: the main roleplay character ("char"). Output exactly ONE entry in "characters" and put a single-subject count tag ("1girl"/"1boy") plus "solo" in "base". NEVER draw the user or any other person. If the character is interacting with someone, shoot it from that person's point of view ("pov"; partial-view tags such as "pov hands" are fine) or crop the other person out of frame, and write "scene" about the character alone (what they are doing, where they are looking). Do not use source#/target#/mutual# interaction tags.`;
+
+/**
+ * '1명 고정' 후처리 — base 의 인원수·상호작용·다인 태그를 제거하고, 남긴 인물의 외형(첫 단어
+ * girl/boy/other)에 맞는 단일 count 태그 + "solo" 를 앞에 붙인다.
+ */
+function enforceSoloBase(base: string, appearance: string): string {
+	const tags = base
+		.split(',')
+		.map((t) => t.trim())
+		.filter(Boolean)
+		.filter(
+			(t) =>
+				!/^\d+\s*(girl|boy|other)s?$/i.test(t) &&
+				!/^(source|target|mutual)#/i.test(t) &&
+				!/^(solo|multiple (girls|boys|others)|couple|group|duo|trio)$/i.test(t)
+		);
+	const subject = /\b(girl|woman|female)\b/i.test(appearance)
+		? '1girl'
+		: /\b(boy|man|male)\b/i.test(appearance)
+			? '1boy'
+			: '1other';
+	return [subject, 'solo', ...tags].join(', ');
+}
+
 const SITUATION_SYSTEM = [
 	`You convert the latest moment of a Korean roleplay scene into a structured image-generation prompt for NovelAI Diffusion (V4.5/V5, anime illustration), using its MULTI-CHARACTER feature.`,
 	`You are given a [Character] reference sheet for the main roleplay character, an optional [Known characters] roster of people whose fixed appearance was already established earlier in this story, an optional [Current outfits] record of what each person was wearing (or not wearing) as of the PREVIOUS image, and the [Recent conversation] (the last few turns, oldest to newest, including the user's actions). Depict ONLY the LATEST moment — the final line of the conversation; use the earlier lines purely as context for what is happening right now. Ignore non-visual text (personality, backstory, rules, command/keyword lists) — use it ONLY for fixed physical appearance.`,
@@ -978,6 +1008,8 @@ interface ImageRequestBody {
 	naiModel?: string;
 	/** 재생성: 이 image_generation 메시지를 제자리(같은 행/순서)에서 덮어쓴다. */
 	replaceId?: string;
+	/** 1명 고정: 주인공 1명만 그린다(여러 인물이 나오면 NAI 디테일이 깨지는 것 방지). */
+	solo?: boolean;
 	/** 디버그 모드: 응답에 사용한 프롬프트/파라미터를 동봉. */
 	debug?: boolean;
 }
@@ -1056,6 +1088,7 @@ chatRouter.post('/image/prepare', async (c) => {
 
 	// 재생성 대상(있으면): 소유·세션·역할 검증(commit 에서 다시 검증하지만 여기서 빨리 거른다).
 	const replaceId = typeof body?.replaceId === 'string' ? body.replaceId : '';
+	const solo = body?.solo === true; // 1명 고정
 	if (replaceId) {
 		const target = await getOwnedMessage(db, replaceId, user.id);
 		if (!target || target.sessionId !== sessionId || target.role !== 'image_generation') {
@@ -1160,6 +1193,7 @@ chatRouter.post('/image/prepare', async (c) => {
 					negative: negativeFor(naiModel),
 					model: naiModel,
 					resolution,
+					solo,
 					params: {
 						sampler: naiParams.sampler,
 						scheduler: naiParams.scheduler,
@@ -1185,6 +1219,7 @@ chatRouter.post('/image/prepare', async (c) => {
 		promptParts.push(sceneBlock);
 		// 캔버스 방향 힌트(system 은 고정 prefix 라 user 쪽에 붙임). 가로형이면 옆으로 넓은 구도를 유도.
 		promptParts.push(canvasHint(resolution));
+		if (solo) promptParts.push(SOLO_HINT);
 		const userPrompt = promptParts.join('\n\n');
 		// 게이트웨이가 일시적 503/500 을 자동 재시도하지 않으므로 직접 백오프 재시도한다.
 		const result = await generateObjectWithRetry({
@@ -1206,7 +1241,15 @@ chatRouter.post('/image/prepare', async (c) => {
 
 		// 인물별: name 으로 원장 대조 → 기존이면 외형 고정(override), 신규면 핀. 최종 캡션 = 외형 + 상태.
 		const turnRef = session.messageCount;
-		const rawChars = (Array.isArray(obj.characters) ? obj.characters : []).slice(0, MAX_CHARACTERS);
+		let rawChars = (Array.isArray(obj.characters) ? obj.characters : []).slice(0, MAX_CHARACTERS);
+		// 1명 고정: LLM 이 여러 인물을 냈어도 주인공(char) 엔트리 하나만 남긴다(없으면 첫 엔트리).
+		if (solo && rawChars.length > 1) {
+			const main = rawChars.find((cc) => {
+				const k = normalizeKey(str((cc as { name?: unknown }).name));
+				return k === 'char' || k === normalizeKey(charLabel);
+			});
+			rawChars = [main ?? rawChars[0]];
+		}
 		charCaptions = [];
 		for (const cc of rawChars) {
 			const entry = cc as { name?: unknown; appearance?: unknown; outfit?: unknown; state?: unknown };
@@ -1238,6 +1281,9 @@ chatRouter.post('/image/prepare', async (c) => {
 				.join(', ');
 			if (caption) charCaptions.push(caption);
 		}
+
+		// 1명 고정: base 의 인원수·상호작용 태그를 1인 기준으로 정리("1girl, solo, …").
+		if (solo) baseScene = enforceSoloBase(baseScene, charCaptions[0] ?? '');
 
 		// 원장 상한 초과 시 가장 오래 안 나온 인물부터 제거(LRU evict).
 		if (evictLedger(ledger, MAX_LEDGER_ENTRIES)) ledgerDirty = true;

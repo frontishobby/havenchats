@@ -99,6 +99,8 @@ export interface ImageDebug {
 	/** NovelAI 생성 모델 id(그림체에 박힌 값). */
 	model: string;
 	resolution: string;
+	/** 1명 고정 토글 상태. */
+	solo: boolean;
 	/** 모델별 생성 파라미터(표시용). */
 	params: {
 		sampler: string;

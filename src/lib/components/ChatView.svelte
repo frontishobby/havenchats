@@ -73,6 +73,7 @@
 	const IMG_STYLE_ID_KEY = 'haven:img:styleId';
 	const IMG_PROMPT_MODEL_KEY = 'haven:img:promptModel';
 	const IMG_EARLY_KEY = 'haven:img:early';
+	const IMG_SOLO_KEY = 'haven:img:solo';
 	const IMG_IGNORE_ASSETS_KEY = 'haven:img:ignoreAssets';
 	// '빠른 생성 우선': 스트리밍 응답이 이만큼(자) 도달하면 마지막 부분을 포기하고 이미지를 미리 발사.
 	const IMG_EARLY_TRIGGER_CHARS = 600;
@@ -413,6 +414,7 @@
 	let imagePromptModel = $state(DEFAULT_IMG_PROMPT_MODEL); // 상황 프롬프트 생성 모델
 	let imgModelOpen = $state(false); // 이미지 프롬프트 모델 드롭다운 열림
 	let imageEarly = $state(false); // 빠른 생성 우선(스트리밍 중 미리 발사)
+	let imageSolo = $state(false); // 1명 고정(주인공만 그림 — 다인 장면 디테일 붕괴 방지)
 	let ignoreCharacterAssets = $state(false); // 캐릭터 내장 이미지(장면·감정 스프라이트) 표시 안 함
 	let naiKeyRegistered = $state<boolean | null>(null); // null=미확인, false=미등록, true=등록됨
 	let naiStatusLoading = $state(false);
@@ -458,6 +460,7 @@
 		// 허용목록(구조화 출력 안정 모델)에 있는 값만 복원 — 옛 비허용 모델이 저장돼 있으면 기본값 유지.
 		if (savedPM && IMAGE_PROMPT_MODEL_IDS.has(savedPM)) imagePromptModel = savedPM;
 		imageEarly = localStorage.getItem(IMG_EARLY_KEY) === '1';
+		imageSolo = localStorage.getItem(IMG_SOLO_KEY) === '1';
 		ignoreCharacterAssets = localStorage.getItem(IMG_IGNORE_ASSETS_KEY) === '1';
 		// 입력 필터 설정 복원(전역).
 		filterEnabled = localStorage.getItem(FILTER_ENABLED_KEY) === '1';
@@ -527,6 +530,9 @@
 	});
 	$effect(() => {
 		localStorage.setItem(IMG_EARLY_KEY, imageEarly ? '1' : '0');
+	});
+	$effect(() => {
+		localStorage.setItem(IMG_SOLO_KEY, imageSolo ? '1' : '0');
 	});
 	$effect(() => {
 		localStorage.setItem(IMG_IGNORE_ASSETS_KEY, ignoreCharacterAssets ? '1' : '0');
@@ -720,6 +726,7 @@
 					naiModel: selectedNaiModel,
 					promptModel: imagePromptModel,
 					replaceId: replaceId || undefined,
+					solo: imageSolo || undefined,
 					debug: debug || undefined
 				})
 			});
@@ -2088,6 +2095,26 @@
 						<p class="setting-hint">
 							응답이 어느 정도 나오면 끝까지 기다리지 않고 <strong>미리 이미지를 생성</strong>해 대기를
 							줄입니다. 대신 응답 <strong>마지막 부분은 그림에 반영되지 않을 수</strong> 있어요.
+						</p>
+					</div>
+
+					<div class="setting">
+						<div class="setting-row">
+							<span class="field-label" id="img-solo-label">1명 고정</span>
+							<button
+								class="switch"
+								class:on={imageSolo}
+								role="switch"
+								aria-checked={imageSolo}
+								aria-labelledby="img-solo-label"
+								onclick={() => (imageSolo = !imageSolo)}
+							>
+								<span class="knob"></span>
+							</button>
+						</div>
+						<p class="setting-hint">
+							장면에 여러 명이 있어도 <strong>캐릭터 1명만</strong> 그립니다. 상대(나·다른 인물)는
+							시점(POV)이나 프레임 밖으로 처리해요. 여러 인물이 함께 나오면 디테일이 깨질 때 켜세요.
 						</p>
 					</div>
 				{/if}
