@@ -182,6 +182,13 @@ export function buildProviderOptions(
 			// 비설정형 필터(아동 성착취 등 PROHIBITED_CONTENT)는 이 옵션과 무관하게 항상 동작한다.
 			safetySettings: GOOGLE_SAFETY_OFF
 		};
+	} else if (modelId.startsWith('anthropic/')) {
+		// Claude 는 anthropic 직결 외에 Bedrock·Vertex 경유 공급자가 있는데, 최저가 라우팅이면 AWS Bedrock 에
+		// 걸리는 경우가 있고 AWS 는 성인 롤플레이를 정책 위반으로 엄격히 차단한다는 커뮤니티 보고가 많다
+		// (2026-09). 프롬프트 캐시도 공급자별로 따로 쌓이므로 anthropic 하나로 고정한다.
+		// `order` 는 우선순위만 주고 미기재 공급자를 폴백으로 남긴다(라우팅 메타 fallbacksAvailable:
+		// bedrock·vertexAnthropic 실측) → 완전 제외는 `only`.
+		out.gateway = { caching: 'auto', only: ['anthropic'] };
 	} else if (modelId.startsWith('openai/')) {
 		out.openai = { reasoningEffort: noThink ? 'none' : OPENAI_REASONING_EFFORT };
 	} else if (modelId.startsWith('xai/')) {
@@ -192,8 +199,10 @@ export function buildProviderOptions(
 		// 에러 JSON(`data_inspection_failed`)으로 거부한다. HTTP 에러가 아니라 공급자 폴백도 안 타고
 		// AI SDK 는 `choices` 누락 → AI_TypeValidationError 로 끝난다(2026-09-06 실측). 또 Alibaba 경유는
 		// frequencyPenalty 를 unsupported 로 버린다. → 검열 없는 네이티브 deepseek 을 1순위로 고정하고
-		// 나머지는 폴백 순서만 준다(order 에 없는 공급자(alibaba)는 시도하지 않는다).
-		out.gateway = { caching: 'auto', order: DEEPSEEK_PROVIDER_ORDER };
+		// 나머지는 폴백 순서만 준다. `order` 는 미기재 공급자(alibaba)를 마지막 폴백으로 남기므로
+		// (2026-09-07 라우팅 메타 실측) `only` 로 목록 밖 공급자를 아예 막는다. 단 `only` 만 주면 목록 안에서
+		// 다시 가중 추첨(fireworks 1순위·deepseek 꼴찌 실측)이라 `order` 도 함께 줘야 네이티브가 1순위.
+		out.gateway = { caching: 'auto', order: DEEPSEEK_PROVIDER_ORDER, only: DEEPSEEK_PROVIDER_ORDER };
 		out.deepseek = { thinking: { type: 'disabled' } };
 	}
 	return out;

@@ -16,8 +16,10 @@ export interface ModelOption {
 // contextLimit = Vercel AI Gateway 표시 max context(input+output 합산 총 컨텍스트).
 // 순서 = 가격 내림차순(게이트웨이 표준 단가, input/output $ per 1M tokens, 2026-09 기준).
 export const MODELS: ModelOption[] = [
-	// $5 / $25
-	{ id: 'anthropic/claude-opus-5', label: 'Claude Opus 5', icon: '/models/claude.avif', contextLimit: 1_000_000 },
+	// $5 / $25 — Opus 4.6. RP 커뮤니티(아카라이브 AI채팅챈·레딧 프리셋 제작자 티어표) 합의로 Claude 중 RP 최고 +
+	// 최신 세대 중 검열 최약. Opus 4.8·5 는 하드검열 강화·창의성 저하 평이라 목록에서 제외(2026-09-07).
+	// 게이트웨이 라우팅은 buildProviderOptions 에서 anthropic 직결 고정(Bedrock 경유는 정책 위반 차단이 엄격).
+	{ id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6', icon: '/models/claude.avif', contextLimit: 1_000_000 },
 	// $3 / $15 — Moonshot 플래그십. 창작 글쓰기 벤치 Opus 5 다음(2026-09). 1M 컨텍스트·캐시 입력 90% 할인
 	{ id: 'moonshotai/kimi-k3', label: 'Kimi K3', icon: '/models/moonshotai.avif', contextLimit: 1_000_000, reasoning: true },
 	// $2 / $10 — GPT-5.6 시리즈 플래그십
@@ -37,7 +39,7 @@ export const DEFAULT_MODEL_ID = 'deepseek/deepseek-v4-flash-0731';
 
 /**
  * 캐릭터 제작 보조(assist)에 허용하는 모델 — 구조화 출력(streamObject)이 안정적인 것만.
- * Claude Opus 5 · GPT-5.6 Sol · DeepSeek V4 Pro · GLM 5.3 Flash. (Gemini Flash 는 제외 — NSFW 설정 입력을
+ * Claude Opus 4.6 · GPT-5.6 Sol · DeepSeek V4 Pro · GLM 5.3 Flash. (Gemini Flash 는 제외 — NSFW 설정 입력을
  * content-filter 로 빈 응답 처리하는 경우가 있음.)
  * DeepSeek V4 Pro 는 NSFW 설정을 거부하지 않는 상위 모델로 추가(2026-09-07 실측: NSFW 러프 입력 4/4 정상 JSON,
  * 30~35s, thinking 끔·스키마는 시스템 주입 호환 모드). Opus·Sol 은 NSFW 설정 입력을 거부하는 경우가 있어
@@ -45,7 +47,7 @@ export const DEFAULT_MODEL_ID = 'deepseek/deepseek-v4-flash-0731';
  * MODELS(채팅 목록)의 부분집합이므로 getModel 로 조회 가능.
  */
 const ASSIST_MODEL_ID_LIST = [
-	'anthropic/claude-opus-5',
+	'anthropic/claude-opus-4.6',
 	'openai/gpt-5.6-sol',
 	'deepseek/deepseek-v4-pro-0813',
 	'zai/glm-5.3-flash'
