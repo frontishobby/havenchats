@@ -126,6 +126,16 @@
 		}
 	}
 
+	// 서버가 이 턴을 검열 응답(안전필터/거부 문구)으로 판정해 취소했는지. 서버는 assistant 를 저장하지 않고
+	// 유저 행도 지우므로, 클라도 버블 둘을 걷어내고 입력을 복원해야 DB 와 맞는다.
+	function parseCensored(jsonText: string): boolean {
+		try {
+			return JSON.parse(jsonText)?.censored === true;
+		} catch {
+			return false;
+		}
+	}
+
 	// 응답 실패·비정상 종료 시 화면에 보여줄 사유. 서버 에러(streamError)를 우선,
 	// 없으면 finishReason 을 사람이 읽을 수 있게 해석. 정상(stop)이면 null.
 	function parseErrorReason(jsonText: string): string | null {
@@ -1355,6 +1365,20 @@
 			if (sep >= 0) {
 				messages[idx].content = raw.slice(0, sep);
 				logResponseMeta(metaJson);
+				// ── 검열 턴 취소 ── 모델이 롤플레이 대신 검열/거부 문구를 냈다(babechat 식 처리).
+				// 스트리밍 중 잠깐 보였던 거부 문구와 유저 버블을 걷어내고, 입력창에 원문을 되살려
+				// 바로 고쳐 보내거나 모델을 바꿀 수 있게 한다. 서버는 이 턴을 DB 에 남기지 않았다.
+				if (parseCensored(metaJson)) {
+					messages.splice(idx, 1);
+					if (!continueTurn) messages.splice(userIdx, 1);
+					input = original;
+					sendError =
+						'AI 가 이야기 대신 검열 문구(부적절한 요청…)를 내보내 이번 턴을 취소했어요. 입력을 되살렸으니 표현을 바꿔 다시 보내거나, 설정(⚙)에서 다른 모델로 바꿔보세요.';
+					await tick();
+					autoGrow();
+					textarea?.focus();
+					return;
+				}
 				const c = parseCost(metaJson);
 				if (c != null) messages[idx].cost = c;
 				// 디버그 모드: 메타 프레임에서 조립 스냅샷·전체 메타를 떼어 패널로.
@@ -3978,6 +4002,26 @@
 		}
 		.header-menu-wrap {
 			display: block;
+		}
+		/* 모바일 — 좁은 폭에서 본문·입력창 글자를 한 단계 줄여 한 화면에 더 많이 읽히게. */
+		.novel {
+			font-size: 0.96rem;
+			line-height: 1.85;
+		}
+		.para {
+			margin-bottom: 1.25em;
+		}
+		.block-body {
+			font-size: 0.86rem;
+		}
+		textarea {
+			font-size: 0.9rem;
+		}
+		.who strong {
+			font-size: 0.92rem;
+		}
+		.who .tagline {
+			font-size: 0.72rem;
 		}
 	}
 	.menu-dot {

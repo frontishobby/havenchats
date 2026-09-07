@@ -311,7 +311,7 @@ chatRouter.post('/', async (c) => {
 				waitUntil: getWaitUntil()
 			});
 		},
-		onFinish: ({ text: reply, usage, providerMetadata }) => {
+		onFinish: ({ text: reply, usage, providerMetadata, finishReason }) => {
 			// AI 호출 토큰·캐시 사용량 실측 로그.
 			// cacheRead > 0 이면 prefix 캐시 hit, cacheWrite 는 이번 턴에 새로 캐시에 쓴 토큰.
 			const d = usage?.inputTokenDetails;
@@ -328,6 +328,12 @@ chatRouter.post('/', async (c) => {
 
 			// 저장 직전 위치코드 {AAB} → 불변 토큰 {#id} 로 고정(이후 제작자 수정에 안 흔들림).
 			// 단, editdisplay 표시 카드는 렌더 때 정규식이 `<img="...">` 를 직접 변환하므로 핀하지 않고 원형 보존.
+			// 검열 응답(안전필터 종료 or 모델의 거부 문구)은 저장하지 않는다 — 스트림 종료부에서 같은 판정으로
+			// 유저 행도 지우고 클라에 censored 메타를 보내 턴 전체를 취소한다(아래 isCensoredTurn).
+			if (isCensoredTurn(reply, finishReason)) {
+				console.warn(`[chat] censored turn dropped session=${session!.id} model=${modelId} finish=${finishReason} text="${reply.trim().slice(0, 120)}"`);
+				return;
+			}
 			const clean = character.displayScripts?.length
 				? reply.trim()
 				: pinSceneCodes(reply.trim(), character.imageSet);
@@ -352,10 +358,12 @@ chatRouter.post('/', async (c) => {
 	});
 
 	const encoder = new TextEncoder();
+	let fullText = '';
 	const stream = new ReadableStream({
 		async start(controller) {
 			try {
 				for await (const chunk of result.textStream) {
+					fullText += chunk;
 					controller.enqueue(encoder.encode(chunk));
 				}
 			} catch (err) {
@@ -385,6 +393,19 @@ chatRouter.post('/', async (c) => {
 			// flash 등에서 출력이 잘리는 경우 finishReason='length'/'content-filter' 로 드러난다.
 			const meta = await collectMeta(result, modelId, streamError);
 			if (debugSnapshot) meta.debug = debugSnapshot;
+			// ── 검열 턴 취소(모델 무관) ── 안전필터 종료·공급자 검열 에러·모델의 거부 문구("부적절한 요청…")면
+			// 이 턴을 없던 일로: assistant 는 onFinish 가 이미 저장 안 했고, 방금 저장한 유저 행을 지운다.
+			// 클라는 censored 메타를 보고 버블 둘을 걷어내고 입력창에 원문을 되살려 재전송/모델 교체를 유도한다.
+			const censored = streamError
+				? isProviderCensorError(streamError)
+				: isCensoredTurn(fullText, meta.finishReason);
+			if (censored) {
+				meta.censored = true;
+				console.warn(
+					`[chat] censored turn session=${session!.id} model=${modelId} finish=${String(meta.finishReason)} err=${streamError ? 1 : 0} text="${fullText.trim().slice(0, 160)}"`
+				);
+				if (!continueTurn) after(deleteMessage(db, userMsgId, userId));
+			}
 			controller.enqueue(encoder.encode(META_SEP + safeJson(meta)));
 			controller.close();
 		}
@@ -456,6 +477,23 @@ function isProviderCensorError(e: unknown): boolean {
 	return /data_inspection_failed|inappropriate content|content[_ -]?filter|content_policy|moderation/.test(
 		s
 	);
+}
+
+/**
+ * 모델이 롤플레이 대신 검열/거부 문구를 내보낸 턴인지(모델 무관). babechat 처럼 이런 응답은 저장하지 않고
+ * 턴을 취소한다. 판정: ① finishReason 이 안전필터 종료(content-filter) ② 응답이 짧고(거부문은 길게 안 씀)
+ * 거부 상투구(부적절/도와드릴 수 없/I can't assist/content policy…)가 있으며 소설 대사 마커(`이름 | "…"`)가 없다.
+ * 캐릭터가 극중에서 "죄송합니다"라고 말하는 정상 응답을 오탐하지 않도록 세 조건을 함께 본다.
+ */
+function isCensoredTurn(text: string, finishReason: unknown): boolean {
+	if (finishReason === 'content-filter') return true;
+	const t = text.trim();
+	if (!t || t.length > 700) return false;
+	// 소설 대사 형식이 하나라도 있으면 롤플레이가 진행된 것으로 본다.
+	if (/[^\n|]{1,30}\s*\|\s*["“]/.test(t)) return false;
+	const refusal =
+		/부적절(한|하여|합니다)|도와드릴 수 없|도움을 드릴 수 없|응답(을|할 수) 없|생성할 수 없|처리할 수 없|요청(을|에) (응|따를|수행)할 수 없|안전 (정책|가이드라인)|콘텐츠 정책|정책에 (위배|어긋)|AI (언어 )?모델(로서|이기)|성적인 콘텐츠|노골적인 (성적|콘텐츠)|I (can(no|')t|am unable to|'m unable to|won't) (help|assist|continue|create|generate|write|comply|provide|fulfill)|(as|I'm) an AI|content policy|safety (guidelines|policy)|sexually explicit|explicit (sexual )?content|inappropriate (request|content)|harmful content|I'm sorry, but|I apologize, but/i;
+	return refusal.test(t);
 }
 
 /**
