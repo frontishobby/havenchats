@@ -20,7 +20,7 @@ import type * as Msal from '@azure/msal-browser';
 import { kvDelete, kvSet } from './idb';
 
 /** Entra 앱(클라이언트) ID — 공개 식별자. 빌드 env PUBLIC_MS_CLIENT_ID 로 덮어쓸 수 있다. */
-const DEFAULT_CLIENT_ID = '';
+const DEFAULT_CLIENT_ID = 'c7d9aef7-36f1-4e6a-8ebc-b3c2eafa1b88';
 export const MS_CLIENT_ID = env.PUBLIC_MS_CLIENT_ID || DEFAULT_CLIENT_ID;
 
 const AUTHORITY = 'https://login.microsoftonline.com/common';

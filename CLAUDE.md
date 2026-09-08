@@ -142,7 +142,7 @@ node scripts/export-legacy.mjs haven-d1.sql --out haven-legacy-backup.zip   # �
 - **GitHub Pages**(레포 `frontishobby/havenchats.com`, Settings › Pages › Source = GitHub Actions, 커스텀 도메인 `havenchats.com`). 워크플로 `.github/workflows/pages.yml`: `npm ci` → `npm run build` → `upload-pages-artifact(build)` → `deploy-pages`.
 - **Cloudflare 는 DNS 만**: `havenchats.com` CNAME → `frontishobby.github.io`(DNS only/회색 구름 — GitHub 가 인증서 발급). Worker `havenchats`·D1 `haven`·R2 `haven-images`(계정 `frontishobby`)는 이전 검증 후 삭제 대상, wrangler 는 레포에서 제거됨. 구 무료 계정 `HavenChats` 리소스도 삭제 대상.
 - **OneDrive**: 유저 Microsoft 계정의 앱 폴더 `Apps/Haven`(무료 5GB). 파일 = `haven.sqlite` + 이미지(키 경로 그대로). 유저가 OneDrive 에서 직접 볼 수 있음.
-- **Entra 앱 등록**(SPA): `PUBLIC_MS_CLIENT_ID`. 리디렉트 URI 에 prod·localhost 의 `/auth.html` 과 `/` 등록. 구 Google OAuth 클라이언트(`965110096401-…`)·Drive appData 의 옛 파일은 삭제 대상.
+- **Entra 앱 등록**(SPA, 개인 계정 Default Directory): 클라이언트 ID `c7d9aef7-36f1-4e6a-8ebc-b3c2eafa1b88`(코드 기본값). 리디렉트 URI 에 prod·localhost 의 `/auth.html` 과 `/` 등록. 구 Google OAuth 클라이언트(`965110096401-…`)·Drive appData 의 옛 파일은 삭제 대상.
 
 ## 아직 안 된 것 / 다음 단계
 
