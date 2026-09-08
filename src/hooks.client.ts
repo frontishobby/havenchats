@@ -1,4 +1,5 @@
 import { initLocalRuntime } from '$lib/local/runtime';
+import { initStorage } from '$lib/local/sync.svelte';
 import type { ClientInit } from '@sveltejs/kit';
 
 /**
@@ -8,4 +9,7 @@ import type { ClientInit } from '@sveltejs/kit';
  */
 export const init: ClientInit = async () => {
 	await initLocalRuntime();
+	// 저장소 모드 확인 + Drive 초기 동기화는 기다리지 않는다(랜딩 오버레이가 진행을 보여주고,
+	// 원격 DB 를 받아오면 invalidateAll 로 화면을 새로 그린다).
+	void initStorage();
 };

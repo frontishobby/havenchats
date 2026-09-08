@@ -3,6 +3,10 @@
 	import ProfileModal from '$lib/components/ProfileModal.svelte';
 	import ApiKeyModal from '$lib/components/ApiKeyModal.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
+	import StorageLanding from '$lib/components/StorageLanding.svelte';
+	import StorageModal from '$lib/components/StorageModal.svelte';
+	import { storageModal } from '$lib/state/storageModal.svelte';
+	import { sync, refreshTokenInGesture } from '$lib/local/sync.svelte';
 	import { profileModal } from '$lib/state/profileModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { privacyMode } from '$lib/state/privacyMode.svelte';
@@ -81,6 +85,10 @@
 		profileModal.open = true;
 		menuOpen = false;
 	}
+	function openStorage() {
+		menuOpen = false;
+		storageModal.open = true;
+	}
 	function openApiKeys() {
 		apiKeyModal.open = true;
 		menuOpen = false;
@@ -94,6 +102,8 @@
 </script>
 
 <svelte:window onclick={onWindowClick} onkeydown={onWindowKey} />
+<!-- Drive 토큰(1시간)이 만료 임박이면 유저 제스처 안에서 미리 갱신(팝업이 바로 닫힘). -->
+<svelte:document onclickcapture={refreshTokenInGesture} />
 
 <div class="app" class:chat-route={isChatRoute}>
 	<header class="topbar">
@@ -113,6 +123,25 @@
 				<span class="wordmark">Haven<span class="dim">chats</span></span>
 			</a>
 		</div>
+		{#if sync.mode === 'drive'}
+			<button
+				class="sync-chip"
+				class:warn={sync.status === 'needs-auth' || sync.status === 'error'}
+				class:busy={sync.status === 'syncing'}
+				onclick={() => (storageModal.open = true)}
+				title={sync.error ?? 'Google Drive 동기화 상태'}
+			>
+				{sync.status === 'syncing'
+					? '⟳ 동기화 중'
+					: sync.status === 'needs-auth'
+						? '⚠ Drive 재연결'
+						: sync.status === 'error'
+							? '⚠ 동기화 오류'
+							: sync.pending > 0
+								? `☁ 대기 ${sync.pending}`
+								: '☁ 동기화됨'}
+			</button>
+		{/if}
 		{#if me?.credits}
 			<span class="credits-badge" title={`총 사용 $${me.credits.totalUsed.toFixed(2)}`}>
 				<span class="credits-k">Vercel 크레딧</span>
@@ -152,6 +181,9 @@
 							<button class="menu-item" role="menuitem" onclick={openApiKeys}>
 								API 키 관리
 							</button>
+							<button class="menu-item" role="menuitem" onclick={openStorage}>
+								저장소 · 백업
+							</button>
 							<a class="menu-item" role="menuitem" href="/import" onclick={() => (menuOpen = false)}>
 								charx 가져오기
 							</a>
@@ -176,6 +208,10 @@
 	onDelete={deleteChat}
 />
 <ProfileModal user={me?.user ?? null} />
+<StorageModal />
+{#if !sync.ready}
+	<StorageLanding />
+{/if}
 {#if me?.user}
 	<ApiKeyModal />
 {/if}
@@ -260,6 +296,24 @@
 		gap: 16px;
 	}
 	/* Vercel 크레딧 뱃지 — 네비바 정중앙(좌/우 영역과 독립되게 절대 배치). */
+	.sync-chip {
+		padding: 4px 10px;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		background: var(--bg-card);
+		color: var(--text-dim);
+		font-size: 0.72rem;
+		font-weight: 600;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+	.sync-chip.busy {
+		color: var(--accent);
+	}
+	.sync-chip.warn {
+		color: #ffb04d;
+		border-color: #ffb04d66;
+	}
 	.credits-badge {
 		position: absolute;
 		left: 50%;
