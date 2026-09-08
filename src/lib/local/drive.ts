@@ -10,12 +10,15 @@
  * (https://havenchats.com, http://localhost:5173)을 넣는다. 앱은 '테스트' 상태로 두고 테스트 사용자에 본인만 추가.
  */
 import { env } from '$env/dynamic/public';
+import { kvDelete, kvSet } from './idb';
 
 /** OAuth 클라이언트 ID(비밀 아님). 빌드 env PUBLIC_GOOGLE_CLIENT_ID 로 덮어쓸 수 있다. */
 export const GOOGLE_CLIENT_ID = env.PUBLIC_GOOGLE_CLIENT_ID || '';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const TOKEN_KEY = 'haven:drive:token';
+/** 서비스워커(static/img-sw.js)가 Drive 지연 다운로드에 쓰는 kv 키. */
+export const TOKEN_KV_KEY = 'drive:token';
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 /** 만료 이 시간 전이면 갱신 시도. */
@@ -86,6 +89,8 @@ function store(t: StoredToken | null) {
 	} catch {
 		/* storage unavailable */
 	}
+	// 서비스워커는 localStorage 를 못 읽으므로 IndexedDB 에도 복사.
+	void (t ? kvSet(TOKEN_KV_KEY, t) : kvDelete(TOKEN_KV_KEY)).catch(() => {});
 }
 
 /** 유효한(만료 여유 있는) 토큰이 있으면 반환, 없으면 null(팝업 없음). */

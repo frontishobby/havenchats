@@ -14,7 +14,7 @@
  * 자동으로 고르지 않고 `conflict` 를 띄워 유저가 고른다(1인 사용이라 드묾).
  */
 import { invalidateAll } from '$app/navigation';
-import { kvGet, kvSet, kvDelete, objGet, objKeys, objPut } from './idb';
+import { kvGet, kvSet, kvDelete, objGet, objKeys, objPut, type StoredObject } from './idb';
 import {
 	getLocalRuntime,
 	onDatabaseSaved,
@@ -43,6 +43,8 @@ export type SyncStatus = 'off' | 'syncing' | 'idle' | 'needs-auth' | 'error';
 const MODE_KEY = 'haven:storage';
 const DB_NAME = 'haven.sqlite';
 const PUSH_DEBOUNCE_MS = 3000;
+/** 이미지 업로드/다운로드 동시 수. */
+const PARALLEL = 4;
 
 // IndexedDB kv 키
 const K_INDEX = 'drive:index'; // Record<name, {id, md5}>
@@ -113,6 +115,8 @@ export async function initStorage(): Promise<void> {
 	index = (await kvGet<Record<string, RemoteRef>>(K_INDEX)) ?? {};
 	await refreshPendingCount();
 	hookRuntime();
+	// 로컬에 없는 이미지(다른 기기에서 만든 것)는 볼 때 Drive 에서 내려받는다.
+	rt.r2.setMissHandler((key) => (sync.mode === 'drive' ? fetchImageFromDrive(key) : Promise.resolve(null)));
 
 	if (sync.mode === 'local') {
 		sync.status = 'off';
@@ -381,13 +385,12 @@ async function syncImages(token: string): Promise<void> {
 		await kvSet(K_DELS, [...dels]);
 	}
 
-	// 2) 업로드: 대기열 + 원격에 없는 로컬 파일
+	// 2) 업로드(병렬): 대기열 + 원격에 없는 로컬 파일
 	const toUpload = new Set<string>([...puts]);
 	for (const k of localKeys) if (!index[k]) toUpload.add(k);
 	let n = 0;
-	for (const key of toUpload) {
-		n++;
-		sync.phase = `이미지 올리는 중… (${n}/${toUpload.size})`;
+	let sinceSave = 0;
+	await parallel([...toUpload], async (key) => {
 		const obj = await objGet(key);
 		if (obj) {
 			const ref = index[key];
@@ -397,28 +400,76 @@ async function syncImages(token: string): Promise<void> {
 			index[key] = { id: f.id, md5: f.md5Checksum };
 		}
 		puts.delete(key);
-		await kvSet(K_PUTS, [...puts]);
-		await kvSet(K_INDEX, index);
-		await refreshPendingCount();
-	}
-
-	// 3) 다운로드: 로컬에 없는 원격 파일(다른 기기에서 만든 이미지)
-	const toDownload = Object.keys(index).filter((k) => k !== DB_NAME && !localKeys.has(k));
-	n = 0;
-	for (const key of toDownload) {
 		n++;
-		sync.phase = `이미지 받는 중… (${n}/${toDownload.length})`;
-		const blob = await download(token, index[key].id);
-		await objPut({
-			key,
-			blob,
-			contentType: blob.type || guessType(key),
-			size: blob.size,
-			uploaded: Date.now(),
-			etag: index[key].md5 ?? crypto.randomUUID().replace(/-/g, '')
-		});
-	}
+		sync.phase = `이미지 올리는 중… (${n}/${toUpload.size})`;
+		// 인덱스/대기열은 20개마다 저장(중단돼도 재개 가능, IndexedDB 쓰기 부담 완화)
+		if (++sinceSave >= 20) {
+			sinceSave = 0;
+			await kvSet(K_PUTS, [...puts]);
+			await kvSet(K_INDEX, index);
+			await refreshPendingCount();
+		}
+	});
+	await kvSet(K_PUTS, [...puts]);
 	await kvSet(K_INDEX, index);
+	await refreshPendingCount();
+
+	// 3) 다운로드는 하지 않는다 — 로컬에 없는 원격 이미지는 볼 때 지연 다운로드(서비스워커/miss 핸들러).
+	await kvSet(K_INDEX, index);
+}
+
+/** Drive 에서 이미지 1개를 받아 IndexedDB 에 넣는다(지연 다운로드). 인덱스에 없거나 토큰 없으면 null. */
+async function fetchImageFromDrive(key: string): Promise<StoredObject | null> {
+	const ref = index[key];
+	if (!ref) return null;
+	const token = currentToken();
+	if (!token) return null;
+	const blob = await download(token, ref.id);
+	const obj: StoredObject = {
+		key,
+		blob,
+		contentType: blob.type || guessType(key),
+		size: blob.size,
+		uploaded: Date.now(),
+		etag: ref.md5 ?? crypto.randomUUID().replace(/-/g, '')
+	};
+	await objPut(obj);
+	return obj;
+}
+
+/** 설정 모달: 원격 이미지를 전부 이 기기에 내려받기(오프라인 대비, 선택). 진행은 sync.phase. */
+export async function downloadAllImages(): Promise<{ downloaded: number; total: number }> {
+	if (sync.mode !== 'drive') return { downloaded: 0, total: 0 };
+	const localKeys = new Set(await objKeys());
+	const todo = Object.keys(index).filter((k) => k !== DB_NAME && !localKeys.has(k));
+	let n = 0;
+	await run(async () => {
+		await parallel(todo, async (key) => {
+			await fetchImageFromDrive(key);
+			n++;
+			sync.phase = `이미지 받는 중… (${n}/${todo.length})`;
+		});
+		await finishOk();
+	});
+	return { downloaded: n, total: todo.length };
+}
+
+async function parallel<T>(items: T[], fn: (item: T) => Promise<void>): Promise<void> {
+	const queue = [...items];
+	let firstError: unknown = null;
+	await Promise.all(
+		Array.from({ length: Math.min(PARALLEL, queue.length) }, async () => {
+			while (queue.length && !firstError) {
+				const item = queue.shift()!;
+				try {
+					await fn(item);
+				} catch (e) {
+					firstError ??= e;
+				}
+			}
+		})
+	);
+	if (firstError) throw firstError;
 }
 
 function guessType(key: string): string {

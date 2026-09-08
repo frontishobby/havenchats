@@ -1,14 +1,15 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { storageModal } from '$lib/state/storageModal.svelte';
-	import { sync, connectDrive, disconnectDrive, syncNow, remoteSummary } from '$lib/local/sync.svelte';
-	import { exportBackup, importBackup } from '$lib/local/backup';
+	import { sync, connectDrive, disconnectDrive, syncNow, remoteSummary, downloadAllImages } from '$lib/local/sync.svelte';
+	import { exportBackup, importBackup, type BackupProgress } from '$lib/local/backup';
 
 	let busy = $state<string | null>(null);
 	let msg = $state<string | null>(null);
 	let err = $state<string | null>(null);
 	let remote = $state<{ files: number; bytes: number } | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
+	let progress = $state<BackupProgress | null>(null);
 
 	$effect(() => {
 		if (storageModal.open) {
@@ -65,13 +66,20 @@
 		});
 	const onExport = () =>
 		guard('export', async () => {
-			const blob = await exportBackup();
-			const a = document.createElement('a');
-			a.href = URL.createObjectURL(blob);
-			a.download = `haven-backup-${new Date().toISOString().slice(0, 10)}.zip`;
-			a.click();
-			setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-			msg = `백업 zip 을 내려받았어요 (${fmtBytes(blob.size)}).`;
+			try {
+				const bytes = await exportBackup((p) => (progress = p));
+				msg = `백업 zip 을 저장했어요 (${fmtBytes(bytes)}).`;
+			} catch (e) {
+				if ((e as Error)?.name === 'AbortError') return; // 저장 대화상자 취소
+				throw e;
+			} finally {
+				progress = null;
+			}
+		});
+	const onDownloadAll = () =>
+		guard('download', async () => {
+			const r = await downloadAllImages();
+			msg = r.total === 0 ? '이미 전부 이 기기에 있어요.' : `이미지 ${r.downloaded}/${r.total}개를 내려받았어요.`;
 		});
 	function onPickImport() {
 		fileInput?.click();
@@ -82,9 +90,13 @@
 		if (!f) return;
 		void guard('import', async () => {
 			if (!confirm('백업을 가져오면 현재 데이터(캐릭터·대화·설정)가 zip 의 내용으로 바뀝니다. 계속할까요?')) return;
-			const r = await importBackup(f);
-			await invalidateAll();
-			msg = `가져왔어요. 이미지 ${r.images}개.${sync.mode === 'drive' ? ' Drive 에도 곧 올라가요.' : ''}`;
+			try {
+				const r = await importBackup(f, (p) => (progress = p));
+				await invalidateAll();
+				msg = `가져왔어요. 이미지 ${r.images}개.${sync.mode === 'drive' ? ' Drive 에도 곧 올라가요.' : ''}`;
+			} finally {
+				progress = null;
+			}
 		});
 	}
 
@@ -131,6 +143,9 @@
 					{#if sync.error}<p class="err">{sync.error}</p>{/if}
 					<div class="actions">
 						<button class="primary" onclick={onSync} disabled={!!busy}>지금 동기화</button>
+						<button class="ghost" onclick={onDownloadAll} disabled={!!busy} title="다른 기기에서 만든 이미지는 볼 때 내려받아요. 오프라인 대비로 미리 전부 받으려면.">
+							{busy === 'download' ? sync.phase || '내려받는 중…' : '이미지 전부 내려받기'}
+						</button>
 						<button class="ghost" onclick={onDisconnect} disabled={!!busy}>연결 해제</button>
 					</div>
 				{:else}
@@ -157,6 +172,16 @@
 				</div>
 			</section>
 
+			{#if progress}
+				<p class="hint">
+					{progress.phase}
+					{#if progress.total > 0}
+						{progress.phase === '읽는 중' ? `${fmtBytes(progress.done)} / ${fmtBytes(progress.total)}` : `${progress.done} / ${progress.total}`}
+					{:else if progress.done > 0}
+						{progress.done}
+					{/if}
+				</p>
+			{/if}
 			{#if msg}<p class="ok">{msg}</p>{/if}
 			{#if err}<p class="err">{err}</p>{/if}
 		</div>

@@ -55,8 +55,27 @@ async function toBlob(value: PutValue, contentType: string): Promise<Blob> {
 
 export type R2ChangeKind = 'put' | 'delete';
 
+export type MissHandler = (key: string) => Promise<StoredObject | null>;
+
 export class LocalR2 {
+	private onMiss: MissHandler | null = null;
+
 	constructor(private readonly onChange: (kind: R2ChangeKind, keys: string[]) => void) {}
+
+	/** 로컬에 없는 키를 외부(Drive)에서 가져오는 핸들러(sync 가 등록). 가져온 건 IndexedDB 에 넣어둔다. */
+	setMissHandler(fn: MissHandler | null): void {
+		this.onMiss = fn;
+	}
+
+	private async load(key: string): Promise<StoredObject | undefined> {
+		const o = await objGet(key);
+		if (o || !this.onMiss) return o;
+		try {
+			return (await this.onMiss(key)) ?? undefined;
+		} catch {
+			return undefined;
+		}
+	}
 
 	async put(
 		key: string,
@@ -81,7 +100,7 @@ export class LocalR2 {
 	}
 
 	async get(key: string): Promise<LocalR2ObjectBody | null> {
-		const o = await objGet(key);
+		const o = await this.load(key);
 		if (!o) return null;
 		const meta = toMeta(o);
 		return {
@@ -96,7 +115,7 @@ export class LocalR2 {
 	}
 
 	async head(key: string): Promise<LocalR2Object | null> {
-		const o = await objGet(key);
+		const o = await this.load(key);
 		return o ? toMeta(o) : null;
 	}
 
