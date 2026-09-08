@@ -12,8 +12,9 @@
 import { env } from '$env/dynamic/public';
 import { kvDelete, kvSet } from './idb';
 
-/** OAuth 클라이언트 ID(비밀 아님). 빌드 env PUBLIC_GOOGLE_CLIENT_ID 로 덮어쓸 수 있다. */
-export const GOOGLE_CLIENT_ID = env.PUBLIC_GOOGLE_CLIENT_ID || '';
+/** OAuth 클라이언트 ID(비밀 아님 — 공개 식별자). 빌드 env PUBLIC_GOOGLE_CLIENT_ID 로 덮어쓸 수 있다. */
+const DEFAULT_CLIENT_ID = '965110096401-ddiqcikdcsn0ffp2d7n0uvno534t3f1l.apps.googleusercontent.com';
+export const GOOGLE_CLIENT_ID = env.PUBLIC_GOOGLE_CLIENT_ID || DEFAULT_CLIENT_ID;
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const TOKEN_KEY = 'haven:drive:token';

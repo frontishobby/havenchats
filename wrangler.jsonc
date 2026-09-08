@@ -1,39 +1,14 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "havenchats",
-	"main": "worker/src/index.ts",
 	"compatibility_date": "2026-06-01",
-	"compatibility_flags": ["nodejs_compat"],
-	// 정적 SPA(adapter-static 빌드 결과)를 ASSETS 로 서빙.
-	// /api,/auth,/img 만 Worker 로, 나머지(정적파일·SPA 네비게이션)는 Worker 안 거치고 직접 서빙.
+	// 정적 자산 전용 Worker(코드 없음, CPU 0) — SvelteKit adapter-static 빌드 결과(build/)만 서빙.
+	// API·DB·이미지는 전부 브라우저 안(src/lib/local)에서 돌고, 저장소는 IndexedDB + Google Drive.
+	// 배포: main 푸시 → Cloudflare Workers Builds(대시보드 Git 연결)가 npm run build → wrangler deploy.
 	"assets": {
 		"directory": "./build",
-		"binding": "ASSETS",
-		"not_found_handling": "single-page-application",
-		"run_worker_first": ["/api/*", "/auth/*", "/img/*"]
+		"not_found_handling": "single-page-application"
 	},
-	// SvelteKit 별칭을 Worker 빌드(esbuild)에서도 해석.
-	// $env/dynamic/private 는 Worker 용 env shim 으로 치환.
-	"alias": {
-		"$lib": "./src/lib",
-		"$env/dynamic/private": "./src/lib/server/env.ts",
-		"$env/dynamic/public": "./src/lib/server/env.ts"
-	},
-	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "haven",
-			"database_id": "4ddf590a-9ef2-45c6-bb07-a293fefdd239",
-			"migrations_dir": "./migrations"
-		}
-	],
-	"r2_buckets": [
-		{
-			"binding": "IMAGES",
-			"bucket_name": "haven-images"
-		}
-	],
 	// 커스텀 도메인(존이 이 계정에 있어야 함). 배포 시 DNS·인증서 자동 구성.
-	"routes": [{ "pattern": "havenchats.com", "custom_domain": true }],
-	"observability": { "enabled": true }
+	"routes": [{ "pattern": "havenchats.com", "custom_domain": true }]
 }

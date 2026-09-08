@@ -1,5 +1,10 @@
 # 캐릭터 AI 채팅 서비스 — 아키텍처 설계
 
+> **⚠ 2026-09-08 이후 이 문서는 역사 기록이다.** 서비스가 **서버 없는 정적 1인 모드**로 바뀌었다:
+> Worker(Hono)·D1·R2·Google 로그인은 폐기되고, 같은 Hono 라우터·DB 로직이 **브라우저 안**에서
+> sql.js(SQLite WASM)+IndexedDB 위에서 돈다. 저장소는 이 기기(IndexedDB) 또는 Google Drive appDataFolder 동기화.
+> 현재 구조는 루트 `CLAUDE.md` 를 보라. 아래 내용 중 프롬프트 조립·토큰 전략·이미지 코드 등 도메인 로직 설명은 여전히 유효하다.
+
 > babechat / caveduck 류 캐릭터 롤플레이 채팅 서비스
 > Stack: **단일 Cloudflare Worker (Hono 백엔드 + 정적 SPA) + Vercel AI Gateway + D1·R2**
 > 작성일: 2026-06-03 / 상태: Draft v1
