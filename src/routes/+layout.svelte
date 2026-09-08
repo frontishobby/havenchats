@@ -139,8 +139,8 @@
 						? '⟳ 동기화 중'
 						: sync.status === 'needs-auth'
 							? sync.pending > 0
-								? `⚠ 재연결 · 대기 ${sync.pending}`
-								: '⚠ OneDrive 재연결'
+								? `⚠ 로그인 · 대기 ${sync.pending}`
+								: '⚠ OneDrive 로그인'
 							: sync.status === 'conflict'
 								? '⚠ 충돌 · 선택 필요'
 							: sync.status === 'error'

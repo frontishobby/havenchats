@@ -68,13 +68,13 @@ async function fetchFromDrive(key) {
 	const [index, token] = await Promise.all([kvGet('od:index'), kvGet('od:token')]);
 	const ref = index && index[key];
 	if (!ref || !token || !token.accessToken || token.expiresAt < Date.now()) return null;
-	const meta = await fetch(`${GRAPH}/me/drive/items/${ref.id}?$select=id,@microsoft.graph.downloadUrl`, {
-		headers: { authorization: `Bearer ${token.accessToken}` }
-	});
+	const auth = { headers: { authorization: `Bearer ${token.accessToken}` } };
+	// `$select=@microsoft.graph.downloadUrl` 은 Graph 버그로 값이 비므로 $select 없이 받는다(두 이름 중 있는 것). 없으면 /content.
+	const meta = await fetch(`${GRAPH}/me/drive/items/${ref.id}`, auth);
 	if (!meta.ok) return null;
-	const url = (await meta.json())['@microsoft.graph.downloadUrl'];
-	if (!url) return null;
-	const res = await fetch(url);
+	const j = await meta.json();
+	const url = j['@microsoft.graph.downloadUrl'] || j['@content.downloadUrl'];
+	const res = url ? await fetch(url) : await fetch(`${GRAPH}/me/drive/items/${ref.id}/content`, auth);
 	if (!res.ok) return null;
 	const blob = await res.blob();
 	const obj = {

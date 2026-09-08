@@ -75,8 +75,8 @@
 				<button class="link" onclick={cancelSync}>취소하고 들어가기 (남은 건 나중에)</button>
 			{/if}
 		{:else if sync.mode === 'drive'}
-			<h1>OneDrive 다시 연결</h1>
-			<p class="sub">OneDrive 로그인이 만료됐어요. 다시 연결하면 최신 데이터로 맞춥니다.</p>
+			<h1>OneDrive 로그인</h1>
+			<p class="sub">OneDrive 에 로그인하면 최신 데이터로 맞춥니다.</p>
 			{#if sync.error}<p class="err">{sync.error}</p>{/if}
 			<button class="primary" onclick={onReconnect} disabled={busy}>OneDrive 다시 연결</button>
 			<button class="link" onclick={continueOffline}>연결 없이 계속 (변경은 나중에 올라감)</button>

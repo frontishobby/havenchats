@@ -316,6 +316,7 @@ interface Item {
 	description?: string;
 	parentReference?: { path?: string; id?: string };
 	'@microsoft.graph.downloadUrl'?: string;
+	'@content.downloadUrl'?: string;
 }
 
 function toFile(it: Item, name: string): CloudFile {
@@ -548,13 +549,16 @@ async function uploadLarge(token: string, key: string, blob: Blob, ifMatch?: str
 	return last;
 }
 
-/** 파일 다운로드(id). 사전 인증 downloadUrl 을 받아 인증 헤더 없이 받는다(CORS). */
+/**
+ * 파일 다운로드(id). 사전 인증 downloadUrl 을 받아 인증 헤더 없이 받는다(CORS).
+ * `$select=@microsoft.graph.downloadUrl` 은 Graph 버그로 값을 안 주므로(`content.downloadUrl` 로 골라야 함) `$select` 없이 항목을
+ * 받아 두 이름 중 있는 것을 쓰고, 그래도 없으면 `/content`(302 → 같은 CDN) 를 인증 헤더로 직접 받는다.
+ */
 export async function download(token: string, id: string): Promise<Blob> {
-	const res = await call(token, `${GRAPH}/me/drive/items/${id}?$select=id,@microsoft.graph.downloadUrl`);
+	const res = await call(token, `${GRAPH}/me/drive/items/${id}`);
 	const it = (await res.json()) as Item;
-	const url = it['@microsoft.graph.downloadUrl'];
-	if (!url) throw new CloudHttpError(404, '다운로드 주소가 없어요.');
-	const r = await fetch(url);
+	const url = it['@microsoft.graph.downloadUrl'] || it['@content.downloadUrl'];
+	const r = url ? await fetch(url) : await call(token, `${GRAPH}/me/drive/items/${id}/content`);
 	if (!r.ok) throw new CloudHttpError(r.status, `다운로드 실패 (${r.status})`);
 	return r.blob();
 }
