@@ -123,33 +123,39 @@
 				<span class="wordmark">Haven<span class="dim">chats</span></span>
 			</a>
 		</div>
-		{#if sync.mode === 'drive'}
-			<button
-				class="sync-chip"
-				class:warn={sync.status === 'needs-auth' || sync.status === 'error'}
-				class:busy={sync.status === 'syncing'}
-				onclick={() => (storageModal.open = true)}
-				title={sync.error ?? 'Google Drive 동기화 상태'}
-			>
-				{sync.status === 'syncing'
-					? '⟳ 동기화 중'
-					: sync.status === 'needs-auth'
-						? '⚠ Drive 재연결'
-						: sync.status === 'error'
-							? '⚠ 동기화 오류'
-							: sync.pending > 0
-								? `☁ 대기 ${sync.pending}`
-								: '☁ 동기화됨'}
-			</button>
-		{/if}
-		{#if me?.credits}
-			<span class="credits-badge" title={`총 사용 $${me.credits.totalUsed.toFixed(2)}`}>
-				<span class="credits-k">Vercel 크레딧</span>
-				<span class="credits-v" class:low={me.credits.balance < 5}>
-					${me.credits.balance.toFixed(2)}
-				</span>
-			</span>
-		{/if}
+		<!-- 중앙: Drive 동기화 칩 + 그 오른쪽에 Vercel 크레딧 잔량(키 등록 시). -->
+		<div class="center">
+			{#if sync.mode === 'drive'}
+				<button
+					class="sync-chip"
+					class:warn={sync.status === 'needs-auth' || sync.status === 'error'}
+					class:busy={sync.status === 'syncing'}
+					onclick={() => (storageModal.open = true)}
+					title={sync.error ?? 'Google Drive 동기화 상태'}
+				>
+					{sync.status === 'syncing'
+						? '⟳ 동기화 중'
+						: sync.status === 'needs-auth'
+							? '⚠ Drive 재연결'
+							: sync.status === 'error'
+								? '⚠ 동기화 오류'
+								: sync.pending > 0
+									? `☁ 대기 ${sync.pending}`
+									: '☁ 동기화됨'}
+				</button>
+			{/if}
+			{#if me?.credits}
+				<button
+					class="credits-badge"
+					class:low={me.credits.balance < 5}
+					onclick={openApiKeys}
+					title={`Vercel AI Gateway 크레딧 잔여 · 총 사용 $${me.credits.totalUsed.toFixed(2)}`}
+				>
+					<span class="credits-k">▲ 크레딧</span>
+					<span class="credits-v">${me.credits.balance.toFixed(2)}</span>
+				</button>
+			{/if}
+		</div>
 		<nav>
 			<a class="hub-link" href="/styles">그림체</a>
 			<a class="hub-link" href="/modules">모듈</a>
@@ -238,9 +244,10 @@
 		position: sticky;
 		top: 0;
 		z-index: 20;
-		display: flex;
+		display: grid;
+		grid-template-columns: 1fr auto 1fr;
 		align-items: center;
-		justify-content: space-between;
+		gap: 12px;
 		padding: 0 20px;
 		height: var(--topbar-h);
 		background: color-mix(in srgb, var(--bg) 80%, transparent);
@@ -251,6 +258,13 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
+		min-width: 0;
+	}
+	/* 중앙 그룹: 동기화 칩 → 크레딧 뱃지 순서로 나란히. */
+	.center {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 	}
 	.hamburger {
 		display: flex;
@@ -293,9 +307,9 @@
 	nav {
 		display: flex;
 		align-items: center;
+		justify-self: end;
 		gap: 16px;
 	}
-	/* Vercel 크레딧 뱃지 — 네비바 정중앙(좌/우 영역과 독립되게 절대 배치). */
 	.sync-chip {
 		padding: 4px 10px;
 		border: 1px solid var(--border);
@@ -314,38 +328,37 @@
 		color: #ffb04d;
 		border-color: #ffb04d66;
 	}
+	/* Vercel 크레딧 잔여 — 동기화 칩과 같은 알약 스타일, 클릭 시 API 키 관리. */
 	.credits-badge {
-		position: absolute;
-		left: 50%;
-		top: 50%;
-		transform: translate(-50%, -50%);
 		display: inline-flex;
 		align-items: center;
-		gap: 8px;
-		padding: 5px 12px;
+		gap: 6px;
+		padding: 4px 10px;
 		background: var(--bg-card);
 		border: 1px solid var(--border);
 		border-radius: 999px;
-		font-size: 0.84rem;
+		font-size: 0.72rem;
 		white-space: nowrap;
-		z-index: 1;
+		cursor: pointer;
 	}
 	.credits-k {
 		color: var(--text-dim);
 		font-weight: 600;
-		font-size: 0.76rem;
 	}
 	.credits-v {
 		font-weight: 800;
 		color: var(--text);
 		font-variant-numeric: tabular-nums;
 	}
-	.credits-v.low {
+	.credits-badge.low {
+		border-color: color-mix(in srgb, var(--nsfw) 40%, transparent);
+	}
+	.credits-badge.low .credits-v {
 		color: var(--nsfw);
 	}
-	/* 좁은 화면에선 브랜드·유저메뉴와 겹치므로 숨김. */
+	/* 좁은 화면: 라벨은 숨기고 금액만. */
 	@media (max-width: 640px) {
-		.credits-badge {
+		.credits-k {
 			display: none;
 		}
 	}
