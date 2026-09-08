@@ -6,7 +6,7 @@ import { requireUser } from '$lib/backend/context';
 
 /**
  * 프로필·아바타 저장(로그인 필수). multipart/form-data.
- * 이름·대화용 이름·취향·페르소나·국가(NSFW 게이트)·아바타 이미지(webp/avif) 저장.
+ * 대화용 이름·페르소나 저장(둘 다 선택). 아바타 필드는 구 UI 호환으로 남아 있음.
  */
 
 /** 허용 이미지 타입 → 확장자. (webp/avif 만) */
@@ -27,13 +27,10 @@ profileRouter.post('/', async (c) => {
 
 	const form = await c.req.formData();
 
-	const name = String(form.get('name') ?? '').trim().slice(0, 40);
-	if (!name) {
-		return c.json({ error: '이름을 입력해 주세요.' }, 400);
-	}
-
-	// 대화용 이름(선택) — 비면 채팅에서 display_name 으로 폴백하므로 NULL 저장.
+	// 대화용 이름(선택) — 비면 채팅에서 display_name('나')으로 폴백하므로 NULL 저장.
 	const personaName = String(form.get('persona_name') ?? '').trim().slice(0, 40) || null;
+	// display_name 은 1인 모드에선 표시용일 뿐(헤더). 대화용 이름이 있으면 그것, 없으면 '나'. 저장되면 profileComplete.
+	const name = String(form.get('name') ?? '').trim().slice(0, 40) || personaName || '나';
 
 	const prefRaw = String(form.get('preference') ?? '');
 	const preference: Preference | null =

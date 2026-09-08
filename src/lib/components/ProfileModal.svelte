@@ -5,69 +5,26 @@
 
 	let { user }: { user: App.Locals['user'] } = $props();
 
+	// 첫 실행(아직 저장한 적 없음)엔 닫기 없이 '시작하기'로 한 번 저장하게 한다. 필드는 전부 선택.
 	const dismissable = $derived(!!user?.profileComplete);
 
-	const ACCEPT = ['image/webp', 'image/avif'];
-	const AVATAR_MAX_BYTES = 3 * 1024 * 1024;
-
-	let name = $state('');
 	let personaName = $state('');
 	let persona = $state('');
 	let saving = $state(false);
 	let error = $state('');
 	let initialized = $state(false);
 
-	// 프로필 사진
-	let avatarFile = $state<File | null>(null);
-	let avatarPreview = $state<string | null>(null);
-	let fileInput = $state<HTMLInputElement | null>(null);
-
-	// 새로 고른 사진 > 기존 프로필 사진 > 없음(이니셜 폴백)
-	const displayAvatar = $derived(avatarPreview ?? user?.avatarUrl ?? null);
-
-	function resetAvatar() {
-		if (avatarPreview) URL.revokeObjectURL(avatarPreview);
-		avatarFile = null;
-		avatarPreview = null;
-		if (fileInput) fileInput.value = '';
-	}
-
-	function setAvatar(file: File | undefined | null) {
-		if (!file) return;
-		if (!ACCEPT.includes(file.type)) {
-			error = '프로필 사진은 webp 또는 avif 이미지만 가능해요.';
-			return;
-		}
-		if (file.size > AVATAR_MAX_BYTES) {
-			error = '이미지 용량이 너무 커요 (최대 3MB).';
-			return;
-		}
-		error = '';
-		if (avatarPreview) URL.revokeObjectURL(avatarPreview);
-		avatarFile = file;
-		avatarPreview = URL.createObjectURL(file);
-	}
-
-	function onAvatarChange(e: Event) {
-		setAvatar((e.target as HTMLInputElement).files?.[0]);
-	}
-
 	// 모달이 열릴 때 현재 프로필로 폼 초기화
 	$effect(() => {
 		if (profileModal.open && !initialized) {
-			name = user?.name ?? '';
 			personaName = user?.personaName ?? '';
 			persona = user?.persona ?? '';
 			error = '';
-			resetAvatar();
 			initialized = true;
 		} else if (!profileModal.open && initialized) {
-			resetAvatar();
 			initialized = false;
 		}
 	});
-
-	const canSave = $derived(name.trim().length > 0);
 
 	function close() {
 		if (dismissable) profileModal.open = false;
@@ -77,15 +34,13 @@
 	}
 
 	async function save() {
-		if (!canSave || saving) return;
+		if (saving) return;
 		saving = true;
 		error = '';
 		try {
 			const fd = new FormData();
-			fd.set('name', name.trim());
 			fd.set('persona_name', personaName.trim());
 			fd.set('persona', persona.trim());
-			if (avatarFile) fd.set('avatar', avatarFile);
 			const res = await fetch('/api/profile', { method: 'POST', body: fd });
 			if (!res.ok) {
 				const j = (await res.json().catch(() => ({}))) as { error?: string };
@@ -120,52 +75,17 @@
 
 			<div class="head">
 				<h2>{dismissable ? '프로필 수정' : '프로필 설정'}</h2>
-				<p class="sub">대화에 사용할 정보를 설정해 주세요.</p>
+				<p class="sub">대화에서 '나'를 어떻게 부르고 어떤 사람으로 둘지 정해요. 전부 선택이라 비워도 돼요.</p>
 			</div>
 
-			<div class="avatar-field">
-				<button
-					type="button"
-					class="avatar-pick"
-					onclick={() => fileInput?.click()}
-					aria-label="프로필 사진 선택"
-				>
-					{#if displayAvatar}
-						<img src={displayAvatar} alt="프로필 사진" />
-					{:else}
-						<span class="avatar-fallback">
-							{(name || user?.email || '?').charAt(0).toUpperCase()}
-						</span>
-					{/if}
-					<span class="avatar-cam">📷</span>
-				</button>
-				<span class="avatar-hint">프로필 사진 <span class="opt">(webp · avif, 선택)</span></span>
-				<input
-					bind:this={fileInput}
-					type="file"
-					accept="image/webp,image/avif"
-					class="hidden-input"
-					onchange={onAvatarChange}
-				/>
-			</div>
 
-			<div class="field">
-				<label for="pf-name">이름</label>
-				<input
-					id="pf-name"
-					type="text"
-					placeholder="다른 사람에게 보여질 이름"
-					maxlength="40"
-					bind:value={name}
-				/>
-			</div>
 
 			<div class="field">
 				<label for="pf-persona-name">대화용 이름 <span class="opt">(선택)</span></label>
 				<input
 					id="pf-persona-name"
 					type="text"
-					placeholder="채팅에서 AI 가 부를 이름 (비우면 위 이름 사용)"
+					placeholder="채팅에서 AI 가 부를 이름 (비우면 '나')"
 					maxlength="40"
 					bind:value={personaName}
 				/>
@@ -201,8 +121,8 @@
 
 			{#if error}<p class="error">{error}</p>{/if}
 
-			<button class="save" onclick={save} disabled={!canSave || saving}>
-				{saving ? '저장 중…' : '시작하기'}
+			<button class="save" onclick={save} disabled={saving}>
+				{saving ? '저장 중…' : dismissable ? '저장' : '시작하기'}
 			</button>
 		</div>
 	</div>
@@ -255,64 +175,6 @@
 		margin: 0 0 20px;
 		font-size: 0.85rem;
 		color: var(--text-dim);
-	}
-	.avatar-field {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 8px;
-		margin-bottom: 20px;
-	}
-	.avatar-pick {
-		position: relative;
-		width: 84px;
-		height: 84px;
-		border-radius: 50%;
-		border: 1px solid var(--border);
-		background: var(--bg-elev);
-		padding: 0;
-		overflow: hidden;
-		cursor: pointer;
-		transition: border-color 0.15s ease;
-	}
-	.avatar-pick:hover {
-		border-color: var(--accent);
-	}
-	.avatar-pick img {
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-		display: block;
-	}
-	.avatar-fallback {
-		width: 100%;
-		height: 100%;
-		display: grid;
-		place-items: center;
-		font-size: 2rem;
-		font-weight: 700;
-		color: #fff;
-		background: linear-gradient(135deg, var(--accent), var(--nsfw));
-	}
-	.avatar-cam {
-		position: absolute;
-		right: 2px;
-		bottom: 2px;
-		width: 26px;
-		height: 26px;
-		display: grid;
-		place-items: center;
-		font-size: 0.8rem;
-		border-radius: 50%;
-		background: var(--bg-card);
-		border: 1px solid var(--border);
-	}
-	.avatar-hint {
-		font-size: 0.78rem;
-		color: var(--text-dim);
-	}
-	.hidden-input {
-		display: none;
 	}
 	.field {
 		margin-bottom: 16px;

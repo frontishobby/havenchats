@@ -167,10 +167,10 @@
 							<img class="user-avatar" src={resized(me.user.avatarUrl, 64)} alt="" />
 						{:else}
 							<span class="user-fallback">
-								{(me.user.name ?? me.user.email).charAt(0).toUpperCase()}
+								{(me.user.personaName || me.user.name || '나').charAt(0).toUpperCase()}
 							</span>
 						{/if}
-						<span class="user-name">{me.user.name ?? '프로필 설정'}</span>
+						<span class="user-name">{me.user.personaName || me.user.name || '나'}</span>
 						<span class="chev">▾</span>
 					</button>
 					{#if menuOpen}
