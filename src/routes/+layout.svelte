@@ -125,7 +125,7 @@
 				<span class="wordmark">Haven<span class="dim">chats</span></span>
 			</a>
 		</div>
-		<!-- 중앙: Drive 동기화 칩 + 그 오른쪽에 Vercel 크레딧 잔량(키 등록 시). -->
+		<!-- 중앙: OneDrive 동기화 칩 + 그 오른쪽에 Vercel 크레딧 잔량(키 등록 시). -->
 		<div class="center">
 			{#if sync.mode === 'drive'}
 				<button
@@ -133,14 +133,14 @@
 					class:warn={sync.status === 'needs-auth' || sync.status === 'error' || sync.status === 'conflict'}
 					class:busy={sync.status === 'syncing'}
 					onclick={() => (storageModal.open = true)}
-					title={sync.error ?? 'Google Drive 동기화 상태'}
+					title={sync.error ?? 'OneDrive 동기화 상태'}
 				>
 					{sync.status === 'syncing'
 						? '⟳ 동기화 중'
 						: sync.status === 'needs-auth'
 							? sync.pending > 0
 								? `⚠ 재연결 · 대기 ${sync.pending}`
-								: '⚠ Drive 재연결'
+								: '⚠ OneDrive 재연결'
 							: sync.status === 'conflict'
 								? '⚠ 충돌 · 선택 필요'
 							: sync.status === 'error'

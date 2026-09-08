@@ -2,8 +2,8 @@
 
 캐릭터 AI 채팅 서비스 (babechat / caveduck 류). **소설 모드** 롤플레이, NSFW 포함(성인).
 **2026-09-08 부터 서버 없는 정적 1인 모드** — 페이지는 정적 파일이고, 예전 Worker 백엔드(Hono 라우터 + DB 로직)가
-**브라우저 안에서** sql.js(SQLite WASM) + IndexedDB 위에서 그대로 돈다. 저장소는 이 기기(IndexedDB) 또는 **Google Drive appDataFolder 동기화**.
-로그인·계정 없음: `users` 테이블의 유일한 행이 '나'. 다른 Google 계정으로 Drive 를 연결하면 그 계정의 데이터가 따로 생긴다.
+**브라우저 안에서** sql.js(SQLite WASM) + IndexedDB 위에서 그대로 돈다. 저장소는 이 기기(IndexedDB) 또는 **OneDrive 앱 폴더 동기화**(2026-09-09 Google Drive 에서 이전 — Google 은 웹 클라이언트 토큰 갱신에 client_secret 이 필요해 서버 없인 1시간마다 로그인 팝업).
+로그인·계정 없음: `users` 테이블의 유일한 행이 '나'. 다른 Microsoft 계정으로 OneDrive 를 연결하면 그 계정의 데이터가 따로 생긴다.
 
 - **Prod**: https://havenchats.com — **GitHub Pages**(`.github/workflows/pages.yml`, main 푸시 시 빌드·배포). DNS 는 Cloudflare 에 그대로(CNAME → `frontishobby.github.io`, DNS only)
 - 과거 설계(Worker/D1/R2 시절): `docs/ARCHITECTURE.md` (도메인 로직 설명은 유효)
@@ -17,7 +17,7 @@
 | '백엔드' | **Hono 앱을 브라우저에서 실행**(`src/lib/local/app.ts`). `app.html` 의 fetch 래퍼가 같은 오리진 `/api/*`·`/img/*` 를 `window.__havenFetch` 로 보내고, `<img src="/img/…">` 는 서비스워커(`static/img-sw.js`)가 IndexedDB 에서 응답 |
 | DB | **sql.js(SQLite WASM) 인메모리 + D1 호환 shim**(`src/lib/local/d1.ts`). 스냅샷(`db.export()`)을 IndexedDB `haven-meta.kv.db` 에 디바운스 저장. 스키마는 `migrations/*.sql` 을 그대로 적용(`_migrations` 테이블로 추적) |
 | 이미지 | **IndexedDB `haven-images.objects` + R2 호환 shim**(`src/lib/local/r2.ts`). 키 규칙은 예전 R2 와 동일(`char/…`, `charimg/<cid>/<id>.<ext>`, `chatimg/<sid>/<mid>.<ext>`, `style/…`, `avatar/…`) |
-| 동기화 | **Google Drive appDataFolder**(`src/lib/local/drive.ts`, `sync.svelte.ts`). GIS 토큰 모델(`drive.appdata` 스코프, 1시간 토큰). `haven.sqlite` 1파일 + 이미지 파일(name=키). 이미지는 **지연 다운로드**(서비스워커가 miss 시 Drive 에서 받아 캐시) |
+| 동기화 | **OneDrive 앱 폴더**(`src/lib/local/onedrive.ts`, `sync.svelte.ts`). MSAL(`@azure/msal-browser`, 동적 import) SPA 코드 플로우 PKCE — 시크릿 없이 refresh token, **팝업 없이 갱신**(SPA refresh token 24h → 이후 숨은 iframe `static/auth.html`, Safari/iOS 는 서드파티 쿠키 차단으로 하루 1회 로그인). 스코프 `Files.ReadWrite.AppFolder`(`/me/drive/special/approot` = Apps/Haven). `haven.sqlite` 1파일 + 이미지 파일(키를 경로 그대로 `char/<id>.webp`). 변경 감지 cTag, 덮어쓰기 방지 `If-Match: eTag`(412→충돌), 목록은 delta. 이미지는 **지연 다운로드**(서비스워커가 miss 시 downloadUrl 로 받아 캐시) |
 | LLM | Vercel AI Gateway (AI SDK v6 `ai` + `@ai-sdk/gateway`) — **브라우저가 직접 호출**(CORS 허용 실측). 키는 유저 등록(로컬 DB `user_keys` 평문) |
 | 이미지 생성 | NovelAI — 브라우저 직접 호출(기존과 동일). 구독 검증(`api.novelai.net`)은 CORS 불가라 생략 |
 
@@ -29,8 +29,8 @@
 - **D1 shim 표면**: `prepare().bind().first/all/run/raw`, `batch`(트랜잭션), `exec`. bind 값은 boolean→0/1·undefined→null 로 정규화. 쓰기 쿼리(`SELECT/WITH/PRAGMA/EXPLAIN` 외)마다 `onWrite` → 400ms 디바운스 스냅샷 저장 + `onDatabaseSaved` 훅(Drive dirty). `waitUntil` 은 그냥 promise 추적(`ctx.pending`).
 - **로컬 개발 = 1터미널**: `npm run dev`(vite :5173) 만. 데이터는 그 브라우저 프로필의 IndexedDB. Playwright MCP 프로필엔 구 데이터 1.8GB 가 import 돼 있을 수 있다.
 - **이미지 URL 은 그대로 `/img/<key>?v=`**. 서비스워커가 첫 방문엔 아직 페이지를 제어하지 않으므로 런타임이 `controllerchange` 를 최대 3초 기다린다. `resized()` 는 항상 원본 URL(CF 리사이즈 없음).
-- **저장소 모드**(`localStorage haven:storage`): `local` | `drive` | 미설정(랜딩). Drive 메타는 IndexedDB kv: `drive:index`(키→파일 id·md5), `drive:db`(**base** — 마지막으로 맞춘 원격 DB), `drive:dbDirty`, `drive:pendingPuts/Deletes`, `drive:deviceId`, `drive:token`(서비스워커용 복사본). **토큰 갱신은 팝업이 필요한데 자동으로 띄우지 않는다**(2026-09-09, 예전 문서 클릭 캡처 자동 갱신 제거 — 1시간마다 팝업이 떠서 불편): 만료되면 `needs-auth` 로 두고 변경은 로컬(dirty)에 쌓인다. 칩 '⚠ 재연결 · 대기 n' → 저장소 모달 '지금 동기화'(`syncNow`, `ensureToken(true)`)를 눌렀을 때만 GIS 팝업. GIS 토큰 모델은 refresh token 이 없고, 코드 플로우는 웹 클라이언트라 client_secret 이 필요(시크릿 보관 서버 없인 불가 — RisuAI 도 `sv.risuai.xyz/drive/token` 서버로 교환) → 서버 없는 지금 구조에선 수동 재연결이 결론.
-- **Drive 동기화 설계(2026-09-08 재설계, `sync.svelte.ts` 머리 주석이 정본)**: ① **앱은 로컬 데이터로 즉시 뜬다** — `ready=false` 로 막는 건 모드 미선택·첫 연결인데 로컬이 비어 pull 해야 할 때·첫 연결 충돌만. ② **Drive 가 원본**, 로컬 = base + dirty. ③ 모든 경로(부팅·저장 후 3s 디바운스·주기 확인·'지금 동기화')가 **`reconcile` 하나**로 수렴: 원격 없음→push 생성 / base 없음→로컬 비었으면 pull 아니면 conflict / 원격==base→dirty 면 push / 원격!=base→clean 이면 pull, dirty 면 conflict. push 는 판정 직후 같은 작업 안에서만 → 덮어쓰기 방지(Drive CAS 없음, 작업 길이만큼 경쟁 창). `runOp` 가 직렬화. ④ **이미지는 대기열만** 처리(로컬 전체를 원격과 대조하는 스캔 금지 — 모바일에서 수십 초 먹던 원인). **올릴 때 이미지 먼저, DB 마지막** — 상대 기기는 DB md5 변화를 보고 받아가므로 그때 참조 이미지가 이미 Drive 에 있어야 함. 백업 가져오기만 `reconcileAfterImport` 가 전체를 대기열에 넣음. ⑤ **인덱스 증분 갱신**: pull 뒤 `listChangedSince(lastSyncAt-60s)`(요청 1회)로 바뀐 파일만 합치고, md5 가 달라진 키의 로컬 캐시를 `idb.objDelete` 로 지움(썸네일은 같은 키 `char/<id>.webp` 덮어쓰기라 안 지우면 서비스워커가 옛 파일 서빙; put 대기열 키 제외). 전체 `listAll` 은 첫 연결·'Drive 기준으로 맞추기'·전부 내려받기만. ⑥ **주기 확인**: 보이는 탭에서 20s(타 기기 3분 내 활동 시 8s) + 표시/포커스 전환 즉시(3s 스로틀) `getMeta` 1회 → md5 ≠ base 면 reconcile. `rt.busy`(진행 중 `/api` 요청 — 스트림 본문 끝까지 — 또는 waitUntil)면 pull 보류(`SyncDeferred`). ⑦ **충돌은 화면을 막지 않음**: `status='conflict'` 칩 → 저장소 모달에서 Drive/이 기기 선택(`resolveConflict`), 고르기 전까지 push/pull 정지. 첫 연결 충돌만 랜딩에서 선택. ⑧ **작성 기기 표시**: DB 파일 appProperties `deviceId`/`deviceName`(UA 기반 `Mac · a1b2`) → `sync.writer`/`otherActive` → 칩 '☁ <기기> 사용 중', 모달 '마지막으로 쓴 기기'. ⑨ **'Drive 기준으로 맞추기'**(`resetToDrive`): 대기열·이미지 캐시 전부 비움(`objClear`, 볼 때 재다운로드) → 전체 인덱스 → DB 교체. 올리지 않은 로컬 변경은 버림. 복구용.
+- **저장소 모드**(`localStorage haven:storage`): `local` | `drive` | 미설정(랜딩). ('drive' 모드명·`drive:` kv 접두는 Google 시절 이름 그대로 = 클라우드.) 메타는 IndexedDB kv: `od:index`(키→항목 id·cTag·eTag), `od:db`(**base** — 마지막으로 맞춘 원격 DB), `od:deltaLink`, `drive:dbDirty`, `drive:pendingPuts/Deletes`, `drive:deviceId`, `od:token`(서비스워커용 액세스 토큰 복사본). **토큰**: `silentToken()`(메모리 캐시 → MSAL `acquireTokenSilent`: 캐시→refresh→iframe, 실패 시 5분 백오프)이 부팅·주기 확인·이미지 지연 다운로드·`runOp` 전부를 담당하고, **로그인 창은 사용자 액션에서만**(`ensureToken(true)`: 팝업 → 막히면 전체 리디렉트 `/#code=`, 복귀는 `initStorage` 의 `handleRedirect` + sessionStorage `haven:od:returnTo`). 만료돼도 자동 팝업 없음: 변경은 dirty 로 쌓이고 칩 '⚠ 재연결 · 대기 n' → 저장소 모달 '지금 동기화'.
+- **동기화 설계(2026-09-08 재설계, 2026-09-09 OneDrive 이식, `sync.svelte.ts` 머리 주석이 정본)**: ① **앱은 로컬 데이터로 즉시 뜬다** — `ready=false` 로 막는 건 모드 미선택·첫 연결인데 로컬이 비어 pull 해야 할 때·첫 연결 충돌만. ② **OneDrive 가 원본**, 로컬 = base + dirty. ③ 모든 경로(부팅·저장 후 3s 디바운스·주기 확인·'지금 동기화')가 **`reconcile` 하나**로 수렴: 원격 없음→로컬 이미지 전부 대기열에 넣고 push 생성(저장소 이전 포함) / base 없음→로컬 비었으면 pull 아니면 conflict / 원격 cTag==base→dirty 면 push / 원격!=base→clean 이면 pull, dirty 면 conflict. push 는 `If-Match: base eTag` 조건부라 그 사이 다른 기기가 올렸으면 412→conflict(덮어쓰기 없음; 충돌 해결 '이 기기 것' 만 `force`). `runOp` 가 직렬화. ④ **이미지는 대기열만** 처리(로컬 전체를 원격과 대조하는 스캔 금지 — 모바일에서 수십 초 먹던 원인). **올릴 때 이미지 먼저, DB 마지막** — 상대 기기는 DB cTag 변화를 보고 받아가므로 그때 참조 이미지가 이미 원격에 있어야 함. 백업 가져오기만 `reconcileAfterImport` 가 전체를 대기열에 넣음. ⑤ **인덱스 증분 갱신**: pull 뒤 `delta(deltaLink)`(보통 요청 1회, 삭제 포함)로 바뀐 파일만 합치고, cTag 가 달라진 키의 로컬 캐시를 `idb.objDelete` 로 지움(썸네일은 같은 키 `char/<id>.webp` 덮어쓰기라 안 지우면 서비스워커가 옛 파일 서빙; put 대기열 키 제외). 전체 delta 는 첫 연결·'OneDrive 기준으로 맞추기'·전부 내려받기만. ⑥ **주기 확인**: 보이는 탭에서 20s(타 기기 3분 내 활동 시 8s) + 표시/포커스 전환 즉시(3s 스로틀) `getMeta` 1회 → cTag ≠ base 면 reconcile. `rt.busy`(진행 중 `/api` 요청 — 스트림 본문 끝까지 — 또는 waitUntil)면 pull 보류(`SyncDeferred`). ⑦ **충돌은 화면을 막지 않음**: `status='conflict'` 칩 → 저장소 모달에서 OneDrive/이 기기 선택(`resolveConflict`), 고르기 전까지 push/pull 정지. 첫 연결 충돌만 랜딩에서 선택. ⑧ **작성 기기 표시**: DB 파일 `description` 에 JSON `{deviceId, deviceName}`(UA 기반 `Mac · a1b2`, 업로드 뒤 PATCH — cTag 는 안 바뀜) → `sync.writer`/`otherActive` → 칩 '☁ <기기> 사용 중', 모달 '마지막으로 쓴 기기'. ⑨ **'OneDrive 기준으로 맞추기'**(`resetToDrive`): 대기열·이미지 캐시 전부 비움(`objClear`, 볼 때 재다운로드) → 전체 인덱스 → DB 교체. 올리지 않은 로컬 변경은 버림. 복구용. ⑩ Graph 세부: 4MB 이하 단순 PUT(`approot:/<key>:/content`), 초과는 업로드 세션(10MiB 조각); 상위 폴더 없어 404 면 만들고 재시도; 다운로드는 `@microsoft.graph.downloadUrl`(사전 인증, 인증 헤더 없이 fetch — CORS).
 - **데이터 규모(2026-09-08 이전분)**: DB 6.4MB, 이미지 7,269개 1.84GB(장면 그리드 6.2k·채팅 이미지 950). 그래서 이미지는 기기마다 전부 복사하지 않고 지연 다운로드하며, 백업 zip 은 fflate 스트리밍(`src/lib/local/backup.ts`, 1.9GB import 11초 실측).
 - **Svelte 5 `$state` 배열 함정**: 배열에 push한 객체는 프록시로 감싸짐. 로컬 변수 ref로 mutate하면 반응성 X → **반드시 `arr[idx]`(프록시)로 수정**. (채팅 스트리밍 누적이 이걸로 동작)
 - **AI SDK v6 `textStream`은 에러를 throw 안 함**(빈 스트림으로 끝남) → `streamText({ onError })`로 잡아야 함. (`/api/chat` 참고. 에러 시 채팅 버블에 일반 메시지 노출, 상세는 콘솔만)
@@ -61,7 +61,7 @@ src/
       d1.ts r2.ts     # D1/R2 호환 shim (sql.js / IndexedDB)
       idb.ts          # IndexedDB 헬퍼(haven-meta.kv, haven-images.objects — 서비스워커와 스키마 공유)
       schema.ts       # migrations/*.sql 글롭 적용(_migrations)
-      drive.ts        # GIS 토큰 + Drive v3 REST(appDataFolder)
+      onedrive.ts     # MSAL(PKCE) 토큰 + Graph REST(approot: delta·조건부 업로드·업로드 세션·downloadUrl)
       sync.svelte.ts  # 저장소 모드·동기화 엔진·반응형 상태 `sync`
       backup.ts       # zip 내보내기/가져오기(스트리밍)
     backend/          # 구 Worker 코드(이름만 유지). routes/api/*.ts = Hono 라우터, db/*.ts = raw SQL, chatAssembly·imagePrompt·novelai 등 도메인 로직
@@ -74,7 +74,8 @@ src/
     state/            # profileModal/apiKeyModal/storageModal/privacyMode.svelte.ts
     admin.ts nsfw.ts  # isAdmin/canSeeNsfw — 항상 true(1인). 호출부는 남아 있음
   routes/             # 클라 렌더 + universal 로더(변경 없음: /, /create, /import, /characters/[id]/{edit,assets}, /chat/[id](/session/[sid])(/debug), /styles, /modules)
-static/img-sw.js      # 이미지 서비스워커(IndexedDB → 없으면 Drive 지연 다운로드)
+static/img-sw.js      # 이미지 서비스워커(IndexedDB → 없으면 OneDrive 지연 다운로드)
+static/auth.html      # MSAL 리디렉트 URI 전용 빈 페이지(팝업·숨은 iframe 복귀용, 앱 미로드)
 migrations/           # SQLite 스키마(구 D1 마이그레이션 그대로 사용)
 scripts/export-legacy.mjs  # 구 D1 덤프 + havenchats.com/img → 백업 zip
 wrangler.jsonc        # assets-only 배포 설정
@@ -112,15 +113,15 @@ wrangler.jsonc        # assets-only 배포 설정
 - **그림체**(`/styles`, 내 목록만 — Hub 공유·즐겨찾기 개념 제거): **깎기 워크숍**(`StyleWorkshopModal`)에서 화풍+상황(테스트)으로 자기 NovelAI 키로 미리보기 생성 → 공유 시 제목·메모 + **고정 표준 장면**(`THUMBNAIL_SITUATION`, SFW)으로 일관 썸네일 리롤·결정 → R2 저장. 카드(썸네일+제목+작성자) 클릭 시 상세(프롬프트+즐겨찾기). **선택 퀄리티·네거티브 프롬프트**(워크숍 접이식 섹션, `art_styles.negative/quality`): 비면 모델별 고정 `QUALITY_TAIL(_V5)`/`NEGATIVE_PROMPT(_V5)`, 있으면 **통째로 대체**(`resolveQualityTail`/`negativeFor(model, custom)`) — 단 네거티브 앞 아동 차단 접두(`MINOR_BLOCK_NEGATIVE`)는 항상 유지, V5 연도·complexity 자동 주입은 그림체 또는 퀄리티에 이미 있으면 생략. 워크숍 미리보기·썸네일·채팅(`styleNegative/styleQuality`)·캐릭터 썸네일 모두 고른 그림체의 값을 보낸다. 채팅 이미지 모달은 즐겨찾기 그림체 중 택1(캐릭터 추천 그림체 상단). 캐릭터 제작 폼에서 추천 그림체 지정 가능. 본인 그림체는 상세의 '수정'으로 같은 워크숍 모달을 채워 열어 수정(`edit` prop → `PATCH /api/styles/:id` multipart, 썸네일은 선택·미첨부 시 유지, 공개 여부는 그대로. JSON `{shared}` PATCH 는 공개 토글). API: `/api/styles*`(목록·생성·수정·상세·삭제·즐겨찾기·`mine`·`generate`).
 - **모듈**(`/modules`, 내 목록만): 캐릭터 무관·재사용 가능한 **일반 지침**(출력 규칙 추가, 문체, 금기 등)(`ModuleEditorModal`: 제목·메모·본문, JSON `POST/PATCH /api/modules(/:id)`, `{shared}` 만 보내면 공개 토글). 채팅 헤더 🧩 버튼(설정 왼쪽) 모달에서 **내 모듈 + 즐겨찾기** 중 여러 개를 켜고 끔(최대 `MAX_ACTIVE_MODULES`=8, 켠 순서 번호 표시, localStorage `haven:modules:active` JSON 배열 — 전역 설정). 전송 시 `moduleIds` 로 보내면 서버가 `getModulesForChat`(공유 or 본인 소유만, 클라 순서 유지)로 해석해 `assembleTurn({modules})` → `buildModulesBlock`(`[추가 규칙 — 모듈]` 헤더 + `## 제목`/본문, `{{char}}`·`{{나}}` 치환) → **프롬프트 가장 마지막**: `[응답 지침]` 뒤 같은 user 메시지에 부착(이어가기 턴도 동일, XML 프레임이면 `<Guide:Modules>`). 꼬리 블록이라 prefix 캐시 무영향. 디버그 스냅샷 `modulesBlock`·패널 '모듈' 섹션, `/api/chat/inspect` 도 `moduleIds` 수용.
 - **프로필**: 첫 실행 시 프로필 모달(이름·대화용 이름·페르소나·아바타). 네비바 이름 클릭 › 프로필 설정 / API 키 관리 / 저장소 · 백업 / charx 가져오기.
-- **저장소**(`StorageLanding`/`StorageModal`): 첫 화면에서 'Google Drive 에 저장' 또는 '이 기기에만 저장'. Drive 모드는 헤더 칩(☁ 동기화됨/대기 n/⚠ 재연결/⚠ 충돌/<기기> 사용 중)으로 상태 표시, 모달에서 지금 동기화·충돌 선택·**Drive 기준으로 맞추기**(`resetToDrive`, 복구용)·이미지 전부 내려받기·연결 해제·**오래된 채팅 정리**(최근 50개만 보유, 생성 이미지 포함 삭제)·zip 내보내기/가져오기.
+- **저장소**(`StorageLanding`/`StorageModal`): 첫 화면에서 'OneDrive 에 저장' 또는 '이 기기에만 저장'. OneDrive 모드는 헤더 칩(☁ 동기화됨/대기 n/⚠ 재연결/⚠ 충돌/<기기> 사용 중)으로 상태 표시, 모달에서 지금 동기화·충돌 선택·**OneDrive 기준으로 맞추기**(`resetToDrive`, 복구용)·이미지 전부 내려받기·연결 해제·**오래된 채팅 정리**(최근 50개만 보유, 생성 이미지 포함 삭제)·zip 내보내기/가져오기.
 
 
 ## 환경 변수
 
 서버가 없으므로 **공개 값만** 있고 빌드 시 인라인된다(`.env`, gitignore / `.env.example` 참고).
-- `PUBLIC_GOOGLE_CLIENT_ID`(선택) — GIS 용 OAuth 클라이언트 ID(비밀 아님). 비우면 `src/lib/local/drive.ts` 의 기본값. **Google 콘솔에서 '승인된 JavaScript 원본'에 `https://havenchats.com`·`http://localhost:5173` 등록 필요**, 클라이언트 시크릿·리디렉트 URI 불필요. OAuth 앱은 '테스트' 상태 + 테스트 사용자에 본인만.
+- `PUBLIC_MS_CLIENT_ID`(선택) — Entra 앱(클라이언트) ID(비밀 아님). 비우면 `src/lib/local/onedrive.ts` 의 기본값. **Entra 앱 등록**: 지원 계정 = 개인 Microsoft 계정(또는 모든 계정+개인), 플랫폼 **단일 페이지 애플리케이션**, 리디렉트 URI `https://havenchats.com/auth.html`·`https://havenchats.com/`·`http://localhost:5173/auth.html`·`http://localhost:5173/`. 시크릿·API 권한 사전 부여 불필요(`Files.ReadWrite.AppFolder` 는 첫 로그인 때 동의).
 - `AI_GATEWAY_API_KEY`(선택) — 재현 스크립트(tsx)용. 앱은 유저가 등록한 키(로컬 DB)를 쓴다.
-- NovelAI·Gateway 키는 앱 '프로필 › API 키 관리'에서 등록 → 로컬 DB `user_keys` 평문(Drive 스냅샷에도 포함됨 — appDataFolder 는 본인만 접근).
+- NovelAI·Gateway 키는 앱 '프로필 › API 키 관리'에서 등록 → 로컬 DB `user_keys` 평문(OneDrive 스냅샷에도 포함됨 — 앱 폴더는 본인 계정만 접근).
 
 ## 명령어
 
@@ -140,12 +141,12 @@ node scripts/export-legacy.mjs haven-d1.sql --out haven-legacy-backup.zip   # �
 
 - **GitHub Pages**(레포 `frontishobby/havenchats.com`, Settings › Pages › Source = GitHub Actions, 커스텀 도메인 `havenchats.com`). 워크플로 `.github/workflows/pages.yml`: `npm ci` → `npm run build` → `upload-pages-artifact(build)` → `deploy-pages`.
 - **Cloudflare 는 DNS 만**: `havenchats.com` CNAME → `frontishobby.github.io`(DNS only/회색 구름 — GitHub 가 인증서 발급). Worker `havenchats`·D1 `haven`·R2 `haven-images`(계정 `frontishobby`)는 이전 검증 후 삭제 대상, wrangler 는 레포에서 제거됨. 구 무료 계정 `HavenChats` 리소스도 삭제 대상.
-- **Google Drive**: 유저 계정의 appDataFolder(앱 전용 숨김 폴더, 15GB 무료 용량 공유). 파일 = `haven.sqlite` + 이미지(name=키). 다른 앱/유저는 못 봄.
-- **Google OAuth 클라이언트**(웹): `965110096401-…apps.googleusercontent.com`. JS 원본에 prod·localhost 등록.
+- **OneDrive**: 유저 Microsoft 계정의 앱 폴더 `Apps/Haven`(무료 5GB). 파일 = `haven.sqlite` + 이미지(키 경로 그대로). 유저가 OneDrive 에서 직접 볼 수 있음.
+- **Entra 앱 등록**(SPA): `PUBLIC_MS_CLIENT_ID`. 리디렉트 URI 에 prod·localhost 의 `/auth.html` 과 `/` 등록. 구 Google OAuth 클라이언트(`965110096401-…`)·Drive appData 의 옛 파일은 삭제 대상.
 
 ## 아직 안 된 것 / 다음 단계
 
-- **Drive 실사용 검증 미완**: 코드는 GIS 토큰·REST·동기화 엔진까지 있으나 실제 Google 계정으로 end-to-end 는 아직(헤드리스에서 OAuth 팝업 불가). 첫 연결 시 Google 콘솔 JS 원본 등록이 선행돼야 한다.
+- **OneDrive 실사용 검증 미완(2026-09-09)**: MSAL·Graph 코드는 있으나 실제 계정 end-to-end 는 아직(헤드리스에서 로그인 불가). 확인 포인트: approot delta 지원, `description` PATCH(작성 기기), downloadUrl CORS, 4MB 초과 업로드 세션. 첫 연결 시 로컬 이미지 전부 재업로드(Google Drive 의 1.8GB 는 고아 파일이라 안 옮김).
 - **구 Worker/D1/R2 삭제**: zip 이전 확인 후. 삭제 전엔 `scripts/export-legacy.mjs` 가 (구 Worker 가 서빙하는) `/img/<key>` 에서 이미지를 받을 수 있다 — DNS 를 GitHub 로 바꾸면 `--base https://havenchats.workers.dev` 류 옛 주소를 써야 한다.
 - 다기기 동기화는 통째 스냅샷 단위(주기 pull + push 선행조건 + 충돌 선택). 행 단위 변경 로그(트리거 `_changes` → ops 파일, PK upsert LWW)로 바꾸면 메시지 1건에 6MB 업로드가 사라진다 — 다음 단계 후보.
 - 캐릭터 삭제 시 고아 이미지 정리 없음. 세션은 '저장소 · 백업 › 정리'(최근 50개만 보유, `POST /api/chat/prune`)가 이미지까지 지운다.

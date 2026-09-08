@@ -53,32 +53,32 @@
 		{#if sync.conflict}
 			<h1>어느 쪽 데이터를 쓸까요?</h1>
 			<p class="sub">
-				Drive 에 있는 데이터와 이 기기의 데이터가 다릅니다. (Drive 마지막 수정: {fmt(
+				OneDrive 에 있는 데이터와 이 기기의 데이터가 다릅니다. (OneDrive 마지막 수정: {fmt(
 					sync.conflict.remoteModified
 				)}{sync.conflict.writer ? `, ${sync.conflict.writer.deviceName}` : ''})
 			</p>
 			<div class="choices">
 				<button class="choice" onclick={() => onResolve('remote')} disabled={busy}>
-					<strong>Drive 데이터 사용</strong>
-					<span>이 기기의 데이터를 Drive 것으로 덮어씁니다.</span>
+					<strong>OneDrive 데이터 사용</strong>
+					<span>이 기기의 데이터를 OneDrive 것으로 덮어씁니다.</span>
 				</button>
 				<button class="choice" onclick={() => onResolve('local')} disabled={busy}>
 					<strong>이 기기 데이터 사용</strong>
-					<span>Drive 의 데이터를 이 기기 것으로 덮어씁니다.</span>
+					<span>OneDrive 의 데이터를 이 기기 것으로 덮어씁니다.</span>
 				</button>
 			</div>
 		{:else if syncing}
 			<h1>동기화 중</h1>
-			<p class="sub">{sync.phase || 'Google Drive 와 맞추는 중…'}</p>
+			<p class="sub">{sync.phase || 'OneDrive 와 맞추는 중…'}</p>
 			<div class="spinner"></div>
 			{#if sync.cancellable}
 				<button class="link" onclick={cancelSync}>취소하고 들어가기 (남은 건 나중에)</button>
 			{/if}
 		{:else if sync.mode === 'drive'}
-			<h1>Google Drive 다시 연결</h1>
-			<p class="sub">Drive 접근 권한이 만료됐어요. 다시 연결하면 최신 데이터로 맞춥니다.</p>
+			<h1>OneDrive 다시 연결</h1>
+			<p class="sub">OneDrive 로그인이 만료됐어요. 다시 연결하면 최신 데이터로 맞춥니다.</p>
 			{#if sync.error}<p class="err">{sync.error}</p>{/if}
-			<button class="primary" onclick={onReconnect} disabled={busy}>Google Drive 다시 연결</button>
+			<button class="primary" onclick={onReconnect} disabled={busy}>OneDrive 다시 연결</button>
 			<button class="link" onclick={continueOffline}>연결 없이 계속 (변경은 나중에 올라감)</button>
 		{:else}
 			<h1>데이터를 어디에 저장할까요?</h1>
@@ -88,7 +88,7 @@
 			{#if sync.error}<p class="err">{sync.error}</p>{/if}
 			<div class="choices">
 				<button class="choice" onclick={onDrive} disabled={busy || sync.clientIdMissing}>
-					<strong>Google Drive 에 저장</strong>
+					<strong>OneDrive 에 저장</strong>
 					<span>
 						Google 계정의 앱 전용 폴더에 저장하고 다른 기기와 동기화해요.
 						{#if sync.clientIdMissing}(클라이언트 ID 미설정){/if}

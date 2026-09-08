@@ -2,15 +2,15 @@
  * 이미지 서비스워커 — `<img src="/img/<key>">` 를 IndexedDB(`haven-images`.`objects`)에서 서빙한다.
  * 페이지 쪽 R2 shim(src/lib/local/r2.ts, idb.ts)과 같은 스키마. `/img/` 외 요청은 건드리지 않는다.
  *
- * 로컬에 없으면(다른 기기에서 만든 이미지) Google Drive 에서 **지연 다운로드**한다:
- *  `haven-meta`.`kv` 의 `drive:index`(키 → Drive 파일 id)와 `drive:token`(액세스 토큰)을 읽어
- *  `alt=media` 로 받아 IndexedDB 에 넣고 응답한다. 토큰이 없거나 만료면 404.
+ * 로컬에 없으면(다른 기기에서 만든 이미지) OneDrive 에서 **지연 다운로드**한다:
+ *  `haven-meta`.`kv` 의 `od:index`(키 → OneDrive 항목 id)와 `od:token`(액세스 토큰)을 읽어 Graph 로 항목의
+ *  사전 인증 downloadUrl 을 받고, 그 주소에서(인증 헤더 없이) 받아 IndexedDB 에 넣고 응답한다. 토큰이 없거나 만료면 404.
  */
 const META_DB = 'haven-meta';
 const META_STORE = 'kv';
 const IMAGES_DB = 'haven-images';
 const IMAGES_STORE = 'objects';
-const DRIVE_API = 'https://www.googleapis.com/drive/v3';
+const GRAPH = 'https://graph.microsoft.com/v1.0';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
@@ -63,14 +63,18 @@ async function kvGet(key) {
 	return reqp(db.transaction(META_STORE, 'readonly').objectStore(META_STORE).get(key));
 }
 
-/** Drive 지연 다운로드. 성공하면 StoredObject, 아니면 null. */
+/** OneDrive 지연 다운로드. 성공하면 StoredObject, 아니면 null. */
 async function fetchFromDrive(key) {
-	const [index, token] = await Promise.all([kvGet('drive:index'), kvGet('drive:token')]);
+	const [index, token] = await Promise.all([kvGet('od:index'), kvGet('od:token')]);
 	const ref = index && index[key];
 	if (!ref || !token || !token.accessToken || token.expiresAt < Date.now()) return null;
-	const res = await fetch(`${DRIVE_API}/files/${ref.id}?alt=media`, {
+	const meta = await fetch(`${GRAPH}/me/drive/items/${ref.id}?$select=id,@microsoft.graph.downloadUrl`, {
 		headers: { authorization: `Bearer ${token.accessToken}` }
 	});
+	if (!meta.ok) return null;
+	const url = (await meta.json())['@microsoft.graph.downloadUrl'];
+	if (!url) return null;
+	const res = await fetch(url);
 	if (!res.ok) return null;
 	const blob = await res.blob();
 	const obj = {
@@ -79,7 +83,7 @@ async function fetchFromDrive(key) {
 		contentType: blob.type || guessType(key),
 		size: blob.size,
 		uploaded: Date.now(),
-		etag: ref.md5 || String(Date.now())
+		etag: ref.rev || String(Date.now())
 	};
 	await putObject(obj);
 	return obj;

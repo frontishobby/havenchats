@@ -54,7 +54,7 @@
 			await connectDrive();
 			if (sync.error) err = sync.error;
 			else {
-				msg = 'Google Drive 와 연결됐어요.';
+				msg = 'OneDrive 와 연결됐어요.';
 				remote = await remoteSummary();
 			}
 		});
@@ -68,17 +68,17 @@
 	const onResetToDrive = () =>
 		guard('reset', async () => {
 			const pending = sync.pending > 0 ? ` 아직 올리지 않은 이 기기의 변경 ${sync.pending}건은 사라져요.` : '';
-			if (!confirm(`Drive 의 데이터로 이 기기를 맞출까요? 캐릭터·대화·설정이 Drive 것으로 바뀌고, Drive 와 다른 이미지 캐시는 지워져요.${pending}`)) return;
+			if (!confirm(`OneDrive 의 데이터로 이 기기를 맞출까요? 캐릭터·대화·설정이 OneDrive 것으로 바뀌고, OneDrive 와 다른 이미지 캐시는 지워져요.${pending}`)) return;
 			await resetToDrive();
 			if (sync.error) err = sync.error;
-			else msg = 'Drive 기준으로 맞췄어요. 이미지는 볼 때 다시 내려받아요.';
+			else msg = 'OneDrive 기준으로 맞췄어요. 이미지는 볼 때 다시 내려받아요.';
 			remote = await remoteSummary();
 		});
 	const onResolve = (pick: 'remote' | 'local') =>
 		guard('resolve', async () => {
 			await resolveConflict(pick);
 			if (sync.error) err = sync.error;
-			else msg = pick === 'remote' ? 'Drive 데이터로 맞췄어요.' : '이 기기 데이터를 Drive 에 올렸어요.';
+			else msg = pick === 'remote' ? 'OneDrive 데이터로 맞췄어요.' : '이 기기 데이터를 OneDrive 에 올렸어요.';
 			remote = await remoteSummary();
 		});
 	const fmtIso = (iso: string) => {
@@ -87,9 +87,9 @@
 	};
 	const onDisconnect = () =>
 		guard('disconnect', async () => {
-			if (!confirm('Drive 연결을 해제할까요? 이 기기의 데이터는 그대로 남고, Drive 의 파일도 지우지 않아요.')) return;
+			if (!confirm('OneDrive 연결을 해제할까요? 이 기기의 데이터는 그대로 남고, OneDrive 의 파일도 지우지 않아요.')) return;
 			await disconnectDrive();
-			msg = 'Drive 연결을 해제했어요. 이제 이 기기에만 저장돼요.';
+			msg = 'OneDrive 연결을 해제했어요. 이제 이 기기에만 저장돼요.';
 		});
 	const onExport = () =>
 		guard('export', async () => {
@@ -126,7 +126,7 @@
 			const j = (await res.json()) as { deleted: number; images: number };
 			await invalidateAll();
 			prune = (await (await fetch(`/api/chat/prune?keep=${PRUNE_KEEP}`)).json()) as typeof prune;
-			msg = `채팅 ${j.deleted}개, 이미지 ${j.images}장을 지웠어요.${sync.mode === 'drive' ? ' Drive 에서도 지워져요.' : ''}`;
+			msg = `채팅 ${j.deleted}개, 이미지 ${j.images}장을 지웠어요.${sync.mode === 'drive' ? ' OneDrive 에서도 지워져요.' : ''}`;
 		});
 	function onPickImport() {
 		fileInput?.click();
@@ -140,7 +140,7 @@
 			try {
 				const r = await importBackup(f, (p) => (progress = p));
 				await invalidateAll();
-				msg = `가져왔어요. 이미지 ${r.images}개.${sync.mode === 'drive' ? ' Drive 에도 곧 올라가요.' : ''}`;
+				msg = `가져왔어요. 이미지 ${r.images}개.${sync.mode === 'drive' ? ' OneDrive 에도 곧 올라가요.' : ''}`;
 			} finally {
 				progress = null;
 			}
@@ -160,8 +160,8 @@
 				? sync.phase || '동기화 중…'
 				: sync.status === 'needs-auth'
 					? sync.pending > 0
-						? `Drive 재연결 필요 · 올릴 변경 ${sync.pending}건 대기 — '지금 동기화'를 누르면 로그인 창이 뜹니다`
-						: 'Drive 재연결 필요 — \'지금 동기화\'를 누르면 로그인 창이 뜹니다'
+						? `OneDrive 재연결 필요 · 올릴 변경 ${sync.pending}건 대기 — '지금 동기화'를 누르면 로그인 창이 뜹니다`
+						: 'OneDrive 재연결 필요 — \'지금 동기화\'를 누르면 로그인 창이 뜹니다'
 					: sync.status === 'conflict'
 						? '충돌 — 어느 쪽 데이터를 쓸지 골라 주세요'
 					: sync.status === 'error'
@@ -208,7 +208,7 @@
 						<span class="v">{remote ? `${fmtBytes(remote.bytes)} · ${remote.files}개 파일` : '…'}</span>
 					</div>
 					<div class="row">
-						<span class="k">Google Drive 전체</span>
+						<span class="k">OneDrive 전체</span>
 						<span class="v">
 							{#if remote}
 								{fmtBytes(remote.quotaUsage)} / {remote.quotaLimit === null ? '무제한' : fmtBytes(remote.quotaLimit)}
@@ -229,12 +229,12 @@
 					{#if sync.conflict}
 						<div class="conflict">
 							<p class="hint">
-								Drive 와 이 기기가 서로 다른 변경을 갖고 있어요. (Drive 마지막 수정: {fmtIso(sync.conflict.remoteModified)}{sync.conflict.writer
+								OneDrive 와 이 기기가 서로 다른 변경을 갖고 있어요. (OneDrive 마지막 수정: {fmtIso(sync.conflict.remoteModified)}{sync.conflict.writer
 									? `, ${sync.conflict.writer.deviceName}`
 									: ''}) 고르기 전까지는 어느 쪽도 덮어쓰지 않아요.
 							</p>
 							<div class="actions">
-								<button class="primary" onclick={() => onResolve('remote')} disabled={!!busy}>Drive 데이터 사용</button>
+								<button class="primary" onclick={() => onResolve('remote')} disabled={!!busy}>OneDrive 데이터 사용</button>
 								<button class="ghost" onclick={() => onResolve('local')} disabled={!!busy}>이 기기 데이터 사용</button>
 							</div>
 						</div>
@@ -248,16 +248,16 @@
 						<button class="ghost" onclick={onDownloadAll} disabled={!!busy} title="다른 기기에서 만든 이미지는 볼 때 내려받아요. 오프라인 대비로 미리 전부 받으려면.">
 							{busy === 'download' ? sync.phase || '내려받는 중…' : '이미지 전부 내려받기'}
 						</button>
-						<button class="ghost" onclick={onResetToDrive} disabled={!!busy || sync.status === 'syncing'} title="Drive 를 원본으로 이 기기의 데이터와 이미지 캐시를 통째 맞춰요. 다른 기기에서 바꾼 썸네일이 옛것으로 보일 때.">
-							{busy === 'reset' ? sync.phase || '맞추는 중…' : 'Drive 기준으로 맞추기'}
+						<button class="ghost" onclick={onResetToDrive} disabled={!!busy || sync.status === 'syncing'} title="OneDrive 를 원본으로 이 기기의 데이터와 이미지 캐시를 통째 맞춰요. 다른 기기에서 바꾼 썸네일이 옛것으로 보일 때.">
+							{busy === 'reset' ? sync.phase || '맞추는 중…' : 'OneDrive 기준으로 맞추기'}
 						</button>
 						<button class="ghost" onclick={onDisconnect} disabled={!!busy}>연결 해제</button>
 					</div>
 				{:else}
-					<p class="hint">브라우저 저장소(IndexedDB)에만 남아요. Google Drive 에 연결하면 다른 기기와 동기화돼요.</p>
+					<p class="hint">브라우저 저장소(IndexedDB)에만 남아요. OneDrive 에 연결하면 다른 기기와 동기화돼요.</p>
 					<div class="actions">
 						<button class="primary" onclick={onConnect} disabled={!!busy || sync.clientIdMissing}>
-							Google Drive 연결
+							OneDrive 연결
 						</button>
 					</div>
 				{/if}

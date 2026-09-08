@@ -1,32 +1,32 @@
 /**
- * 저장소 모드 + Google Drive 동기화 엔진(반응형 상태 포함). 2026-09-08 재설계.
+ * 저장소 모드 + OneDrive 동기화 엔진(반응형 상태 포함). 2026-09-08 재설계, 2026-09-09 Google Drive → OneDrive.
+ * (코드 안의 'drive' 모드명·kv 키 접두 `drive:` 는 그대로 — 클라우드 저장소라는 뜻으로 읽는다.)
  *
  * 모드(localStorage `haven:storage`):
  *  - 'local' : 이 기기(IndexedDB)에만 저장.
- *  - 'drive' : IndexedDB 를 캐시로 두고 Google Drive appDataFolder 와 동기화(원본 = Drive).
+ *  - 'drive' : IndexedDB 를 캐시로 두고 OneDrive 앱 폴더(Apps/Haven)와 동기화(원본 = OneDrive).
  *  - 미설정  : 랜딩(StorageLanding)에서 고른다.
  *
  * 원칙
  *  1. **앱은 로컬 데이터로 즉시 뜬다.** 동기화는 뒤에서 돌고 헤더 칩이 상태를 보인다. 화면을 막는 경우는 둘뿐:
- *     저장소를 아직 안 골랐을 때, Drive 를 처음 연결하는데 로컬이 비어 있어 받아와야 할 때(`sync.ready=false`).
- *  2. **Drive 가 원본.** 로컬 DB 는 `base`(마지막으로 맞춘 원격 DB 의 md5) + `dirty`(그 뒤 로컬 변경) 로 표현된다.
+ *     저장소를 아직 안 골랐을 때, OneDrive 를 처음 연결하는데 로컬이 비어 있어 받아와야 할 때(`sync.ready=false`).
+ *  2. **OneDrive 가 원본.** 로컬 DB 는 `base`(마지막으로 맞춘 원격 DB 의 cTag) + `dirty`(그 뒤 로컬 변경) 로 표현된다.
  *  3. **한 번에 한 작업.** 모든 작업은 `reconcile` 하나로 수렴한다(부팅·저장 후 디바운스·주기 확인·수동 동기화 전부):
  *       원격 없음            → push(생성)
  *       base 없음(첫 연결)   → 로컬 비었으면 pull, 아니면 conflict
  *       원격 == base         → dirty 면 push
  *       원격 != base         → clean 이면 pull, dirty 면 conflict
- *     push 는 이 판정 직후 같은 작업 안에서만 일어나므로 다른 기기 변경을 덮어쓰지 않는다(Drive 에 CAS 가 없어
- *     작업 길이만큼의 경쟁 창은 남는다 — 1인 전제).
+ *     push 는 `If-Match: <base eTag>` 조건부 업로드라 그 사이 다른 기기가 올렸으면 412 → 충돌로 넘긴다(덮어쓰기 없음).
  *  4. **이미지는 대기열만.** put/delete 대기열(IndexedDB 영속)을 처리할 뿐, 로컬 전체를 원격과 대조하지 않는다
  *     (예전 '원격에 없는 로컬 파일 전부 올리기' 스캔이 모바일에서 수십 초를 먹던 원인). 백업 가져오기만 명시적으로
  *     전체를 대기열에 넣는다. 다른 기기가 올린 이미지는 볼 때 지연 다운로드(서비스워커/miss 핸들러, 인덱스 필요).
- *  5. **인덱스는 증분 갱신.** pull 뒤 `modifiedTime > 마지막 동기화` 로 바뀐 파일만 받아(요청 1회) 인덱스에 합치고,
- *     그중 md5 가 달라진 키의 로컬 캐시를 지운다(같은 키에 덮어쓰는 썸네일 교체가 다른 기기에서도 보이게).
- *     전체 목록(`listAll`)은 첫 연결·'Drive 기준으로 맞추기'·이미지 전부 내려받기에서만.
+ *  5. **인덱스는 증분 갱신.** pull 뒤 delta 링크(`od:deltaLink`)로 바뀐 파일만 받아(보통 요청 1회) 인덱스에 합치고
+ *     (삭제 반영), 그중 cTag 가 달라진 키의 로컬 캐시를 지운다(같은 키에 덮어쓰는 썸네일 교체가 다른 기기에서도 보이게).
+ *     전체 목록(delta 처음부터)은 첫 연결·'OneDrive 기준으로 맞추기'·이미지 전부 내려받기에서만.
  *
  * 다기기: 탭이 보이는 동안 `POLL_MS`(다른 기기가 최근 썼으면 `POLL_ACTIVE_MS`)마다 원격 DB 메타 1회 조회 + 탭 표시/
  * 포커스 전환 시 즉시. 바뀌었으면 reconcile. 채팅 스트림 등 요청이 진행 중(`rt.busy`)이면 pull 을 다음으로 미룬다.
- * DB 파일 appProperties 에 마지막으로 쓴 기기(`deviceId`/`deviceName`)를 남겨 '다른 기기 사용 중' 을 표시한다.
+ * DB 파일 description(JSON)에 마지막으로 쓴 기기(`deviceId`/`deviceName`)를 남겨 '다른 기기 사용 중' 을 표시한다.
  *
  * 충돌은 화면을 막지 않는다(첫 연결 중만 랜딩에서 선택). `status='conflict'` 칩 → 저장소 모달에서 어느 쪽을 쓸지 고르고,
  * 고르기 전까지 push/pull 은 멈춘다(데이터는 양쪽 다 보존).
@@ -34,8 +34,9 @@
 import { invalidateAll } from '$app/navigation';
 import { kvGet, kvSet, kvDelete, objClear, objDelete, objGet, objKeys, objPut, type StoredObject } from './idb';
 import { getLocalRuntime, onDatabaseSaved, onObjectsChanged, type LocalRuntime } from './runtime';
+import { goto } from '$app/navigation';
 import {
-	createFile,
+	delta,
 	deleteFile,
 	download,
 	ensureToken,
@@ -43,15 +44,16 @@ import {
 	forgetToken,
 	getMeta,
 	getQuota,
+	handleRedirect,
 	listAll,
-	listChangedSince,
-	updateFile,
-	currentToken,
-	DriveAuthError,
-	DriveHttpError,
-	GOOGLE_CLIENT_ID,
-	type DriveFile
-} from './drive';
+	silentToken,
+	upload,
+	CloudAuthError,
+	CloudHttpError,
+	PreconditionFailed,
+	MS_CLIENT_ID,
+	type CloudFile
+} from './onedrive';
 
 export type StorageMode = 'unset' | 'local' | 'drive';
 export type SyncStatus = 'off' | 'idle' | 'syncing' | 'conflict' | 'needs-auth' | 'error';
@@ -69,9 +71,10 @@ const OTHER_ACTIVE_MS = 3 * 60_000;
 /** 이미지 업로드/다운로드 동시 수. */
 const PARALLEL = 4;
 
-// IndexedDB kv 키(이전 버전과 같은 이름 — 기존 기기의 상태를 그대로 이어받는다)
-const K_INDEX = 'drive:index'; // Record<name, {id, md5}>
-const K_BASE = 'drive:db'; // {id, md5} — 마지막으로 맞춘 원격 DB
+// IndexedDB kv 키. 인덱스·base 는 OneDrive 이전(2026-09-09)으로 형식이 바뀌어 새 이름(`od:`) — 구 Google Drive 값은 무시된다.
+const K_INDEX = 'od:index'; // Record<key, {id, rev, etag}>
+const K_BASE = 'od:db'; // {id, rev, etag} — 마지막으로 맞춘 원격 DB
+const K_DELTA = 'od:deltaLink';
 const K_DIRTY = 'drive:dbDirty';
 const K_PUTS = 'drive:pendingPuts';
 const K_DELS = 'drive:pendingDeletes';
@@ -80,10 +83,13 @@ const K_DEVICE = 'drive:deviceId';
 
 interface RemoteRef {
 	id: string;
-	md5?: string;
+	/** 내용 태그(cTag). */
+	rev?: string;
+	/** eTag(조건부 업로드용). */
+	etag?: string;
 }
 
-/** 원격 DB 를 마지막으로 쓴 기기(DB 파일 appProperties + modifiedTime). */
+/** 원격 DB 를 마지막으로 쓴 기기(DB 파일 description JSON + modifiedTime). */
 export interface Writer {
 	deviceId: string;
 	deviceName: string;
@@ -113,8 +119,8 @@ export const sync = $state({
 	lastSyncAt: null as number | null,
 	error: null as string | null,
 	conflict: null as null | { remoteModified: string; writer: Writer | null },
-	clientIdMissing: !GOOGLE_CLIENT_ID,
-	/** 이 기기 식별(Drive 파일 appProperties 에 기록). */
+	clientIdMissing: !MS_CLIENT_ID,
+	/** 이 기기 식별(DB 파일 description 에 기록). */
 	deviceId: '',
 	deviceName: '',
 	/** 원격 DB 를 마지막으로 쓴 기기. */
@@ -168,8 +174,8 @@ async function saveIndex() {
 	await kvSet(K_INDEX, index);
 }
 
-function toRef(f: DriveFile): RemoteRef {
-	return { id: f.id, md5: f.md5Checksum };
+function toRef(f: CloudFile): RemoteRef {
+	return { id: f.id, rev: f.rev, etag: f.etag };
 }
 
 /** 기기 id 는 브라우저 프로필당 1회 생성해 kv 에 보관, 이름은 UA 로 대충(iPhone/Android/Mac/…) + id 앞 4자. */
@@ -202,8 +208,8 @@ function deviceProps(): Record<string, string> {
 }
 
 /** 원격 DB 파일 메타에서 마지막 작성 기기를 읽어 상태에 반영. */
-function noteWriter(f: DriveFile): void {
-	const p = f.appProperties ?? {};
+function noteWriter(f: CloudFile): void {
+	const p = f.props ?? {};
 	const at = Date.parse(f.modifiedTime) || Date.now();
 	sync.writer = p.deviceId ? { deviceId: p.deviceId, deviceName: p.deviceName || '다른 기기', at } : null;
 	updateOtherActive();
@@ -216,16 +222,19 @@ function updateOtherActive(): void {
 
 // ── 시작 ────────────────────────────────────────────────────
 
-/** 앱 시작 시(런타임 부팅 후) 호출. Drive 모드면 뒤에서 reconcile 을 돌린다(로컬이 비어 있지 않으면 화면은 바로 연다). */
+/** 앱 시작 시(런타임 부팅 후) 호출. 클라우드 모드면 뒤에서 reconcile 을 돌린다(로컬이 비어 있지 않으면 화면은 바로 연다). */
 export async function initStorage(): Promise<void> {
 	rt = getLocalRuntime();
 	sync.mode = readMode();
+	// 리디렉트 로그인(팝업이 막힌 기기)에서 돌아온 경우 먼저 처리하고 원래 경로로.
+	const back = await handleRedirect();
+	if (back && back !== location.pathname + location.search) void goto(back, { replaceState: true });
 	sync.lastSyncAt = (await kvGet<number>(K_LAST)) ?? null;
 	index = (await kvGet<Record<string, RemoteRef>>(K_INDEX)) ?? {};
 	await refreshPendingCount();
 	await ensureDeviceIdentity();
 	hookRuntime();
-	// 로컬에 없는 이미지(다른 기기에서 만든 것)는 볼 때 Drive 에서 내려받는다.
+	// 로컬에 없는 이미지(다른 기기에서 만든 것)는 볼 때 OneDrive 에서 내려받는다.
 	rt.r2.setMissHandler((key) => (sync.mode === 'drive' ? fetchImageFromDrive(key) : Promise.resolve(null)));
 
 	if (sync.mode === 'local') {
@@ -238,11 +247,11 @@ export async function initStorage(): Promise<void> {
 	// 첫 연결인데 로컬이 비어 있으면 받아올 때까지만 막는다. 그 외엔 로컬 데이터로 바로 연다.
 	const base = await kvGet<RemoteRef>(K_BASE);
 	sync.ready = !!base || !(await localIsEmpty());
-	if (currentToken()) {
+	if (await silentToken()) {
 		await runOp(reconcile);
 	} else {
-		// 토큰 만료 — 팝업을 자동으로 띄우지 않는다. 변경은 dirty 로 쌓이고 칩에 '재연결 · 대기 n' 으로 보이며,
-		// 저장소 모달 '지금 동기화'(또는 첫 연결 랜딩의 '다시 연결')를 눌렀을 때만 로그인 창을 띄운다.
+		// 조용한 갱신 실패(로그인 안 함·refresh 만료+iframe 차단) — 팝업을 자동으로 띄우지 않는다. 변경은 dirty 로 쌓이고
+		// 칩에 '재연결 · 대기 n' 으로 보이며, 저장소 모달 '지금 동기화'(또는 첫 연결 랜딩의 '다시 연결')를 눌렀을 때만 로그인.
 		sync.status = 'needs-auth';
 	}
 	startPolling();
@@ -314,26 +323,30 @@ function stopPolling(): void {
 	pollTimer = null;
 }
 
-/** 원격 DB 메타 1회 조회(요청 1회). 바뀌었으면 reconcile. 팝업이 필요한 토큰 갱신은 하지 않는다(제스처 경로가 담당). */
+/** 원격 DB 메타 1회 조회(요청 1회). 바뀌었으면 reconcile. 토큰은 조용한 갱신만(로그인 창은 사용자 액션에서만). */
 async function poll(force = false): Promise<void> {
 	if (sync.mode !== 'drive' || !sync.ready || sync.conflict || running) return;
 	if (!force && document.visibilityState === 'hidden') return;
 	if (Date.now() - lastPollAt < 3000) return;
-	const token = currentToken();
 	const ref = index[DB_NAME];
-	if (!token || !ref) return;
+	if (!ref) return;
+	const token = await silentToken();
+	if (!token) {
+		if (sync.status === 'idle') sync.status = 'needs-auth';
+		return;
+	}
 	lastPollAt = Date.now();
-	let meta: DriveFile | null;
+	let meta: CloudFile | null;
 	try {
-		meta = await getMeta(token, ref.id);
+		meta = await getMeta(token, ref.id, DB_NAME);
 	} catch (e) {
-		if (e instanceof DriveHttpError && e.status === 401) sync.status = 'needs-auth';
+		if (e instanceof CloudHttpError && e.status === 401) sync.status = 'needs-auth';
 		return;
 	}
 	if (!meta) return;
 	noteWriter(meta);
 	const base = await kvGet<RemoteRef>(K_BASE);
-	if (base?.md5 && meta.md5Checksum === base.md5) return;
+	if (base?.rev && meta.rev === base.rev) return;
 	await runOp(reconcile);
 }
 
@@ -346,7 +359,7 @@ export function chooseLocal(): void {
 	sync.ready = true;
 }
 
-/** 랜딩/설정: Drive 연결(유저 제스처 안에서 호출 — GIS 팝업). 첫 연결은 판정이 끝날 때까지 랜딩이 진행을 보인다. */
+/** 랜딩/설정: OneDrive 연결(유저 제스처 안에서 호출 — 로그인 팝업/리디렉트). 첫 연결은 판정이 끝날 때까지 랜딩이 진행을 보인다. */
 export async function connectDrive(): Promise<void> {
 	sync.error = null;
 	try {
@@ -362,7 +375,7 @@ export async function connectDrive(): Promise<void> {
 	startPolling();
 }
 
-/** Drive 연결 해제(로컬 데이터는 그대로, 원격 파일도 지우지 않음). */
+/** OneDrive 연결 해제(로컬 데이터는 그대로, 원격 파일도 지우지 않음). */
 export async function disconnectDrive(): Promise<void> {
 	forgetToken();
 	stopPolling();
@@ -370,7 +383,7 @@ export async function disconnectDrive(): Promise<void> {
 	index = {};
 	sync.writer = null;
 	sync.otherActive = false;
-	await Promise.all([kvDelete(K_INDEX), kvDelete(K_BASE), kvDelete(K_DIRTY), kvDelete(K_PUTS), kvDelete(K_DELS)]);
+	await Promise.all([kvDelete(K_INDEX), kvDelete(K_BASE), kvDelete(K_DELTA), kvDelete(K_DIRTY), kvDelete(K_PUTS), kvDelete(K_DELS)]);
 	sync.status = 'off';
 	sync.pending = 0;
 	sync.conflict = null;
@@ -382,23 +395,23 @@ export function continueOffline(): void {
 	sync.ready = true;
 }
 
-/** 충돌 해결: 'remote' = Drive 것으로 로컬 덮어쓰기, 'local' = 이 기기 것으로 Drive 덮어쓰기. */
+/** 충돌 해결: 'remote' = OneDrive 것으로 로컬 덮어쓰기, 'local' = 이 기기 것으로 OneDrive 덮어쓰기. */
 export async function resolveConflict(pick: 'remote' | 'local'): Promise<void> {
 	if (!sync.conflict) return;
 	sync.conflict = null;
 	await runOp(async (token) => {
-		const remote = index[DB_NAME] ? await getMeta(token, index[DB_NAME].id) : await findByName(token, DB_NAME);
+		const remote = index[DB_NAME] ? await getMeta(token, index[DB_NAME].id, DB_NAME) : await findByName(token, DB_NAME);
 		if (pick === 'remote' && remote) {
 			await pull(token, remote);
 			await processImageQueue(token);
 		} else {
 			await processImageQueue(token);
-			await push(token, remote);
+			await push(token, remote, { force: true });
 		}
 	});
 }
 
-/** 수동 '지금 동기화'(제스처 안). 토큰이 만료됐으면 팝업으로 갱신. */
+/** 수동 '지금 동기화'(제스처 안). 토큰이 만료됐으면 로그인 창으로 갱신. */
 export async function syncNow(): Promise<void> {
 	if (sync.mode !== 'drive') return;
 	try {
@@ -413,9 +426,9 @@ export async function syncNow(): Promise<void> {
 }
 
 /**
- * 설정 모달 'Drive 기준으로 맞추기'(제스처 안): Drive 를 원본으로 이 기기를 통째 맞춘다 — **올리지 않은 로컬 변경은 버린다**.
- * 이미지 대기열과 로컬 이미지 캐시를 전부 비우고(전부 Drive 에서 지연 다운로드 가능), 인덱스를 전체 목록으로 다시 만들고,
- * DB 를 Drive 것으로 교체한다. 다른 기기가 바꾼 썸네일이 옛것으로 보이는 등 캐시가 꼬였을 때의 복구용.
+ * 설정 모달 'OneDrive 기준으로 맞추기'(제스처 안): OneDrive 를 원본으로 이 기기를 통째 맞춘다 — **올리지 않은 로컬 변경은 버린다**.
+ * 이미지 대기열과 로컬 이미지 캐시를 전부 비우고(전부 OneDrive 에서 지연 다운로드 가능), 인덱스를 전체 목록으로 다시 만들고,
+ * DB 를 OneDrive 것으로 교체한다. 다른 기기가 바꾼 썸네일이 옛것으로 보이는 등 캐시가 꼬였을 때의 복구용.
  */
 export async function resetToDrive(): Promise<void> {
 	if (sync.mode !== 'drive') return;
@@ -426,9 +439,9 @@ export async function resetToDrive(): Promise<void> {
 		await kvSet(K_PUTS, []);
 		await kvSet(K_DELS, []);
 		await objClear();
-		sync.phase = 'Drive 목록 받는 중…';
+		sync.phase = 'OneDrive 목록 받는 중…';
 		await loadFullIndex(token);
-		const remote = index[DB_NAME] ? await getMeta(token, index[DB_NAME].id) : null;
+		const remote = index[DB_NAME] ? await getMeta(token, index[DB_NAME].id, DB_NAME) : null;
 		if (remote) await pull(token, remote, { refreshIndex: false });
 		else await push(token, null);
 	});
@@ -473,9 +486,9 @@ async function runOp(job: (token: string) => Promise<void>): Promise<void> {
 				sync.ready = true;
 			} else if (e instanceof SyncDeferred) {
 				sync.status = 'idle';
-			} else if ((e instanceof DriveHttpError && e.status === 401) || e instanceof DriveAuthError) {
+			} else if ((e instanceof CloudHttpError && e.status === 401) || e instanceof CloudAuthError) {
 				sync.status = 'needs-auth';
-				if (e instanceof DriveAuthError) sync.error = e.message;
+				if (e instanceof CloudAuthError) sync.error = e.message;
 			} else {
 				sync.status = 'error';
 				sync.error = e instanceof Error ? e.message : String(e);
@@ -493,14 +506,14 @@ async function runOp(job: (token: string) => Promise<void>): Promise<void> {
 
 /**
  * 핵심: 원격 DB 와 로컬의 관계를 판정해 필요한 한 가지를 하고, 이미지 대기열을 처리한다.
- * 올릴 때는 **이미지 먼저, DB 마지막** — 다른 기기는 DB md5 변화를 보고 받아가므로, 그 시점에 DB 가 참조하는 이미지가
- * 이미 Drive 에 있어야 한다(반대 순서면 상대가 DB 만 받고 옛 썸네일 캐시를 계속 쓰는데, 다음 DB 변경까지 갱신 계기가 없다).
+ * 올릴 때는 **이미지 먼저, DB 마지막** — 다른 기기는 DB cTag 변화를 보고 받아가므로, 그 시점에 DB 가 참조하는 이미지가
+ * 이미 OneDrive 에 있어야 한다(반대 순서면 상대가 DB 만 받고 옛 썸네일 캐시를 계속 쓰는데, 다음 DB 변경까지 갱신 계기가 없다).
  */
 async function reconcile(token: string): Promise<void> {
-	sync.phase = 'Drive 확인 중…';
-	let remote: DriveFile | null = null;
+	sync.phase = 'OneDrive 확인 중…';
+	let remote: CloudFile | null = null;
 	if (index[DB_NAME]) {
-		remote = await getMeta(token, index[DB_NAME].id);
+		remote = await getMeta(token, index[DB_NAME].id, DB_NAME);
 		if (!remote) delete index[DB_NAME]; // 원격에서 지워짐
 	}
 	if (!remote && !index[DB_NAME]) {
@@ -516,8 +529,11 @@ async function reconcile(token: string): Promise<void> {
 	const dirty = await isDirty();
 
 	if (!remote) {
+		// 원격이 비어 있음(처음 연결·저장소 이전) → 로컬 이미지 전부를 대기열에 넣고 올린 뒤 DB 생성.
+		const local = await objKeys();
+		if (local.length) await enqueue(K_PUTS, local, K_DELS);
 		await processImageQueue(token);
-		sync.phase = 'Drive 에 처음 올리는 중…';
+		sync.phase = 'OneDrive 에 처음 올리는 중…';
 		await push(token, null);
 	} else if (!base) {
 		// 이 기기에서 처음 연결. 로컬이 비어 있으면 받아오고, 데이터가 있으면 유저가 고른다.
@@ -527,7 +543,7 @@ async function reconcile(token: string): Promise<void> {
 		} else {
 			setConflict(remote);
 		}
-	} else if (remote.md5Checksum === base.md5) {
+	} else if (remote.rev === base.rev) {
 		await processImageQueue(token);
 		if (dirty) await push(token, remote);
 	} else if (!dirty) {
@@ -540,21 +556,38 @@ async function reconcile(token: string): Promise<void> {
 	}
 }
 
-function setConflict(remote: DriveFile): void {
+function setConflict(remote: CloudFile): void {
 	index[DB_NAME] = toRef(remote);
 	void saveIndex();
 	sync.conflict = { remoteModified: remote.modifiedTime, writer: sync.writer };
 }
 
-/** 로컬 DB 스냅샷을 Drive 에 올린다(`remote` 가 있으면 그 파일을 교체). base 갱신, dirty 해제. */
-async function push(token: string, remote: DriveFile | null): Promise<void> {
+/**
+ * 로컬 DB 스냅샷을 OneDrive 에 올린다. `remote` 가 있으면 그 eTag 로 조건부 업로드 — 판정 뒤 다른 기기가 먼저 올렸으면
+ * 412 → 덮어쓰지 않고 충돌로 넘긴다(`force` 는 충돌 해결에서 '이 기기 것으로' 를 골랐을 때). base 갱신, dirty 해제.
+ */
+async function push(token: string, remote: CloudFile | null, opts: { force?: boolean } = {}): Promise<void> {
 	sync.phase = '변경 사항 올리는 중…';
 	await rt!.flush();
 	const bytes = rt!.exportDatabase();
 	const blob = new Blob([bytes as BlobPart], { type: DB_MIME });
-	const f = remote
-		? await updateFile(token, remote.id, blob, DB_MIME, deviceProps())
-		: await createFile(token, DB_NAME, blob, DB_MIME, deviceProps());
+	let f: CloudFile;
+	try {
+		f = await upload(token, DB_NAME, blob, DB_MIME, {
+			ifMatch: remote && !opts.force ? remote.etag : undefined,
+			props: deviceProps()
+		});
+	} catch (e) {
+		if (e instanceof PreconditionFailed) {
+			const cur = await findByName(token, DB_NAME);
+			if (cur) {
+				noteWriter(cur);
+				setConflict(cur);
+				return;
+			}
+		}
+		throw e;
+	}
 	index[DB_NAME] = toRef(f);
 	await saveIndex();
 	await kvSet(K_BASE, index[DB_NAME]);
@@ -563,8 +596,8 @@ async function push(token: string, remote: DriveFile | null): Promise<void> {
 }
 
 /** 원격 DB 로 로컬을 덮어쓴다. base 갱신, dirty 해제, 인덱스 증분 갱신(+낡은 캐시 정리), 화면 갱신. */
-async function pull(token: string, remote: DriveFile, opts: { refreshIndex?: boolean } = {}): Promise<void> {
-	sync.phase = 'Drive 데이터 받는 중…';
+async function pull(token: string, remote: CloudFile, opts: { refreshIndex?: boolean } = {}): Promise<void> {
+	sync.phase = 'OneDrive 데이터 받는 중…';
 	const blob = await download(token, remote.id);
 	const bytes = new Uint8Array(await blob.arrayBuffer());
 	// 판정 뒤 내려받는 몇 초 사이에 로컬 쓰기(캐릭터 저장 등)가 끼어들었으면 덮어쓰지 않고 다음 reconcile 로 넘긴다
@@ -580,38 +613,44 @@ async function pull(token: string, remote: DriveFile, opts: { refreshIndex?: boo
 	await invalidateAll();
 }
 
-/** 전체 목록으로 인덱스를 다시 만든다(첫 연결·복구·전부 내려받기). */
+/** 전체 목록(delta 처음부터)으로 인덱스를 다시 만든다(첫 연결·복구·전부 내려받기). delta 링크도 새로 저장. */
 async function loadFullIndex(token: string): Promise<void> {
-	const files = await listAll(token);
+	const r = await delta(token, null);
 	index = {};
-	for (const f of files) index[f.name] = toRef(f);
+	for (const f of r.files) index[f.name] = toRef(f);
 	await saveIndex();
+	await kvSet(K_DELTA, r.deltaLink);
 }
 
 /**
- * 인덱스 갱신. 인덱스가 DB 파일뿐이면(첫 연결) 전체 목록, 아니면 마지막 동기화 이후 바뀐 파일만(요청 1회).
- * 바뀐 파일 중 인덱스의 md5 와 다른 키는 다른 기기가 교체한 것 → 로컬 캐시를 지워 다음 표시 때 새로 받게 한다.
+ * 인덱스 갱신. delta 링크가 없으면(첫 연결) 전체 목록, 있으면 그 뒤 바뀐 파일만(보통 요청 1회, 삭제 포함).
+ * 바뀐 파일 중 인덱스의 cTag 와 다른 키는 다른 기기가 교체한 것 → 로컬 캐시를 지워 다음 표시 때 새로 받게 한다.
  * 이 기기가 올릴 차례인 키(put 대기열)는 이 기기 것이 최신이므로 건드리지 않는다.
- * idb.objDelete 는 R2 shim 을 거치지 않아 삭제 대기열(Drive 삭제)로 번지지 않는다.
+ * idb.objDelete 는 R2 shim 을 거치지 않아 삭제 대기열(원격 삭제)로 번지지 않는다.
  */
 async function refreshIndex(token: string): Promise<void> {
-	const known = Object.keys(index).filter((k) => k !== DB_NAME).length;
-	if (known === 0 || !sync.lastSyncAt) {
-		sync.phase = 'Drive 목록 받는 중…';
+	const link = await kvGet<string>(K_DELTA);
+	if (!link) {
+		sync.phase = 'OneDrive 목록 받는 중…';
 		await loadFullIndex(token);
 		return;
 	}
 	sync.phase = '바뀐 파일 확인 중…';
-	const changed = await listChangedSince(token, sync.lastSyncAt - 60_000);
+	const r = await delta(token, link);
 	const puts = new Set((await kvGet<string[]>(K_PUTS)) ?? []);
 	const stale: string[] = [];
-	for (const f of changed) {
+	if (r.deleted.length) {
+		const gone = new Set(r.deleted);
+		for (const [key, ref] of Object.entries(index)) if (key !== DB_NAME && gone.has(ref.id)) delete index[key];
+	}
+	for (const f of r.files) {
 		if (f.name === DB_NAME) continue;
 		const old = index[f.name];
-		if (old && old.md5 && f.md5Checksum && old.md5 !== f.md5Checksum && !puts.has(f.name)) stale.push(f.name);
+		if (old && old.rev && f.rev && old.rev !== f.rev && !puts.has(f.name)) stale.push(f.name);
 		index[f.name] = toRef(f);
 	}
 	await saveIndex();
+	await kvSet(K_DELTA, r.deltaLink);
 	if (stale.length) {
 		await objDelete(stale);
 		console.info(`[sync] 다른 기기가 바꾼 이미지 캐시 ${stale.length}개 정리`);
@@ -619,7 +658,7 @@ async function refreshIndex(token: string): Promise<void> {
 }
 
 /**
- * 백업 가져오기 직후: 로컬이 zip 내용으로 통째 바뀌었으므로 Drive 도 그에 맞춘다 —
+ * 백업 가져오기 직후: 로컬이 zip 내용으로 통째 바뀌었으므로 OneDrive 도 그에 맞춘다 —
  * 로컬 이미지 전부를 업로드 대기열에, zip 에 없는 원격 이미지는 삭제 대기열에. DB 는 replaceDatabase 가 dirty 로 만들었다.
  */
 export async function reconcileAfterImport(): Promise<void> {
@@ -649,7 +688,7 @@ async function processImageQueue(token: string): Promise<void> {
 			}
 			dels.delete(key);
 			d++;
-			sync.phase = `Drive 에서 지우는 중… (${d}/${total})`;
+			sync.phase = `OneDrive 에서 지우는 중… (${d}/${total})`;
 			if (d % 20 === 0) {
 				await kvSet(K_DELS, [...dels]);
 				await saveIndex();
@@ -667,13 +706,10 @@ async function processImageQueue(token: string): Promise<void> {
 		await parallel([...puts], async (key) => {
 			const obj = await objGet(key);
 			if (obj) {
-				const ref = index[key];
-				const f = ref
-					? await updateFile(token, ref.id, obj.blob, obj.contentType)
-					: await createFile(token, key, obj.blob, obj.contentType);
+				const f = await upload(token, key, obj.blob, obj.contentType);
 				index[key] = toRef(f);
-				// 로컬 etag 를 Drive md5 로 맞춰 둔다(서비스워커 ETag 응답과 일치).
-				if (f.md5Checksum && obj.etag !== f.md5Checksum) await objPut({ ...obj, etag: f.md5Checksum });
+				// 로컬 etag 를 원격 cTag 로 맞춰 둔다(서비스워커 ETag 응답과 일치).
+				if (f.rev && obj.etag !== f.rev) await objPut({ ...obj, etag: f.rev });
 			}
 			puts.delete(key);
 			n++;
@@ -690,11 +726,11 @@ async function processImageQueue(token: string): Promise<void> {
 	}
 }
 
-/** Drive 에서 이미지 1개를 받아 IndexedDB 에 넣는다(지연 다운로드). 인덱스에 없거나 토큰 없으면 null. */
+/** OneDrive 에서 이미지 1개를 받아 IndexedDB 에 넣는다(지연 다운로드). 인덱스에 없거나 토큰 없으면 null. */
 async function fetchImageFromDrive(key: string): Promise<StoredObject | null> {
 	const ref = index[key];
 	if (!ref) return null;
-	const token = currentToken();
+	const token = await silentToken();
 	if (!token) return null;
 	const blob = await download(token, ref.id);
 	const obj: StoredObject = {
@@ -703,7 +739,7 @@ async function fetchImageFromDrive(key: string): Promise<StoredObject | null> {
 		contentType: blob.type || guessType(key),
 		size: blob.size,
 		uploaded: Date.now(),
-		etag: ref.md5 ?? crypto.randomUUID().replace(/-/g, '')
+		etag: ref.rev ?? crypto.randomUUID().replace(/-/g, '')
 	};
 	await objPut(obj);
 	return obj;
@@ -782,15 +818,15 @@ function guessType(key: string): string {
 // ── 설정 모달 정보 ─────────────────────────────────────────
 
 export interface RemoteSummary {
-	/** Haven(appDataFolder) 파일 수·바이트. */
+	/** Haven 앱 폴더 파일 수·바이트. */
 	files: number;
 	bytes: number;
-	/** Google Drive 계정 전체 사용량·총 용량(무제한이면 null). */
+	/** OneDrive 전체 사용량·총 용량(모르면 null). */
 	quotaUsage: number;
 	quotaLimit: number | null;
 }
 
-/** 설정 모달용: Haven appData 사용량 + Drive 계정 전체 용량. */
+/** 설정 모달용: Haven 앱 폴더 사용량 + OneDrive 전체 용량. */
 export async function remoteSummary(): Promise<RemoteSummary | null> {
 	if (sync.mode !== 'drive') return null;
 	try {
