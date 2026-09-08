@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { storageModal } from '$lib/state/storageModal.svelte';
-	import { sync, connectDrive, disconnectDrive, syncNow, remoteSummary, downloadAllImages } from '$lib/local/sync.svelte';
+	import { sync, connectDrive, disconnectDrive, syncNow, remoteSummary, downloadAllImages, type RemoteSummary } from '$lib/local/sync.svelte';
 	import { exportBackup, importBackup, type BackupProgress } from '$lib/local/backup';
 
 	let busy = $state<string | null>(null);
 	let msg = $state<string | null>(null);
 	let err = $state<string | null>(null);
-	let remote = $state<{ files: number; bytes: number } | null>(null);
+	let remote = $state<RemoteSummary | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let progress = $state<BackupProgress | null>(null);
 	const PRUNE_KEEP = 50;
@@ -128,7 +128,11 @@
 	}
 
 	const fmtBytes = (n: number) =>
-		n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+		n >= 1024 ** 3
+			? `${(n / 1024 ** 3).toFixed(2)} GB`
+			: n >= 1024 * 1024
+				? `${(n / 1024 / 1024).toFixed(1)} MB`
+				: `${(n / 1024).toFixed(0)} KB`;
 	const statusText = $derived(
 		sync.mode !== 'drive'
 			? '이 기기에만 저장'
@@ -164,9 +168,27 @@
 						<span class="v">{sync.lastSyncAt ? new Date(sync.lastSyncAt).toLocaleString('ko-KR') : '—'}</span>
 					</div>
 					<div class="row">
-						<span class="k">Drive 사용량</span>
-						<span class="v">{remote ? `${remote.files}개 파일 · ${fmtBytes(remote.bytes)}` : '…'}</span>
+						<span class="k">Haven 이 쓰는 용량</span>
+						<span class="v">{remote ? `${fmtBytes(remote.bytes)} · ${remote.files}개 파일` : '…'}</span>
 					</div>
+					<div class="row">
+						<span class="k">Google Drive 전체</span>
+						<span class="v">
+							{#if remote}
+								{fmtBytes(remote.quotaUsage)} / {remote.quotaLimit === null ? '무제한' : fmtBytes(remote.quotaLimit)}
+								{#if remote.quotaLimit}
+									<span class="pct">({((remote.quotaUsage / remote.quotaLimit) * 100).toFixed(0)}%)</span>
+								{/if}
+							{:else}…{/if}
+						</span>
+					</div>
+					{#if remote?.quotaLimit}
+						<div class="bar" aria-hidden="true">
+							<span class="bar-haven" style:width="{Math.min(100, (remote.bytes / remote.quotaLimit) * 100)}%"></span>
+							<span class="bar-other" style:width="{Math.min(100, (Math.max(0, remote.quotaUsage - remote.bytes) / remote.quotaLimit) * 100)}%"></span>
+						</div>
+						<p class="hint legend"><span class="sw haven"></span>Haven <span class="sw other"></span>다른 파일</p>
+					{/if}
 					{#if sync.error}<p class="err">{sync.error}</p>{/if}
 					<div class="actions">
 						<button class="primary" onclick={onSync} disabled={!!busy}>지금 동기화</button>
@@ -336,6 +358,43 @@
 	}
 	.hidden-input {
 		display: none;
+	}
+	.pct {
+		color: var(--text-dim);
+		font-size: 0.78rem;
+	}
+	.bar {
+		display: flex;
+		height: 8px;
+		border-radius: 999px;
+		background: var(--bg-card);
+		overflow: hidden;
+		margin-top: 2px;
+	}
+	.bar-haven {
+		background: var(--accent);
+	}
+	.bar-other {
+		background: var(--text-faint);
+	}
+	.legend {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 0.72rem;
+	}
+	.sw {
+		display: inline-block;
+		width: 10px;
+		height: 10px;
+		border-radius: 3px;
+	}
+	.sw.haven {
+		background: var(--accent);
+	}
+	.sw.other {
+		background: var(--text-faint);
+		margin-left: 8px;
 	}
 	.ok {
 		margin: 0;

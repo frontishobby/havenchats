@@ -29,6 +29,7 @@ import {
 	forgetToken,
 	hasStoredToken,
 	listAll,
+	getQuota,
 	updateFile,
 	currentToken,
 	DriveAuthError,
@@ -499,13 +500,27 @@ async function flush(): Promise<void> {
 	});
 }
 
-/** 설정 모달용: 원격 파일 목록 요약. */
-export async function remoteSummary(): Promise<{ files: number; bytes: number } | null> {
+export interface RemoteSummary {
+	/** Haven(appDataFolder) 파일 수·바이트. */
+	files: number;
+	bytes: number;
+	/** Google Drive 계정 전체 사용량·총 용량(무제한이면 null). */
+	quotaUsage: number;
+	quotaLimit: number | null;
+}
+
+/** 설정 모달용: Haven appData 사용량 + Drive 계정 전체 용량. */
+export async function remoteSummary(): Promise<RemoteSummary | null> {
 	if (sync.mode !== 'drive') return null;
 	try {
 		const token = await ensureToken(false);
-		const files = await listAll(token);
-		return { files: files.length, bytes: files.reduce((a, f) => a + f.size, 0) };
+		const [files, quota] = await Promise.all([listAll(token), getQuota(token)]);
+		return {
+			files: files.length,
+			bytes: files.reduce((a, f) => a + f.size, 0),
+			quotaUsage: quota.usage,
+			quotaLimit: quota.limit
+		};
 	} catch {
 		return null;
 	}

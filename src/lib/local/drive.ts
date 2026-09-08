@@ -229,6 +229,14 @@ function toFile(f: Record<string, unknown>): DriveFile {
 	};
 }
 
+/** Drive 전체 저장 용량(바이트). limit 은 무제한 계정이면 null. */
+export async function getQuota(token: string): Promise<{ limit: number | null; usage: number }> {
+	const res = await call(token, `${API}/about?fields=storageQuota`);
+	const j = (await res.json()) as { storageQuota?: { limit?: string; usage?: string } };
+	const q = j.storageQuota ?? {};
+	return { limit: q.limit ? Number(q.limit) : null, usage: Number(q.usage ?? 0) };
+}
+
 /** appDataFolder 의 전체 파일 목록(페이지 순회). */
 export async function listAll(token: string): Promise<DriveFile[]> {
 	const out: DriveFile[] = [];
