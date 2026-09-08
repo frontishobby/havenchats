@@ -205,6 +205,14 @@
 							<a class="menu-item" role="menuitem" href="/import" onclick={() => (menuOpen = false)}>
 								charx 가져오기
 							</a>
+							<!-- 모바일: 상단바에서 숨긴 허브 링크를 메뉴 안으로 -->
+							<div class="menu-sep mobile-only"></div>
+							<a class="menu-item mobile-only" role="menuitem" href="/styles" onclick={() => (menuOpen = false)}>
+								그림체
+							</a>
+							<a class="menu-item mobile-only" role="menuitem" href="/modules" onclick={() => (menuOpen = false)}>
+								모듈
+							</a>
 						</div>
 					{/if}
 				</div>
@@ -323,6 +331,9 @@
 		gap: 16px;
 	}
 	.sync-chip {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 		padding: 4px 10px;
 		border: 1px solid var(--border);
 		border-radius: 999px;
@@ -378,6 +389,14 @@
 		.credits-k {
 			display: none;
 		}
+	}
+	.mobile-only {
+		display: none;
+	}
+	.menu-sep {
+		height: 1px;
+		margin: 6px 4px;
+		background: var(--border);
 	}
 	.hub-link {
 		font-size: 0.85rem;
@@ -472,5 +491,71 @@
 	}
 	main {
 		flex: 1;
+	}
+
+	/* ── 모바일 상단바 ──
+	   데스크톱 그대로 두면 [햄버거+로고] [동기화·크레딧] [그림체·모듈·이름▾] 세 묶음이 390px 를 훌쩍 넘어
+	   오른쪽 메뉴가 화면 밖으로 잘린다(html overflow-x: clip). 좁은 폭에선
+	   허브 링크는 유저 메뉴 안으로, 이름은 아바타만, 로고는 'Haven' 만 남긴다. */
+	@media (max-width: 640px) {
+		.app {
+			--topbar-h: 52px;
+		}
+		.topbar {
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			gap: 8px;
+			padding: 0 10px 0 6px;
+		}
+		.left {
+			gap: 4px;
+		}
+		.brand {
+			font-size: 1.05rem;
+			gap: 5px;
+		}
+		.logo {
+			font-size: 1.15rem;
+		}
+		.wordmark .dim {
+			display: none;
+		}
+		.center {
+			justify-content: center;
+			min-width: 0;
+			gap: 6px;
+		}
+		.sync-chip,
+		.credits-badge {
+			font-size: 0.68rem;
+			padding: 4px 8px;
+		}
+		nav {
+			gap: 6px;
+		}
+		.hub-link {
+			display: none;
+		}
+		.mobile-only {
+			display: block;
+		}
+		.user-name-btn {
+			padding: 3px;
+			gap: 4px;
+		}
+		.user-name {
+			display: none;
+		}
+		.user-avatar,
+		.user-fallback {
+			width: 30px;
+			height: 30px;
+		}
+		.menu {
+			min-width: 170px;
+		}
+		.menu-item {
+			padding: 11px 12px;
+			font-size: 0.9rem;
+		}
 	}
 </style>

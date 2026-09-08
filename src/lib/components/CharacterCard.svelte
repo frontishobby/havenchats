@@ -145,4 +145,44 @@
 		padding: 2px 8px;
 		border-radius: 999px;
 	}
+
+	/* 모바일 2열: 카드 한 장이 화면 절반 폭이라 본문·글자를 한 단계 줄이고 태그는 한 줄만. */
+	@media (max-width: 640px) {
+		.card {
+			border-radius: 12px;
+		}
+		.card:hover {
+			transform: none;
+		}
+		.avatar-fallback {
+			font-size: 2.6rem;
+		}
+		.body {
+			padding: 9px 10px 11px;
+			gap: 4px;
+		}
+		h3.name {
+			font-size: 0.9rem;
+			gap: 4px;
+		}
+		.chats {
+			font-size: 0.68rem;
+		}
+		.tagline {
+			font-size: 0.76rem;
+			line-height: 1.38;
+			min-height: 0;
+		}
+		.tags {
+			flex-wrap: nowrap;
+			overflow: hidden;
+			gap: 3px;
+		}
+		.tag {
+			font-size: 0.64rem;
+			padding: 1px 6px;
+			white-space: nowrap;
+			flex-shrink: 0;
+		}
+	}
 </style>

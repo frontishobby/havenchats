@@ -109,14 +109,17 @@
 		position: fixed;
 		inset: 0;
 		z-index: 200;
-		display: grid;
-		place-items: center;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
 		padding: 20px;
 		background: var(--bg);
+		overflow-y: auto;
 	}
 	.card {
 		width: 100%;
 		max-width: 460px;
+		margin: auto;
 		padding: 32px 28px;
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
@@ -225,6 +228,28 @@
 	@keyframes spin {
 		to {
 			transform: rotate(360deg);
+		}
+	}
+
+	@media (max-width: 640px) {
+		.landing {
+			padding: 16px 12px;
+		}
+		.card {
+			padding: 22px 18px;
+			gap: 12px;
+		}
+		h1 {
+			font-size: 1.2rem;
+		}
+		.sub {
+			font-size: 0.86rem;
+		}
+		.choice {
+			padding: 12px 13px;
+		}
+		.choice strong {
+			font-size: 0.94rem;
 		}
 	}
 </style>

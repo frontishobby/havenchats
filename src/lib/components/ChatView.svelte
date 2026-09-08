@@ -2899,13 +2899,16 @@
 		z-index: 50;
 		background: rgba(0, 0, 0, 0.6);
 		backdrop-filter: blur(2px);
-		display: grid;
-		place-items: center;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
 		padding: 20px;
+		overflow-y: auto;
 	}
 	.modal {
 		width: 100%;
 		max-width: 380px;
+		margin: auto;
 		max-height: calc(100dvh - 40px);
 		overflow-y: auto;
 		overscroll-behavior: contain;
@@ -3982,6 +3985,23 @@
 		}
 		.header-menu-wrap {
 			display: block;
+		}
+		/* 설정·필터·모듈·이미지 모달 → 바텀시트 */
+		.modal-backdrop {
+			padding: 0;
+		}
+		.modal {
+			max-width: none;
+			margin: auto 0 0;
+			max-height: calc(100dvh - 32px);
+			border-radius: 18px 18px 0 0;
+			border-left: none;
+			border-right: none;
+			border-bottom: none;
+			padding: 18px 16px calc(16px + env(safe-area-inset-bottom));
+		}
+		.modal-head {
+			margin-bottom: 14px;
 		}
 		/* 모바일 — 좁은 폭에서 본문·입력창 글자를 한 단계 줄여 한 화면에 더 많이 읽히게. */
 		.novel {

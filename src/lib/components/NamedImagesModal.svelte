@@ -173,7 +173,7 @@
 	.modal {
 		width: 100%;
 		max-width: 560px;
-		max-height: 85vh;
+		max-height: calc(100dvh - 32px);
 		overflow-y: auto;
 		background: var(--bg-card);
 		border: 1px solid var(--border);
@@ -304,5 +304,17 @@
 		background: var(--accent);
 		border: none;
 		color: #fff;
+	}
+
+	/* 모바일: 여백을 줄여 폭·높이를 더 쓴다 */
+	@media (max-width: 640px) {
+		.overlay {
+			padding: 10px;
+		}
+		.modal {
+			padding: 16px 14px;
+			max-height: calc(100dvh - 20px);
+			border-radius: 14px;
+		}
 	}
 </style>

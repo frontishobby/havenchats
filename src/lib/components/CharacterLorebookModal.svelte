@@ -180,7 +180,7 @@
 		border-radius: var(--radius);
 		width: 100%;
 		max-width: 640px;
-		max-height: 88vh;
+		max-height: calc(100dvh - 40px);
 		overflow-y: auto;
 		padding: 20px;
 	}
@@ -328,5 +328,17 @@
 		background: var(--accent);
 		border: none;
 		color: #fff;
+	}
+
+	/* 모바일: 여백을 줄여 폭·높이를 더 쓴다 */
+	@media (max-width: 640px) {
+		.backdrop {
+			padding: 10px;
+		}
+		.modal {
+			padding: 16px 14px;
+			max-height: calc(100dvh - 20px);
+			border-radius: 14px;
+		}
 	}
 </style>

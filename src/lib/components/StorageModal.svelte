@@ -263,14 +263,17 @@
 		z-index: 120;
 		background: rgba(0, 0, 0, 0.7);
 		backdrop-filter: blur(3px);
-		display: grid;
-		place-items: center;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
 		padding: 20px;
+		overflow-y: auto;
 	}
 	.modal {
 		position: relative;
 		width: 100%;
 		max-width: 440px;
+		margin: auto;
 		padding: 24px 22px;
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
@@ -409,5 +412,40 @@
 		margin: 0;
 		font-size: 0.82rem;
 		color: #ff7b7b;
+	}
+
+	/* 모바일: 바텀시트 */
+	@media (max-width: 640px) {
+		.backdrop {
+			padding: 0;
+		}
+		.modal {
+			max-width: none;
+			margin: auto 0 0;
+			max-height: calc(100dvh - 32px);
+			overflow-y: auto;
+			overscroll-behavior: contain;
+			border-radius: 18px 18px 0 0;
+			border-left: none;
+			border-right: none;
+			border-bottom: none;
+			padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
+			gap: 14px;
+		}
+		h2 {
+			font-size: 1.08rem;
+		}
+		.row {
+			font-size: 0.82rem;
+		}
+		.v {
+			min-width: 0;
+			overflow-wrap: anywhere;
+		}
+		.primary,
+		.ghost {
+			padding: 9px 12px;
+			font-size: 0.8rem;
+		}
 	}
 </style>

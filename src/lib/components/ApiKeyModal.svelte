@@ -289,8 +289,9 @@
 		z-index: 110;
 		background: rgba(0, 0, 0, 0.65);
 		backdrop-filter: blur(3px);
-		display: grid;
-		place-items: center;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
 		padding: 20px;
 		overflow-y: auto;
 	}
@@ -298,6 +299,7 @@
 		position: relative;
 		width: 100%;
 		max-width: 420px;
+		margin: auto;
 		background: var(--bg-card);
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
@@ -443,5 +445,45 @@
 	.del:hover {
 		color: var(--nsfw);
 		border-color: var(--nsfw);
+	}
+
+	/* 모바일: 바텀시트(두 공급자 섹션이 길어 전체 스크롤) */
+	@media (max-width: 640px) {
+		.backdrop {
+			padding: 0;
+		}
+		.modal {
+			max-width: none;
+			margin: auto 0 0;
+			max-height: calc(100dvh - 32px);
+			overflow-y: auto;
+			overscroll-behavior: contain;
+			border-radius: 18px 18px 0 0;
+			border-left: none;
+			border-right: none;
+			border-bottom: none;
+			padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
+		}
+		.head h2 {
+			font-size: 1.1rem;
+		}
+		.head .sub {
+			font-size: 0.82rem;
+			margin-bottom: 16px;
+		}
+		.provider-sep {
+			margin: 18px 0;
+		}
+		.hint {
+			font-size: 0.76rem;
+		}
+		.actions {
+			gap: 8px;
+		}
+		.save,
+		.del {
+			flex: 1;
+			padding: 11px 12px;
+		}
 	}
 </style>

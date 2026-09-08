@@ -184,21 +184,25 @@
 		z-index: 120;
 		background: rgba(0, 0, 0, 0.65);
 		backdrop-filter: blur(3px);
-		display: grid;
-		place-items: center;
+		/* flex + margin:auto — 모달이 화면보다 길어도 위가 잘리지 않고 스크롤(grid place-items:center 는 위쪽이 잘림) */
+		display: flex;
+		flex-direction: column;
+		align-items: center;
 		padding: 20px;
 		overflow-y: auto;
 	}
 	.modal {
+		--pad: 24px;
 		position: relative;
 		width: 100%;
 		max-width: 520px;
+		margin: auto;
 		background: var(--bg-card);
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
-		padding: 24px;
+		padding: var(--pad);
 		box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
-		max-height: calc(100vh - 40px);
+		max-height: calc(100dvh - 40px);
 		display: flex;
 		flex-direction: column;
 	}
@@ -229,10 +233,10 @@
 	/* 세로 포트레이트 히어로 — 모달 좌우 패딩까지 채우고 하단에 이름/태그라인 오버레이 */
 	.thumb {
 		position: relative;
-		width: calc(100% + 48px);
-		margin: -24px -24px 0;
+		width: calc(100% + var(--pad) * 2);
+		margin: calc(var(--pad) * -1) calc(var(--pad) * -1) 0;
 		aspect-ratio: 3 / 4;
-		max-height: 56vh;
+		max-height: 56dvh;
 		overflow: hidden;
 		background: linear-gradient(135deg, var(--accent), var(--nsfw));
 		border-radius: var(--radius) var(--radius) 0 0;
@@ -459,5 +463,84 @@
 	.start:disabled {
 		opacity: 0.6;
 		cursor: default;
+	}
+
+	/* ── 모바일: 바텀시트 ──
+	   화면 폭 전체를 쓰고, 모달 전체가 스크롤되며 '채팅 시작하기' 는 하단에 고정. */
+	@media (max-width: 640px) {
+		.backdrop {
+			padding: 0;
+		}
+		.modal {
+			--pad: 16px;
+			max-width: none;
+			margin: auto 0 0;
+			max-height: calc(100dvh - 32px);
+			border-radius: 18px 18px 0 0;
+			border-left: none;
+			border-right: none;
+			border-bottom: none;
+			padding-bottom: 0;
+			overflow-y: auto;
+			overscroll-behavior: contain;
+			-webkit-overflow-scrolling: touch;
+		}
+		.close {
+			top: 10px;
+			right: 10px;
+		}
+		.thumb {
+			max-height: 46dvh;
+			border-radius: 18px 18px 0 0;
+		}
+		.hero {
+			gap: 10px;
+			margin-bottom: 14px;
+		}
+		.hero-overlay {
+			padding: 28px 16px 12px;
+		}
+		.name-row h2 {
+			font-size: 1.25rem;
+		}
+		.tagline {
+			font-size: 0.84rem;
+			margin-top: 4px;
+		}
+		.intro {
+			margin-bottom: 14px;
+			padding: 12px 13px;
+			font-size: 0.84rem;
+		}
+		/* 내부 스크롤 대신 모달 전체 스크롤 */
+		.body {
+			flex: none;
+			overflow: visible;
+			margin-bottom: 14px;
+		}
+		.openings {
+			margin-bottom: 14px;
+		}
+		.pick-trigger {
+			padding: 10px 12px;
+			font-size: 0.86rem;
+		}
+		.actions {
+			position: sticky;
+			bottom: 0;
+			gap: 8px;
+			margin: 0 calc(var(--pad) * -1);
+			padding: 10px var(--pad) calc(12px + env(safe-area-inset-bottom));
+			background: var(--bg-card);
+			border-top: 1px solid var(--border);
+		}
+		.assets {
+			padding: 12px 13px;
+			font-size: 0.86rem;
+		}
+		.start {
+			padding: 12px;
+			font-size: 0.92rem;
+		}
 	}
 </style>

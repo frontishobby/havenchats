@@ -121,7 +121,7 @@
 		border-radius: var(--radius);
 		padding: 24px;
 		box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
-		max-height: calc(100vh - 40px);
+		max-height: calc(100dvh - 40px);
 		display: flex;
 		flex-direction: column;
 	}
@@ -262,5 +262,17 @@
 	}
 	.g-done:hover {
 		background: var(--accent-hover);
+	}
+
+	/* 모바일: 여백을 줄여 폭·높이를 더 쓴다 */
+	@media (max-width: 640px) {
+		.backdrop {
+			padding: 10px;
+		}
+		.modal {
+			padding: 16px 14px;
+			max-height: calc(100dvh - 20px);
+			border-radius: 14px;
+		}
 	}
 </style>

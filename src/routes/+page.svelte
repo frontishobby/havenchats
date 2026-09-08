@@ -105,9 +105,29 @@
 		gap: 18px;
 	}
 	@media (max-width: 640px) {
+		.hero {
+			padding: 14px 12px 6px;
+		}
+		.search {
+			margin-bottom: 6px;
+		}
+		.search-icon {
+			left: 13px;
+			font-size: 0.85rem;
+		}
+		.search input {
+			padding: 10px 14px 10px 38px;
+		}
+		.grid-wrap {
+			padding: 8px 12px 48px;
+		}
 		.grid {
 			grid-template-columns: repeat(2, 1fr);
-			gap: 12px;
+			gap: 10px;
+		}
+		.empty {
+			padding: 40px 0;
+			font-size: 0.9rem;
 		}
 	}
 	.empty {

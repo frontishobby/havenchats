@@ -334,7 +334,7 @@
 	.modal {
 		width: 100%;
 		max-width: 720px;
-		max-height: 90vh;
+		max-height: calc(100dvh - 40px);
 		overflow-y: auto;
 		background: var(--bg-card);
 		border: 1px solid var(--border);
@@ -632,5 +632,17 @@
 	}
 	input[type='text']:focus {
 		border-color: var(--accent);
+	}
+
+	/* 모바일: 여백을 줄여 폭·높이를 더 쓴다 */
+	@media (max-width: 640px) {
+		.backdrop {
+			padding: 10px;
+		}
+		.modal {
+			padding: 16px 14px;
+			max-height: calc(100dvh - 20px);
+			border-radius: 14px;
+		}
 	}
 </style>
