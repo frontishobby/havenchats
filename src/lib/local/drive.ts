@@ -184,6 +184,8 @@ export interface DriveFile {
 	size: number;
 	modifiedTime: string;
 	md5Checksum?: string;
+	/** 앱 전용 메타(appProperties). DB 파일엔 마지막으로 쓴 기기 `deviceId`/`deviceName` 을 남긴다. */
+	appProperties?: Record<string, string>;
 }
 
 export class DriveHttpError extends Error {
@@ -217,7 +219,7 @@ async function call(token: string, url: string, init: RequestInit = {}): Promise
 	return res;
 }
 
-const FIELDS = 'id,name,size,modifiedTime,md5Checksum';
+const FIELDS = 'id,name,size,modifiedTime,md5Checksum,appProperties';
 
 function toFile(f: Record<string, unknown>): DriveFile {
 	return {
@@ -225,7 +227,11 @@ function toFile(f: Record<string, unknown>): DriveFile {
 		name: String(f.name),
 		size: Number(f.size ?? 0),
 		modifiedTime: String(f.modifiedTime ?? ''),
-		md5Checksum: typeof f.md5Checksum === 'string' ? f.md5Checksum : undefined
+		md5Checksum: typeof f.md5Checksum === 'string' ? f.md5Checksum : undefined,
+		appProperties:
+			f.appProperties && typeof f.appProperties === 'object'
+				? (f.appProperties as Record<string, string>)
+				: undefined
 	};
 }
 
@@ -256,36 +262,48 @@ export async function listAll(token: string): Promise<DriveFile[]> {
 	return out;
 }
 
-/** 새 파일 생성(multipart). */
+function multipart(meta: Record<string, unknown>, blob: Blob, contentType: string): FormData {
+	const body = new FormData();
+	body.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+	body.append('file', new Blob([blob], { type: contentType }));
+	return body;
+}
+
+/** 새 파일 생성(multipart). `appProperties` 는 선택(DB 파일의 작성 기기 표시용). */
 export async function createFile(
 	token: string,
 	name: string,
 	blob: Blob,
-	contentType: string
+	contentType: string,
+	appProperties?: Record<string, string>
 ): Promise<DriveFile> {
-	const meta = { name, parents: ['appDataFolder'] };
-	const body = new FormData();
-	body.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
-	body.append('file', new Blob([blob], { type: contentType }));
+	const meta: Record<string, unknown> = { name, parents: ['appDataFolder'] };
+	if (appProperties) meta.appProperties = appProperties;
 	const res = await call(token, `${UPLOAD}/files?uploadType=multipart&fields=${FIELDS}`, {
 		method: 'POST',
-		body
+		body: multipart(meta, blob, contentType)
 	});
 	return toFile((await res.json()) as Record<string, unknown>);
 }
 
-/** 기존 파일 내용 교체(media). */
+/** 기존 파일 내용 교체. `appProperties` 를 주면 메타까지 한 요청(multipart)으로 갱신, 없으면 media 만. */
 export async function updateFile(
 	token: string,
 	id: string,
 	blob: Blob,
-	contentType: string
+	contentType: string,
+	appProperties?: Record<string, string>
 ): Promise<DriveFile> {
-	const res = await call(token, `${UPLOAD}/files/${id}?uploadType=media&fields=${FIELDS}`, {
-		method: 'PATCH',
-		headers: { 'content-type': contentType },
-		body: blob
-	});
+	const res = appProperties
+		? await call(token, `${UPLOAD}/files/${id}?uploadType=multipart&fields=${FIELDS}`, {
+				method: 'PATCH',
+				body: multipart({ appProperties }, blob, contentType)
+			})
+		: await call(token, `${UPLOAD}/files/${id}?uploadType=media&fields=${FIELDS}`, {
+				method: 'PATCH',
+				headers: { 'content-type': contentType },
+				body: blob
+			});
 	return toFile((await res.json()) as Record<string, unknown>);
 }
 

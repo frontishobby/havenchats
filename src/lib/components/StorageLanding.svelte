@@ -55,7 +55,7 @@
 			<p class="sub">
 				Drive 에 있는 데이터와 이 기기의 데이터가 다릅니다. (Drive 마지막 수정: {fmt(
 					sync.conflict.remoteModified
-				)})
+				)}{sync.conflict.writer ? `, ${sync.conflict.writer.deviceName}` : ''})
 			</p>
 			<div class="choices">
 				<button class="choice" onclick={() => onResolve('remote')} disabled={busy}>

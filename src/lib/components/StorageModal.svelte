@@ -144,8 +144,16 @@
 						? '동기화 오류'
 						: sync.pending > 0
 							? `올릴 변경 ${sync.pending}건 대기`
-							: '동기화됨'
+							: sync.otherActive
+								? `동기화됨 · ${sync.writer?.deviceName ?? '다른 기기'} 사용 중`
+								: '동기화됨'
 	);
+	const writerText = $derived.by(() => {
+		const w = sync.writer;
+		if (!w) return '—';
+		const who = w.deviceId === sync.deviceId ? `${w.deviceName} (이 기기)` : w.deviceName;
+		return `${who} · ${new Date(w.at).toLocaleString('ko-KR')}`;
+	});
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -166,6 +174,10 @@
 					<div class="row">
 						<span class="k">마지막 동기화</span>
 						<span class="v">{sync.lastSyncAt ? new Date(sync.lastSyncAt).toLocaleString('ko-KR') : '—'}</span>
+					</div>
+					<div class="row">
+						<span class="k">마지막으로 쓴 기기</span>
+						<span class="v" title="이 기기: {sync.deviceName}">{writerText}</span>
 					</div>
 					<div class="row">
 						<span class="k">Haven 이 쓰는 용량</span>

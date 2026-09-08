@@ -37,6 +37,8 @@ export interface LocalRuntime {
 	userId: string;
 	/** 마지막 저장 이후 변경 여부. */
 	dirty: boolean;
+	/** 진행 중인 `/api` 요청(스트림 본문이 끝날 때까지 포함)이나 백그라운드 작업(waitUntil)이 있는지 — Drive pull 로 DB 를 바꿔도 되는지 판단용. */
+	busy: boolean;
 	/** 스냅샷을 즉시 IndexedDB 에 저장(대기 중 디바운스 취소). */
 	flush(): Promise<void>;
 	/** 다른 스냅샷 바이트로 DB 를 교체(Drive 에서 받은 것·백업 복원). */
@@ -121,7 +123,54 @@ async function boot(): Promise<LocalRuntime> {
 
 	const env = { DB: d1, IMAGES: r2 } as unknown as WorkerEnv;
 	const app = createLocalApp(env, ctx, () => rt.userId);
-	window.__havenFetch = app.fetch;
+	let inFlight = 0;
+	window.__havenFetch = async (input, init) => {
+		inFlight++;
+		let res: Response;
+		try {
+			res = await app.fetch(input, init);
+		} catch (e) {
+			inFlight--;
+			throw e;
+		}
+		if (!res.body) {
+			inFlight--;
+			return res;
+		}
+		// 스트리밍 응답(/api/chat 등)은 본문이 끝나거나 취소될 때까지 진행 중으로 본다.
+		const src = res.body;
+		let ended = false;
+		const end = () => {
+			if (!ended) {
+				ended = true;
+				inFlight--;
+			}
+		};
+		const body = new ReadableStream<Uint8Array>({
+			start(ctrl) {
+				const reader = src.getReader();
+				void (async () => {
+					try {
+						for (;;) {
+							const { value, done } = await reader.read();
+							if (done) break;
+							ctrl.enqueue(value);
+						}
+						ctrl.close();
+					} catch (e) {
+						ctrl.error(e);
+					} finally {
+						end();
+					}
+				})();
+			},
+			cancel() {
+				src.cancel().catch(() => {});
+				end();
+			}
+		});
+		return new Response(body, res);
+	};
 
 	const rt: LocalRuntime = {
 		sql,
@@ -132,6 +181,9 @@ async function boot(): Promise<LocalRuntime> {
 		userId,
 		get dirty() {
 			return state.dirty;
+		},
+		get busy() {
+			return inFlight > 0 || ctx.pending.size > 0;
 		},
 		flush,
 		exportDatabase: () => db.export(),

@@ -30,6 +30,7 @@
 - **로컬 개발 = 1터미널**: `npm run dev`(vite :5173) 만. 데이터는 그 브라우저 프로필의 IndexedDB. Playwright MCP 프로필엔 구 데이터 1.8GB 가 import 돼 있을 수 있다.
 - **이미지 URL 은 그대로 `/img/<key>?v=`**. 서비스워커가 첫 방문엔 아직 페이지를 제어하지 않으므로 런타임이 `controllerchange` 를 최대 3초 기다린다. `resized()` 는 항상 원본 URL(CF 리사이즈 없음).
 - **저장소 모드**(`localStorage haven:storage`): `local` | `drive` | 미설정(랜딩). Drive 메타는 IndexedDB kv: `drive:index`(키→파일 id·md5), `drive:db`(마지막 push/pull 의 원격 DB), `drive:dbDirty`, `drive:pendingPuts/Deletes`, `drive:token`(서비스워커용 복사본). 시작 시 원격 `haven.sqlite` md5 를 `drive:db` 와 비교해 pull/push/충돌(유저 선택) 판정. 토큰 갱신은 팝업이 필요해 **문서 클릭 캡처에서 만료 임박 시 갱신**(`refreshTokenInGesture`).
+- **다기기 동기화(2026-09-08, PocketRisu 의 서버 동기화를 Drive 위에 흉내)**: ① 탭이 보이는 동안 `POLL_MS`(20s, 다른 기기가 최근 썼으면 8s)마다 원격 DB 메타 1회(`getMeta`) 조회 + 탭 표시/포커스 전환 시 즉시(3s 스로틀). 원격 md5 ≠ `drive:db` 면 로컬 clean → 조용히 pull(`replaceDatabase`+`invalidateAll`, 파일 인덱스도 `listAll` 로 갱신해 다른 기기 이미지 지연 다운로드 가능), 로컬 dirty → push 를 앞당김. **`rt.busy`(진행 중 `/api` 요청 — 스트림 본문 끝까지 — 또는 waitUntil 잔여)면 pull 을 미룬다**(스트리밍 중 DB 교체 방지; `window.__havenFetch` 가 in-flight 를 셈). ② **push 선행조건**: `pushDb` 는 `verified` 가 아니면 직전에 원격 md5 를 확인, 다른 기기가 썼으면 올리지 않고 `sync.conflict` → 레이아웃이 `!ready || conflict` 일 때 `StorageLanding` 오버레이(어느 쪽 데이터 쓸지 선택). ③ **작성 기기 표시**: DB 파일 appProperties 에 `deviceId`(kv `drive:deviceId`, 프로필당 1회)·`deviceName`(UA 기반 `Mac · a1b2`) 기록 → `sync.writer`/`sync.otherActive`(3분 내 타 기기 쓰기) → 헤더 칩 '☁ iPhone · 1a2b 사용 중', 저장소 모달 '마지막으로 쓴 기기'. 락으로 쓰기를 막진 않는다(선행조건이 덮어쓰기를 막고, 충돌은 유저 선택). Drive 에 CAS 가 없어 확인→업로드 사이 짧은 경쟁 창은 남는다(1인 전제).
 - **데이터 규모(2026-09-08 이전분)**: DB 6.4MB, 이미지 7,269개 1.84GB(장면 그리드 6.2k·채팅 이미지 950). 그래서 이미지는 기기마다 전부 복사하지 않고 지연 다운로드하며, 백업 zip 은 fflate 스트리밍(`src/lib/local/backup.ts`, 1.9GB import 11초 실측).
 - **Svelte 5 `$state` 배열 함정**: 배열에 push한 객체는 프록시로 감싸짐. 로컬 변수 ref로 mutate하면 반응성 X → **반드시 `arr[idx]`(프록시)로 수정**. (채팅 스트리밍 누적이 이걸로 동작)
 - **AI SDK v6 `textStream`은 에러를 throw 안 함**(빈 스트림으로 끝남) → `streamText({ onError })`로 잡아야 함. (`/api/chat` 참고. 에러 시 채팅 버블에 일반 메시지 노출, 상세는 콘솔만)
@@ -146,7 +147,7 @@ node scripts/export-legacy.mjs haven-d1.sql --out haven-legacy-backup.zip   # �
 
 - **Drive 실사용 검증 미완**: 코드는 GIS 토큰·REST·동기화 엔진까지 있으나 실제 Google 계정으로 end-to-end 는 아직(헤드리스에서 OAuth 팝업 불가). 첫 연결 시 Google 콘솔 JS 원본 등록이 선행돼야 한다.
 - **구 Worker/D1/R2 삭제**: zip 이전 확인 후. 삭제 전엔 `scripts/export-legacy.mjs` 가 (구 Worker 가 서빙하는) `/img/<key>` 에서 이미지를 받을 수 있다 — DNS 를 GitHub 로 바꾸면 `--base https://havenchats.workers.dev` 류 옛 주소를 써야 한다.
-- 다기기 동시 편집은 통째 스냅샷이라 마지막 쓰기 승리 + 시작 시 충돌 선택뿐(1인 전제).
+- 다기기 동기화는 통째 스냅샷 단위(주기 pull + push 선행조건 + 충돌 선택). 행 단위 변경 로그(트리거 `_changes` → ops 파일, PK upsert LWW)로 바꾸면 메시지 1건에 6MB 업로드가 사라진다 — 다음 단계 후보.
 - 캐릭터 삭제 시 고아 이미지 정리 없음. 세션은 '저장소 · 백업 › 정리'(최근 50개만 보유, `POST /api/chat/prune`)가 이미지까지 지운다.
 - 모바일 사파리는 IndexedDB 용량·서비스워커 제약이 커서 1.8GB 이미지 캐시가 부담 — 지연 다운로드라 필요한 것만 받지만 캐시 축출은 미처리.
 - `isAdmin`/`canSeeNsfw`/`visibility`/`shared`/`favorites` 등 다인 흔적이 코드·스키마에 남아 있음(동작은 전부 허용). 점진 제거.

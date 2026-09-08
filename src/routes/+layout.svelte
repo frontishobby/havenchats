@@ -145,7 +145,9 @@
 								? '⚠ 동기화 오류'
 								: sync.pending > 0
 									? `☁ 대기 ${sync.pending}`
-									: '☁ 동기화됨'}
+									: sync.otherActive
+										? `☁ ${sync.writer?.deviceName ?? '다른 기기'} 사용 중`
+										: '☁ 동기화됨'}
 				</button>
 			{/if}
 			{#if creditsInvalid}
@@ -235,7 +237,7 @@
 />
 <ProfileModal user={me?.user ?? null} />
 <StorageModal />
-{#if !sync.ready}
+{#if !sync.ready || sync.conflict}
 	<StorageLanding />
 {/if}
 {#if me?.user}
