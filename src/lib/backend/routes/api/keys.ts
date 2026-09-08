@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { createGateway } from '@ai-sdk/gateway';
+import { getGatewayCredits } from '$lib/backend/credits';
 import { getKeyStatus, getDecryptedKey, setKey, deleteKey } from '$lib/backend/db/userKeys';
 import type { AppEnv } from '$lib/backend/context';
 import { requireUser } from '$lib/backend/context';
@@ -34,9 +34,10 @@ keysRouter.post('/gateway', async (c) => {
 	const key = typeof body?.key === 'string' ? body.key.trim() : '';
 	if (!key) return c.json({ error: 'empty key' }, 400);
 
-	// getCredits 로 키 유효성 확인 — 잘못된 키면 throw → 거부.
+	// credits 조회로 키 유효성 확인 — 잘못된 키면 throw → 거부.
+	// (SDK getCredits 는 브라우저에서 401 — src/lib/backend/credits.ts 주석 참고)
 	try {
-		await createGateway({ apiKey: key }).getCredits();
+		await getGatewayCredits(key);
 	} catch {
 		return c.json(
 			{ error: 'invalid_key', message: 'Vercel AI Gateway 키가 유효하지 않습니다.' },
