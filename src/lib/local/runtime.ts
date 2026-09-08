@@ -253,11 +253,13 @@ function ensureLocalUser(db: Database, onWrite: () => void): string {
 /**
  * `/img/*` 서비스워커 등록. 첫 방문엔 SW 가 페이지를 아직 제어하지 않아 `<img>` 가 404 가 되므로
  * `clients.claim()` 후 controllerchange 까지 잠깐 기다린다(최대 3초).
+ * `updateViaCache:'none'` — 부팅마다 하는 갱신 확인이 HTTP 캐시(GitHub Pages `max-age=600`)를 타지 않게 해
+ * 배포 직후 새로고침에서 바로 새 SW 를 받는다(안 그러면 최대 10분 옛 SW 가 남아 강력 새로고침해야 바뀜).
  */
 async function registerImageWorker(): Promise<void> {
 	if (!('serviceWorker' in navigator)) return;
 	try {
-		await navigator.serviceWorker.register('/img-sw.js', { scope: '/' });
+		await navigator.serviceWorker.register('/img-sw.js', { scope: '/', updateViaCache: 'none' });
 		await navigator.serviceWorker.ready;
 		if (navigator.serviceWorker.controller) return;
 		await new Promise<void>((resolve) => {
