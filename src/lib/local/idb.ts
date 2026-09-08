@@ -105,6 +105,14 @@ export async function objDelete(keys: string[]): Promise<void> {
 	await txDone(tx);
 }
 
+/** 이미지 오브젝트 전부 삭제(백업 가져오기 전 초기화). */
+export async function objClear(): Promise<void> {
+	const db = await getImagesDb();
+	const tx = db.transaction(IMAGES_STORE, 'readwrite');
+	tx.objectStore(IMAGES_STORE).clear();
+	await txDone(tx);
+}
+
 /** 모든 키(정렬됨). prefix 필터는 호출부에서. */
 export async function objKeys(): Promise<string[]> {
 	const db = await getImagesDb();

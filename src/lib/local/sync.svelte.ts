@@ -82,8 +82,17 @@ export const sync = $state({
 	lastSyncAt: null as number | null,
 	error: null as string | null,
 	conflict: null as null | { remoteModified: string },
-	clientIdMissing: !GOOGLE_CLIENT_ID
+	clientIdMissing: !GOOGLE_CLIENT_ID,
+	/** 진행 중인 동기화를 취소할 수 있는지(이미지 업로드/다운로드 단계). */
+	cancellable: false
 });
+
+let abortFlag = false;
+
+/** 진행 중인 이미지 업로드/다운로드를 중단한다(대기열은 남아 다음에 이어짐). */
+export function cancelSync(): void {
+	if (sync.status === 'syncing') abortFlag = true;
+}
 
 let rt: LocalRuntime | null = null;
 let index: Record<string, RemoteRef> = {};
@@ -265,7 +274,10 @@ async function run(job: (token: string) => Promise<void>): Promise<void> {
 		try {
 			await job(token);
 		} catch (e) {
-			if (e instanceof DriveHttpError && e.status === 401) {
+			if (e instanceof SyncCancelled) {
+				sync.status = 'idle';
+				sync.ready = true;
+			} else if (e instanceof DriveHttpError && e.status === 401) {
 				sync.status = 'needs-auth';
 			} else if (e instanceof DriveAuthError) {
 				sync.status = 'needs-auth';
@@ -332,9 +344,25 @@ async function runInitialSync(): Promise<void> {
 				return;
 			}
 		}
+		// DB 가 맞춰졌으면 화면을 연다. 이미지 업로드는 뒤에서(헤더 칩에 진행 표시, 취소 가능).
+		sync.ready = true;
 		await syncImages(token);
 		await finishOk();
 	});
+}
+
+/**
+ * 백업 가져오기 직후: 로컬 이미지가 zip 내용으로 통째 바뀌었으므로 Drive 도 그에 맞춘다 —
+ * zip 에 없는 원격 이미지는 삭제 대기열에, 대기 중이던 업로드 목록은 비운다(없어진 키 업로드 방지).
+ */
+export async function reconcileAfterImport(): Promise<void> {
+	if (sync.mode !== 'drive') return;
+	const local = new Set(await objKeys());
+	const extras = Object.keys(index).filter((k) => k !== DB_NAME && !local.has(k));
+	await kvSet(K_PUTS, []);
+	await kvSet(K_DELS, extras);
+	await refreshPendingCount();
+	schedulePush(500);
 }
 
 async function localIsEmpty(): Promise<boolean> {
@@ -375,15 +403,27 @@ async function syncImages(token: string): Promise<void> {
 	const puts = new Set((await kvGet<string[]>(K_PUTS)) ?? []);
 	const dels = new Set((await kvGet<string[]>(K_DELS)) ?? []);
 
-	// 1) 삭제 대기열
-	for (const key of [...dels]) {
-		const ref = index[key];
-		if (ref) {
-			await deleteFile(token, ref.id);
-			delete index[key];
-		}
-		dels.delete(key);
+	// 1) 삭제 대기열(병렬)
+	if (dels.size) {
+		let d = 0;
+		const total = dels.size;
+		await parallel([...dels], async (key) => {
+			const ref = index[key];
+			if (ref) {
+				await deleteFile(token, ref.id);
+				delete index[key];
+			}
+			dels.delete(key);
+			d++;
+			sync.phase = `Drive 에서 지우는 중… (${d}/${total})`;
+			if (d % 20 === 0) {
+				await kvSet(K_DELS, [...dels]);
+				await kvSet(K_INDEX, index);
+			}
+		});
 		await kvSet(K_DELS, [...dels]);
+		await kvSet(K_INDEX, index);
+		await refreshPendingCount();
 	}
 
 	// 2) 업로드(병렬): 대기열 + 원격에 없는 로컬 파일
@@ -458,9 +498,11 @@ export async function downloadAllImages(): Promise<{ downloaded: number; total: 
 async function parallel<T>(items: T[], fn: (item: T) => Promise<void>): Promise<void> {
 	const queue = [...items];
 	let firstError: unknown = null;
+	abortFlag = false;
+	sync.cancellable = queue.length > 0;
 	await Promise.all(
 		Array.from({ length: Math.min(PARALLEL, queue.length) }, async () => {
-			while (queue.length && !firstError) {
+			while (queue.length && !firstError && !abortFlag) {
 				const item = queue.shift()!;
 				try {
 					await fn(item);
@@ -470,7 +512,18 @@ async function parallel<T>(items: T[], fn: (item: T) => Promise<void>): Promise<
 			}
 		})
 	);
+	sync.cancellable = false;
 	if (firstError) throw firstError;
+	if (abortFlag) {
+		abortFlag = false;
+		throw new SyncCancelled();
+	}
+}
+
+class SyncCancelled extends Error {
+	constructor() {
+		super('동기화를 취소했어요. 남은 항목은 다음에 이어서 올라가요.');
+	}
 }
 
 function guessType(key: string): string {

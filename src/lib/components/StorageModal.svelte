@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { storageModal } from '$lib/state/storageModal.svelte';
-	import { sync, connectDrive, disconnectDrive, syncNow, remoteSummary, downloadAllImages, type RemoteSummary } from '$lib/local/sync.svelte';
+	import { sync, connectDrive, disconnectDrive, syncNow, remoteSummary, downloadAllImages, cancelSync, type RemoteSummary } from '$lib/local/sync.svelte';
 	import { exportBackup, importBackup, type BackupProgress } from '$lib/local/backup';
 
 	let busy = $state<string | null>(null);
@@ -191,7 +191,11 @@
 					{/if}
 					{#if sync.error}<p class="err">{sync.error}</p>{/if}
 					<div class="actions">
-						<button class="primary" onclick={onSync} disabled={!!busy}>지금 동기화</button>
+						{#if sync.status === 'syncing' && sync.cancellable}
+							<button class="primary" onclick={cancelSync}>동기화 취소</button>
+						{:else}
+							<button class="primary" onclick={onSync} disabled={!!busy || sync.status === 'syncing'}>지금 동기화</button>
+						{/if}
 						<button class="ghost" onclick={onDownloadAll} disabled={!!busy} title="다른 기기에서 만든 이미지는 볼 때 내려받아요. 오프라인 대비로 미리 전부 받으려면.">
 							{busy === 'download' ? sync.phase || '내려받는 중…' : '이미지 전부 내려받기'}
 						</button>

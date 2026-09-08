@@ -10,7 +10,8 @@
  */
 import { Unzip, UnzipInflate, UnzipPassThrough, Zip, ZipPassThrough } from 'fflate';
 import { getLocalRuntime } from './runtime';
-import { objGet, objKeys, objPut } from './idb';
+import { objClear, objGet, objKeys, objPut } from './idb';
+import { reconcileAfterImport } from './sync.svelte';
 
 const DB_NAME = 'haven.sqlite';
 
@@ -109,7 +110,7 @@ export interface ImportResult {
 	images: number;
 }
 
-/** zip 을 스트리밍으로 풀어 이미지를 IndexedDB 에 넣고(같은 키는 덮어씀) DB 를 교체한다. */
+/** zip 을 스트리밍으로 풀어 **기존 이미지를 전부 지우고** zip 의 이미지를 넣은 뒤 DB 를 교체한다. Drive 모드면 원격도 zip 기준으로 정리. */
 export async function importBackup(
 	file: Blob,
 	onProgress?: (p: BackupProgress) => void
@@ -118,6 +119,8 @@ export async function importBackup(
 	let images = 0;
 	let chain: Promise<void> = Promise.resolve();
 	let failure: Error | null = null;
+	onProgress?.({ phase: '기존 이미지 정리', done: 0, total: 0 });
+	await objClear();
 
 	const unzip = new Unzip((entry) => {
 		const name = entry.name;
@@ -177,6 +180,7 @@ export async function importBackup(
 
 	onProgress?.({ phase: 'DB 교체', done: 0, total: 0 });
 	await getLocalRuntime().replaceDatabase(dbBytes);
+	await reconcileAfterImport();
 	return { images };
 }
 

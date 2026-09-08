@@ -5,7 +5,8 @@
 		connectDrive,
 		continueOffline,
 		resolveConflict,
-		syncNow
+		syncNow,
+		cancelSync
 	} from '$lib/local/sync.svelte';
 
 	let busy = $state(false);
@@ -70,6 +71,9 @@
 			<h1>동기화 중</h1>
 			<p class="sub">{sync.phase || 'Google Drive 와 맞추는 중…'}</p>
 			<div class="spinner"></div>
+			{#if sync.cancellable}
+				<button class="link" onclick={cancelSync}>취소하고 들어가기 (남은 건 나중에)</button>
+			{/if}
 		{:else if sync.mode === 'drive'}
 			<h1>Google Drive 다시 연결</h1>
 			<p class="sub">Drive 접근 권한이 만료됐어요. 다시 연결하면 최신 데이터로 맞춥니다.</p>
