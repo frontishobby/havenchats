@@ -188,16 +188,14 @@
 				</div>
 			{/if}
 
-			<div class="manage">
-				<button class="mini" onclick={edit}>✎ 수정</button>
-				{#if hasAssets}
-					<button class="mini" onclick={viewAssets}>🖼 에셋 미리보기</button>
-				{/if}
-				<button class="mini danger" onclick={remove} disabled={deleting}>
-					{deleting ? '삭제 중…' : '🗑 삭제'}
-				</button>
-			</div>
+			<button class="delete-link" onclick={remove} disabled={deleting}>
+				{deleting ? '삭제 중…' : '이 캐릭터 삭제'}
+			</button>
 			<div class="actions">
+				<button class="secondary" onclick={edit} title="캐릭터 수정">✎ 수정</button>
+				{#if hasAssets}
+					<button class="secondary" onclick={viewAssets} title="장면 이미지 미리보기">🖼 에셋</button>
+				{/if}
 				<button class="start" onclick={start} disabled={starting}>
 					{starting ? '시작하는 중…' : '채팅 시작하기'}
 				</button>
@@ -460,32 +458,38 @@
 		display: flex;
 		gap: 10px;
 	}
-	.manage {
+	.secondary {
 		flex-shrink: 0;
-		display: flex;
-		gap: 8px;
-		flex-wrap: wrap;
-	}
-	.mini {
-		padding: 8px 12px;
+		padding: 13px 16px;
 		border: 1px solid var(--border);
-		border-radius: 999px;
+		border-radius: var(--radius-sm);
 		background: var(--bg-elev);
-		color: var(--text-dim);
-		font-weight: 600;
-		font-size: 0.8rem;
-		white-space: nowrap;
-		transition: border-color 0.15s ease, color 0.15s ease;
-	}
-	.mini:hover:not(:disabled) {
-		border-color: var(--accent);
 		color: var(--text);
+		font-weight: 600;
+		font-size: 0.9rem;
+		white-space: nowrap;
+		transition: border-color 0.15s ease;
 	}
-	.mini.danger:hover:not(:disabled) {
-		border-color: #ff7b7b;
+	.secondary:hover {
+		border-color: var(--accent);
+	}
+	.delete-link {
+		flex-shrink: 0;
+		align-self: flex-end;
+		margin: -6px 0 6px;
+		padding: 2px;
+		border: none;
+		background: none;
+		color: var(--text-faint);
+		font-size: 0.78rem;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+		cursor: pointer;
+	}
+	.delete-link:hover:not(:disabled) {
 		color: #ff7b7b;
 	}
-	.mini:disabled {
+	.delete-link:disabled {
 		opacity: 0.55;
 	}
 	.start {
@@ -580,6 +584,10 @@
 		.start {
 			padding: 12px;
 			font-size: 0.92rem;
+		}
+		.secondary {
+			padding: 12px 13px;
+			font-size: 0.86rem;
 		}
 	}
 </style>
