@@ -282,7 +282,7 @@
 		rows="3"
 		maxlength={DIRECTION_MAX}
 		bind:value={direction}
-		placeholder="비우면 주인공 단독 초상. 예: 주인공과 여동생이 나란히 서서 카메라를 보고 웃는다. 배경은 벚꽃 거리, 저녁 노을"
+		placeholder="비우면 설정에서 뽑은 대표 장면(직업·장소·소품·표정)으로 옷 입은 상반신 컷. 노출은 여기에 적어야 나옵니다. 예: 주인공과 여동생이 나란히 서서 카메라를 보고 웃는다. 배경은 벚꽃 거리, 저녁 노을"
 		disabled={generating}
 	></textarea>
 

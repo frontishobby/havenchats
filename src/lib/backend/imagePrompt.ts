@@ -120,3 +120,37 @@ export function stripHiddenFeatures(appearance: string, exposure: string): strin
 		.filter((s) => s && !HIDDEN_FEATURE_RE.test(s))
 		.join(', ');
 }
+
+/*
+ * ── 옷 입은 카드(dressed) 모드 ──
+ * 캐릭터 썸네일에서 연출이 비어 있거나(또는 연출에 벗기는 지시가 없는데) 설정문의 성적 묘사(유두·성기·
+ * 속옷 취향 등)가 LLM 출력으로 새어 들어와 NAI 가 전신+노출 컷을 그리던 문제의 출력단 가드.
+ * 시스템 프롬프트 규칙과 별개로, 연출이 벗기라고 하지 않았으면 base_caption 의 nsfw 태그를 빼고
+ * 카드 프레이밍(상반신)을 강제한다. 의상 태그 자체는 건드리지 않는다(설정의 의상을 존중).
+ */
+
+/** 연출(한국어/영어)에 노출·탈의를 요구하는 신호가 있는지. 없으면 dressed 모드. */
+const KO_UNDRESS_RE =
+	/(나체|알몸|누드|벗|탈의|노출|속옷|란제리|팬티|브래?지어|젖꼭지|유두|가슴을 드러|보지|성기|자지|음부|정사|섹스|삽입|자위|목욕|샤워|온천|비키니|수영복|비치는|시스루)/;
+export function directionRequestsUndress(direction: string): boolean {
+	const d = direction.trim();
+	if (!d) return false;
+	return EXPOSURE_RE.test(d) || KO_UNDRESS_RE.test(d);
+}
+
+/** 카드 프레이밍 태그(이 중 하나가 있으면 그대로 둔다). */
+const CARD_FRAMING_RE =
+	/\b(upper body|cowboy shot|portrait|close-up|bust|half body|head and shoulders)\b/i;
+/** 카드에 부적합한 프레이밍 — 전신·원경·하체 강조. */
+const NON_CARD_FRAMING_RE =
+	/\b(full body|wide shot|very wide shot|long shot|from below|lower body|feet out of frame|thigh focus|ass focus|crotch focus|from behind)\b/i;
+
+/** base 의 프레이밍을 카드용으로 강제: 전신·원경 조각을 떼고, 프레이밍 태그가 없으면 'upper body' 추가. */
+export function enforceCardFraming(base: string): string {
+	const kept = base
+		.split(',')
+		.map((s) => s.trim())
+		.filter((s) => s && !NON_CARD_FRAMING_RE.test(s));
+	if (!kept.some((s) => CARD_FRAMING_RE.test(s))) kept.push('upper body');
+	return kept.join(', ');
+}

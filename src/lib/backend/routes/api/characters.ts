@@ -41,6 +41,8 @@ import {
 	sanitizeScene,
 	sanitizeTags,
 	stripHiddenFeatures,
+	directionRequestsUndress,
+	enforceCardFraming,
 	str
 } from '$lib/backend/imagePrompt';
 import {
@@ -539,8 +541,10 @@ const THUMB_SYSTEM = [
 	`    - "state": this person's pose and expression in THIS shot, in THIS order: framing of this person if notable → pose/action → expression (e.g. "gentle smile, looking at viewer"). NO clothing here (that is "outfit"). Lowercase, comma-separated; a SHORT clause is fine where a tag is awkward.`,
 	``,
 	`Composition rules:`,
-	`- This is a card thumbnail: subjects must be LARGE and faces clearly visible. Prefer upper body / cowboy shot; never tiny distant figures. With no [Direction], make a flattering single-subject portrait of the main character: looking at viewer, an expression that fits the character, simple or fitting background.`,
-	`- If [Direction] is given, follow it faithfully: depict the scene, mood, pose, background and EXACTLY the people it asks for. If it names other people, take their appearance from the setup text when described there; otherwise invent a plausible appearance that contrasts with the main character (different hair color etc.).`,
+	`- This is a CARD thumbnail: subjects must be LARGE and faces clearly visible. Framing in "base" MUST be "upper body", "cowboy shot" or "portrait" — NEVER "full body", never tiny distant figures, never a lower-body/thigh/crotch focus.`,
+	`- With no [Direction], design ONE scene that matches the identity of the main character (or the one or two people who define this character sheet, e.g. a duo or a pair of sisters): read the setup for their role or occupation, world and era, the place they belong to (their shop counter, classroom, throne room, cockpit, a rooftop at night, a rainy alley…), a defining prop or activity (sword, coffee cup, cigarette, book, headphones, a pet), and the expression and pose that best show their personality. Put the setting, lighting and mood in "base"/"scene", the pose and expression in "state". Prefer "looking at viewer". One subject by default; two only when the setup is built around two people. Do not fall back to a plain studio portrait when the setup gives you a world to show.`,
+	`- With no [Direction], the character wears the outfit the setup gives them — respect it as written (a revealing or unusual signature outfit is fine if that IS their outfit), but do not undress them further. IGNORE the setup's sexual details (nipples, genitals, pubic hair, sexual habits, exposed-state descriptions) — that text is chat material, not the card. Do not let such details steer the framing toward the lower body.`,
+	`- If [Direction] is given, follow it faithfully: depict the scene, mood, pose, background and EXACTLY the people it asks for. Undress or explicit content ONLY when the direction itself asks for it. If it names other people, take their appearance from the setup text when described there; otherwise invent a plausible appearance that contrasts with the main character (different hair color etc.).`,
 	`- The subject COUNT tag in "base" must match the number of character entries.`,
 	`- Put per-person body/clothes ONLY in "appearance"/"outfit"/"state", never in "base" or "scene". Put the count tag ONLY in "base".`,
 	HIDDEN_FEATURE_RULE,
@@ -550,7 +554,7 @@ const THUMB_SYSTEM = [
 	`- Do NOT copy the status window, stat block, or any prompt/instruction text from the input — write your own concise tags.`,
 	`- Do NOT include quality boosters, artist names, "masterpiece", resolution tags, "rating:" tags, or negative terms — those are added separately.`,
 	`- Keep it concise: "base" short, "scene" at most two sentences, each character under ~40 tags.`,
-	`- NSFW content is allowed and should be described plainly when the direction asks for it.`,
+	`- NSFW content is allowed and should be described plainly ONLY when the [Direction] asks for it.`,
 	ADULT_ONLY_RULE
 ].join('\n');
 
@@ -598,7 +602,13 @@ charactersRouter.post('/thumbnail', async (c) => {
 	const direction = (body?.direction ?? '').trim().slice(0, MAX_DIRECTION_CHARS);
 	const given = normalizePrompt(body?.prompt);
 	const regen = body?.regen === true;
-	const isNsfw = body?.nsfw === true;
+	/**
+	 * dressed 모드 — 연출이 비었거나 벗기는 지시가 없으면 카드 프레이밍(상반신) 강제 + base_caption 의
+	 * nsfw 태그 생략. 설정문의 유두·성기 묘사가 새어 들어와 전신 노출 컷이 나오던 문제. 의상 태그는
+	 * 건드리지 않는다(설정의 의상 존중, 시스템 프롬프트 규칙에만 맡김). 편집한 프롬프트(given, regen 아님)는 그대로.
+	 */
+	const dressed = !directionRequestsUndress(direction);
+	const isNsfw = body?.nsfw === true && (!dressed || (!!given && !regen));
 	const model = pickPromptModel(body?.model);
 	const naiModel = pickNaiModel(body?.naiModel);
 	// 그림체의 선택 네거티브/퀄리티(비면 모델별 고정값).
@@ -654,16 +664,15 @@ charactersRouter.post('/thumbnail', async (c) => {
 					const e = cc as { appearance?: unknown; outfit?: unknown; state?: unknown };
 					const outfit = sanitizeTags(str(e.outfit));
 					const state = sanitizeTags(str(e.state));
+					const appearance = sanitizeTags(str(e.appearance));
 					// 옷 입은 컷이면 가려지는 특징을 뺀다(썸네일도 채팅 이미지와 같은 가드). 캡션 = 외형 + 복장 + 포즈/표정.
-					return [
-						stripHiddenFeatures(sanitizeTags(str(e.appearance)), `${outfit}, ${state}`),
-						outfit,
-						state
-					]
+					return [stripHiddenFeatures(appearance, `${outfit}, ${state}`), outfit, state]
 						.filter(Boolean)
 						.join(', ');
 				});
-			prompt = normalizePrompt({ base: str(obj.base), scene: str(obj.scene), characters });
+			// 연출이 벗기라고 하지 않았으면 카드 프레이밍(상반신) 강제 — 전신·하체 강조 조각만 뗀다. 의상 태그는 그대로.
+			const base = dressed ? enforceCardFraming(sanitizeTags(str(obj.base))) : str(obj.base);
+			prompt = normalizePrompt({ base, scene: str(obj.scene), characters });
 		} catch (e) {
 			console.error('[characters/thumbnail] situation prompt error:', e);
 			notifyServerError({
