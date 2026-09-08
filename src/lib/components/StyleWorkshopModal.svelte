@@ -371,16 +371,13 @@
 							{publishing ? '저장 중…' : '수정 저장'}
 						</button>
 					{:else}
-						<button class="ghost" onclick={() => publish(false)} disabled={!!publishing || !canPublish}>
-							{publishing === 'save' ? '저장 중…' : '저장 (나만)'}
-						</button>
 						<button class="primary" onclick={() => publish(true)} disabled={!!publishing || !canPublish}>
-							{publishing === 'share' ? '공유 중…' : '공유 (Hub)'}
+							{publishing ? '저장 중…' : '저장'}
 						</button>
 					{/if}
 				</div>
 				{#if !canPublish}
-					<p class="hint center">{isEdit ? '제목과 그림체 프롬프트는 비울 수 없어요.' : '제목과 썸네일을 준비하면 저장·공유할 수 있어요.'}</p>
+					<p class="hint center">{isEdit ? '제목과 그림체 프롬프트는 비울 수 없어요.' : '제목과 썸네일을 준비하면 저장할 수 있어요.'}</p>
 				{/if}
 			</div>
 		</div>

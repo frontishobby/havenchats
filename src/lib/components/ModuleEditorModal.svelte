@@ -23,7 +23,6 @@
 	let title = $state('');
 	let memo = $state('');
 	let prompt = $state('');
-	let shared = $state(true);
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 
@@ -33,7 +32,6 @@
 		title = edit?.title ?? '';
 		memo = edit?.memo ?? '';
 		prompt = edit?.prompt ?? '';
-		shared = edit ? edit.shared : true;
 		error = null;
 	});
 
@@ -52,7 +50,7 @@
 			title: title.trim().slice(0, MAX_TITLE),
 			memo: memo.trim().slice(0, MAX_MEMO),
 			prompt: prompt.trim().slice(0, MAX_PROMPT),
-			shared
+			shared: true
 		};
 		try {
 			const res = await fetch(edit ? `/api/modules/${edit.id}` : '/api/modules', {
@@ -119,26 +117,12 @@
 					placeholder={'예:\n- 서술보다 대사 비중을 높여라(대사 60% 이상).\n- 매 응답 끝에 캐릭터의 속마음을 한 줄 괄호로 덧붙여라.'}
 				></textarea>
 			</label>
-			<div class="row">
-				<span class="label" id="mod-shared-label">Hub에 공개</span>
-				<button
-					class="switch"
-					class:on={shared}
-					role="switch"
-					aria-checked={shared}
-					aria-labelledby="mod-shared-label"
-					onclick={() => (shared = !shared)}
-				>
-					<span class="knob"></span>
-				</button>
-			</div>
-			<p class="hint small">끄면 비공개(내 채팅에서만 사용). 나중에 상세에서 공개로 바꿀 수 있어요.</p>
 
 			{#if error}<p class="err">{error}</p>{/if}
 			<div class="actions">
 				<button class="ghost" onclick={close} disabled={saving}>취소</button>
 				<button class="primary" onclick={save} disabled={!canSave}>
-					{saving ? '저장 중…' : edit ? '저장' : shared ? '공유' : '저장'}
+					{saving ? '저장 중…' : '저장'}
 				</button>
 			</div>
 		</div>
@@ -197,10 +181,6 @@
 		line-height: 1.5;
 		color: var(--text-dim);
 	}
-	.hint.small {
-		margin: 6px 0 0;
-		font-size: 0.74rem;
-	}
 	.hint strong {
 		color: var(--text);
 	}
@@ -248,37 +228,6 @@
 	textarea:focus {
 		outline: none;
 		border-color: var(--accent);
-	}
-	.row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-top: 4px;
-	}
-	.switch {
-		position: relative;
-		width: 42px;
-		height: 24px;
-		border-radius: 999px;
-		border: none;
-		background: var(--border);
-		transition: background 0.15s ease;
-	}
-	.switch.on {
-		background: var(--accent);
-	}
-	.switch .knob {
-		position: absolute;
-		top: 3px;
-		left: 3px;
-		width: 18px;
-		height: 18px;
-		border-radius: 50%;
-		background: #fff;
-		transition: transform 0.15s ease;
-	}
-	.switch.on .knob {
-		transform: translateX(18px);
 	}
 	.err {
 		margin: 12px 0 0;

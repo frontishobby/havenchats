@@ -99,7 +99,6 @@
 	const descTokens = $derived(estimatePromptTokens(description));
 	let audience = $state<Audience>(init?.audience ?? 'all');
 	let nsfw = $state(init?.contentRating === 'nsfw');
-	let isPrivate = $state(init?.visibility === 'private');
 
 	// 추천 그림체 — 내가 만들거나 즐겨찾기한 그림체 중 택1(선택). 채팅 이미지 모달에 '추천'으로 노출.
 	let recommendedStyleId = $state(init?.recommendedStyleId ?? '');
@@ -390,7 +389,7 @@
 			fd.set('description', description.trim());
 			fd.set('audience', audience);
 			fd.set('contentRating', nsfw ? 'nsfw' : 'sfw');
-			fd.set('visibility', isPrivate ? 'private' : 'public');
+			fd.set('visibility', 'public');
 			fd.set('recommendedStyleId', recommendedStyleId);
 			fd.set('tags', JSON.stringify(tags));
 			fd.set(
@@ -612,7 +611,7 @@
 	<div class="field">
 		<div class="label-row">
 			<span class="field-label" id="rec-style-label">추천 그림체 <span class="opt">(선택)</span></span>
-			<a class="opt-link" href="/styles" target="_blank" rel="noreferrer">그림체 Hub →</a>
+			<a class="opt-link" href="/styles" target="_blank" rel="noreferrer">그림체 →</a>
 		</div>
 		<select class="rec-select" aria-labelledby="rec-style-label" bind:value={recommendedStyleId}>
 			<option value="">지정 안 함</option>
@@ -621,7 +620,7 @@
 			{/each}
 		</select>
 		<p class="field-hint">
-			내가 만들거나 즐겨찾기한 그림체를 지정하면, 이 캐릭터로 채팅할 때 이미지 설정에 <strong>제작자
+			저장한 그림체를 지정하면, 이 캐릭터로 채팅할 때 이미지 설정에 <strong>제작자
 			추천</strong>으로 노출돼요.
 		</p>
 	</div>
@@ -818,33 +817,6 @@
 		</div>
 	</div>
 
-	<!-- 공개 범위 -->
-	<div class="field">
-		<span class="field-label">공개 범위</span>
-		<div class="seg">
-			<button
-				type="button"
-				class="seg-btn"
-				class:active={!isPrivate}
-				onclick={() => (isPrivate = false)}
-			>
-				<strong>공개</strong>
-				<span>모두에게 노출</span>
-			</button>
-			<button
-				type="button"
-				class="seg-btn"
-				class:active={isPrivate}
-				onclick={() => (isPrivate = true)}
-			>
-				<strong>비공개</strong>
-				<span>내 캐릭터에서만</span>
-			</button>
-		</div>
-		<p class="field-hint">
-			비공개로 두면 메인·검색에 노출되지 않고, 내 프로필("내 캐릭터")에서 나만 볼 수 있어요.
-		</p>
-	</div>
 
 	<!-- 연령제한 -->
 	<div class="field">

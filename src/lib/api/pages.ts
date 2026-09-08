@@ -23,14 +23,5 @@ export interface MeData {
 export interface HomeData {
 	characters: Character[];
 	tags: string[];
-	loggedIn: boolean;
-	authError: string | null;
 }
 
-/** GET /api/user/:id — 공개 프로필 + 제작 캐릭터 목록. */
-export interface UserPageData {
-	profile: { id: string; name: string | null; avatarUrl: string | null };
-	characters: Character[];
-	isOwner: boolean;
-	isAdmin: boolean;
-}

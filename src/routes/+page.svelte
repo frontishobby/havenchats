@@ -33,12 +33,6 @@
 	<meta name="description" content="나만의 AI 캐릭터와 끝없는 이야기를 나눠보세요." />
 </svelte:head>
 
-{#if data.authError === 'notallowed'}
-	<div class="notice">현재는 테스트 기간으로, 허용된 계정만 로그인할 수 있어요.</div>
-{:else if data.authError === 'error'}
-	<div class="notice">로그인 중 문제가 발생했어요. 다시 시도해 주세요.</div>
-{/if}
-
 <section class="hero">
 	<div class="search">
 		<span class="search-icon">🔍</span>
@@ -69,17 +63,6 @@
 <CharacterDetailModal character={detail} onclose={() => (detail = null)} />
 
 <style>
-	.notice {
-		max-width: var(--maxw);
-		margin: 16px auto 0;
-		padding: 12px 16px;
-		background: var(--accent-soft);
-		border: 1px solid var(--accent);
-		border-radius: var(--radius-sm);
-		color: var(--text);
-		font-size: 0.88rem;
-		text-align: center;
-	}
 	.hero {
 		max-width: var(--maxw);
 		margin: 0 auto;

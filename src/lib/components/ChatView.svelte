@@ -10,7 +10,6 @@
 		DEFAULT_IMAGE_PROMPT_MODEL_ID,
 		findImagePromptModel
 	} from '$lib/data/models';
-	import { openLogin } from '$lib/state/loginModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { generateImageDirect, getNovelaiToken, NovelaiError } from '$lib/novelaiClient';
 	import type {
@@ -715,10 +714,6 @@
 	/** 말풍선 버튼: 현재 장면 기준 유저 입력 후보를 받아 컴포저 위에 칩으로 띄운다. */
 	async function fetchSuggestions() {
 		if (suggesting || streaming) return;
-		if (!data.user) {
-			openLogin();
-			return;
-		}
 		sendError = null;
 		suggesting = true;
 		try {
@@ -1203,12 +1198,6 @@
 		const original = input.trim();
 		const continueTurn = !original && opts?.allowContinue === true;
 		if ((!original && !continueTurn) || streaming) return;
-
-		// 비로그인 상태에서는 전송 대신 로그인 모달을 띄운다 (입력값은 유지)
-		if (!data.user) {
-			openLogin();
-			return;
-		}
 
 		// 이어갈 장면(오프닝/응답)이 하나도 없으면 이어가기 불가.
 		if (continueTurn && !messages.some((m) => m.role === 'assistant' && m.content.trim())) {
@@ -2082,7 +2071,7 @@
 					<p class="summary-empty">불러오는 중…</p>
 				{:else if moduleCandidates.length === 0}
 					<p class="summary-empty">
-						쓸 수 있는 모듈이 없어요. <a href="/modules">모듈 Hub</a>에서 만들거나 즐겨찾기해 보세요.
+						쓸 수 있는 모듈이 없어요. <a href="/modules">모듈</a> 페이지에서 만들어 보세요.
 					</p>
 				{:else}
 					{#snippet moduleGroup(title: string, items: PromptModule[])}
@@ -2119,10 +2108,9 @@
 						{/if}
 					{/snippet}
 					{@render moduleGroup('내 모듈', myModules)}
-					{@render moduleGroup('즐겨찾기', favModules)}
 				{/if}
 				<p class="setting-hint">
-					<a href="/modules">모듈 Hub</a>에서 만들거나 즐겨찾기해 골라보세요.
+					<a href="/modules">모듈</a> 페이지에서 만들어 골라보세요.
 					{#if moduleActiveCount > 0}
 						<button class="link-btn" onclick={() => (activeModuleIds = [])}>모두 끄기</button>
 					{/if}
@@ -2259,7 +2247,7 @@
 					<div class="setting">
 						<div class="setting-row">
 							<span class="field-label">그림체</span>
-							<a class="hub-mini" href="/styles">Hub →</a>
+							<a class="hub-mini" href="/styles">그림체 →</a>
 						</div>
 						{#snippet styleOption(st: ArtStyle, badge: string | null)}
 							<li>
@@ -2326,25 +2314,17 @@
 										<li class="style-group">추천</li>
 										{@render styleOption(recommendedStyle, '추천')}
 									{/if}
-									{#if favStyles.filter((s) => s.id !== recommendedStyle?.id).length}
-										<li class="style-group">즐겨찾기</li>
-										{#each favStyles as st (st.id)}
-											{#if st.id !== recommendedStyle?.id}{@render styleOption(st, null)}{/if}
-										{/each}
-									{/if}
 									{#if savedStyles.filter((s) => s.id !== recommendedStyle?.id).length}
-										<li class="style-group">저장</li>
+										<li class="style-group">내 그림체</li>
 										{#each savedStyles as st (st.id)}
-											{#if st.id !== recommendedStyle?.id}
-												{@render styleOption(st, st.shared ? null : '비공개')}
-											{/if}
+											{#if st.id !== recommendedStyle?.id}{@render styleOption(st, null)}{/if}
 										{/each}
 									{/if}
 								</ul>
 							{/if}
 						</div>
 						<p class="setting-hint">
-							<a href="/styles">그림체 Hub</a>에서 깎거나 즐겨찾기해 골라보세요.
+							<a href="/styles">그림체</a> 페이지에서 깎아 골라보세요.
 						</p>
 					</div>
 

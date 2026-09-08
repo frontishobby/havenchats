@@ -13,9 +13,6 @@
 	let name = $state('');
 	let personaName = $state('');
 	let persona = $state('');
-	let preference = $state<'male' | 'female' | null>(null);
-	let country = $state<'KR' | 'PY' | null>(null);
-	let countryCode = $state(''); // 파라과이(NSFW) 전환 승인 코드
 	let saving = $state(false);
 	let error = $state('');
 	let initialized = $state(false);
@@ -61,9 +58,6 @@
 			name = user?.name ?? '';
 			personaName = user?.personaName ?? '';
 			persona = user?.persona ?? '';
-			preference = user?.preference ?? null;
-			country = user?.country ?? 'KR'; // 모든 계정 기본 대한민국(SFW)
-			countryCode = '';
 			error = '';
 			resetAvatar();
 			initialized = true;
@@ -73,14 +67,7 @@
 		}
 	});
 
-	// 파라과이를 처음 고르면(이전이 PY 가 아니면) 승인 코드 입력칸이 나타난다.
-	const needsCode = $derived(country === 'PY' && user?.country !== 'PY');
-	const canSave = $derived(
-		name.trim().length > 0 &&
-			preference !== null &&
-			country !== null &&
-			(!needsCode || countryCode.trim().length > 0)
-	);
+	const canSave = $derived(name.trim().length > 0);
 
 	function close() {
 		if (dismissable) profileModal.open = false;
@@ -98,9 +85,6 @@
 			fd.set('name', name.trim());
 			fd.set('persona_name', personaName.trim());
 			fd.set('persona', persona.trim());
-			if (preference) fd.set('preference', preference);
-			if (country) fd.set('country', country);
-			if (needsCode && countryCode.trim()) fd.set('country_code', countryCode.trim());
 			if (avatarFile) fd.set('avatar', avatarFile);
 			const res = await fetch('/api/profile', { method: 'POST', body: fd });
 			if (!res.ok) {
@@ -196,61 +180,6 @@
 					maxlength="2000"
 					bind:value={persona}
 				></textarea>
-			</div>
-
-			<div class="field">
-				<span class="field-label">국가</span>
-				<div class="pref">
-					<button
-						type="button"
-						class="pref-btn"
-						class:active={country === 'KR'}
-						onclick={() => (country = 'KR')}
-					>
-						<strong>🇰🇷 대한민국</strong>
-					</button>
-					<button
-						type="button"
-						class="pref-btn"
-						class:active={country === 'PY'}
-						onclick={() => (country = 'PY')}
-					>
-						<strong>🇵🇾 파라과이</strong>
-					</button>
-				</div>
-				{#if needsCode}
-					<input
-						class="code-input"
-						type="text"
-						placeholder="코드"
-						autocomplete="off"
-						bind:value={countryCode}
-					/>
-				{/if}
-			</div>
-
-			<div class="field">
-				<span class="field-label">취향</span>
-				<div class="pref">
-					<button
-						type="button"
-						class="pref-btn"
-						class:active={preference === 'male'}
-						onclick={() => (preference = 'male')}
-					>
-						<strong>남성향</strong>
-						<span>여성 캐릭터 위주</span>
-					</button>
-					<button
-						type="button"
-						class="pref-btn"
-						class:active={preference === 'female'}
-						onclick={() => (preference = 'female')}
-					>
-						<strong>여성향</strong>
-						<span>남성 캐릭터 위주</span>
-					</button>
-				</div>
 			</div>
 
 			<div class="field">
@@ -416,37 +345,6 @@
 	.field input:focus,
 	.field textarea:focus {
 		border-color: var(--accent);
-	}
-	.pref {
-		display: flex;
-		gap: 10px;
-	}
-	.code-input {
-		margin-top: 10px;
-	}
-	.pref-btn {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		gap: 3px;
-		padding: 12px;
-		background: var(--bg-elev);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		color: var(--text);
-		text-align: center;
-		transition: all 0.15s ease;
-	}
-	.pref-btn span {
-		font-size: 0.72rem;
-		color: var(--text-faint);
-	}
-	.pref-btn.active {
-		border-color: var(--accent);
-		background: var(--accent-soft);
-	}
-	.pref-btn.active span {
-		color: var(--text-dim);
 	}
 	.field .toggle-row {
 		display: flex;

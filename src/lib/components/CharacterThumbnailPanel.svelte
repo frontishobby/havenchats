@@ -284,8 +284,8 @@
 		</select>
 	{:else}
 		<p class="t-hint">
-			즐겨찾기한 그림체가 없어요. <a href="/styles" target="_blank" rel="noreferrer">그림체 Hub</a>에서
-			만들거나 즐겨찾기하면 여기서 고를 수 있어요. (그림체 없이도 생성돼요.)
+			저장한 그림체가 없어요. <a href="/styles" target="_blank" rel="noreferrer">그림체</a> 페이지에서
+			깎아 저장하면 여기서 고를 수 있어요. (그림체 없이도 생성돼요.)
 		</p>
 	{/if}
 

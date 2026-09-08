@@ -290,31 +290,10 @@ const SELECT_COLS =
 	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.lorebook, c.display_scripts, c.imported, c.recommended_style_id, c.updated_at, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key, u.updated_at AS creator_updated_at";
 const FROM_JOIN = 'FROM characters c LEFT JOIN users u ON u.id = c.creator_id';
 
-/** 공개(public) 유저 캐릭터 전체 (최신순). 비공개는 제외. */
+/** 캐릭터 전체 (최신순). 1인 모드라 공개/비공개 구분 없이 전부. */
 export async function listCharacters(db: D1Database): Promise<Character[]> {
 	const { results } = await db
-		.prepare(
-			`SELECT ${SELECT_COLS} ${FROM_JOIN} WHERE c.visibility = 'public' ORDER BY c.created_at DESC`
-		)
-		.all<CharacterRow>();
-	return (results ?? []).map(rowToCharacter);
-}
-
-/**
- * 특정 유저가 만든 캐릭터 목록 (최신순).
- * includePrivate=false 면 공개 캐릭터만(외부 방문자용), true 면 비공개 포함(본인용).
- */
-export async function listCharactersByCreator(
-	db: D1Database,
-	creatorId: string,
-	includePrivate: boolean
-): Promise<Character[]> {
-	const where = includePrivate
-		? 'c.creator_id = ?'
-		: "c.creator_id = ? AND c.visibility = 'public'";
-	const { results } = await db
-		.prepare(`SELECT ${SELECT_COLS} ${FROM_JOIN} WHERE ${where} ORDER BY c.created_at DESC`)
-		.bind(creatorId)
+		.prepare(`SELECT ${SELECT_COLS} ${FROM_JOIN} ORDER BY c.created_at DESC`)
 		.all<CharacterRow>();
 	return (results ?? []).map(rowToCharacter);
 }

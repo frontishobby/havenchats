@@ -1,17 +1,13 @@
 <script lang="ts">
 	import '../app.css';
-	import LoginModal from '$lib/components/LoginModal.svelte';
 	import ProfileModal from '$lib/components/ProfileModal.svelte';
 	import ApiKeyModal from '$lib/components/ApiKeyModal.svelte';
-	import BlockedModal from '$lib/components/BlockedModal.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
-	import { loginModal } from '$lib/state/loginModal.svelte';
 	import { profileModal } from '$lib/state/profileModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { privacyMode } from '$lib/state/privacyMode.svelte';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { isAdmin } from '$lib/admin';
 	import { resized } from '$lib/imageUrl';
 	import type { LayoutData } from './$types';
 	import type { MeData } from '$lib/api/pages';
@@ -57,7 +53,7 @@
 
 	// 최초 로그인(프로필 미완성) 시 프로필 설정 모달 자동 노출
 	$effect(() => {
-		if (me?.user && !me.user.profileComplete && !me.user.blockedReason) profileModal.open = true;
+		if (me?.user && !me.user.profileComplete) profileModal.open = true;
 	});
 
 	// 브라우저 기록 숨김(로컬 옵션): 켜져 있으면 어떤 페이지든 탭 제목을 "Haven" 으로 강제.
@@ -76,8 +72,6 @@
 	// 좌측 사이드바(최근 채팅)
 	let sidebarOpen = $state(false);
 
-	// 관리자 여부(메뉴에 /admin 노출용). 공용 isAdmin(클라/서버 공유)로 판별 — 하드코딩 제거.
-	const isAdminUser = $derived(isAdmin(me?.user?.email));
 
 	// 우상단 유저 메뉴(드롭다운)
 	let menuOpen = $state(false);
@@ -128,8 +122,8 @@
 			</span>
 		{/if}
 		<nav>
-			<a class="hub-link" href="/styles">그림체 Hub</a>
-			<a class="hub-link" href="/modules">모듈 Hub</a>
+			<a class="hub-link" href="/styles">그림체</a>
+			<a class="hub-link" href="/modules">모듈</a>
 			{#if me?.user}
 				<div class="user-menu" bind:this={menuRef}>
 					<button
@@ -152,44 +146,18 @@
 					</button>
 					{#if menuOpen}
 						<div class="menu" role="menu">
-							<a
-								class="menu-item"
-								role="menuitem"
-								href="/user/{me.user.id}"
-								onclick={() => (menuOpen = false)}
-							>
-								내 캐릭터
-							</a>
 							<button class="menu-item" role="menuitem" onclick={openProfileSettings}>
 								프로필 설정
 							</button>
 							<button class="menu-item" role="menuitem" onclick={openApiKeys}>
 								API 키 관리
 							</button>
-							{#if isAdminUser}
-								<a
-									class="menu-item"
-									role="menuitem"
-									href="/admin"
-									onclick={() => (menuOpen = false)}
-								>
-									관리자
-								</a>
-							{/if}
-							<div class="menu-sep"></div>
-							<a
-								class="menu-item danger"
-								role="menuitem"
-								href="/auth/logout"
-								data-sveltekit-preload-data="off"
-							>
-								로그아웃
+							<a class="menu-item" role="menuitem" href="/import" onclick={() => (menuOpen = false)}>
+								charx 가져오기
 							</a>
 						</div>
 					{/if}
 				</div>
-			{:else}
-				<button class="login-btn" onclick={() => (loginModal.open = true)}>로그인</button>
 			{/if}
 		</nav>
 	</header>
@@ -207,16 +175,11 @@
 	onClose={() => (sidebarOpen = false)}
 	onDelete={deleteChat}
 />
-<LoginModal />
 <ProfileModal user={me?.user ?? null} />
 {#if me?.user}
 	<ApiKeyModal />
 {/if}
 
-<!-- 차단된 유저: 종료 불가 모달로 모든 동작 차단. 다른 모든 모달/UI 위에 렌더. -->
-{#if me?.user?.blockedReason}
-	<BlockedModal reason={me.user.blockedReason} />
-{/if}
 
 <style>
 	.app {
@@ -332,20 +295,6 @@
 			display: none;
 		}
 	}
-	.login-btn {
-		display: inline-block;
-		background: var(--accent);
-		color: #fff;
-		border: none;
-		font-weight: 600;
-		font-size: 0.88rem;
-		padding: 8px 16px;
-		border-radius: 999px;
-		transition: background 0.15s ease;
-	}
-	.login-btn:hover {
-		background: var(--accent-hover);
-	}
 	.hub-link {
 		font-size: 0.85rem;
 		font-weight: 600;
@@ -409,17 +358,6 @@
 	}
 	.menu-item:hover {
 		background: var(--bg-elev);
-	}
-	.menu-item.danger {
-		color: var(--text-faint);
-	}
-	.menu-item.danger:hover {
-		color: var(--text);
-	}
-	.menu-sep {
-		height: 1px;
-		margin: 6px 4px;
-		background: var(--border);
 	}
 	.user-fallback {
 		width: 28px;
