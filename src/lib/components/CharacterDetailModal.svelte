@@ -94,7 +94,7 @@
 						<span class="thumb-fallback">{character.name.charAt(0)}</span>
 					{:else}
 						<img
-							src={character.avatarUrl}
+							src={character.fullImageUrl ?? character.avatarUrl}
 							alt={character.name}
 							onerror={() => (imgFailed = true)}
 						/>
@@ -235,7 +235,7 @@
 		position: relative;
 		width: calc(100% + var(--pad) * 2);
 		margin: calc(var(--pad) * -1) calc(var(--pad) * -1) 0;
-		aspect-ratio: 3 / 4;
+		aspect-ratio: 1 / 1;
 		max-height: 56dvh;
 		overflow: hidden;
 		background: linear-gradient(135deg, var(--accent), var(--nsfw));

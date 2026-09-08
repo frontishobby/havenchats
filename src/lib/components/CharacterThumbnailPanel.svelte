@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
-	import { base64ToBlob, blobToBase64, blobToWebp } from '$lib/imagePreview';
+	import { base64ToBlob, blobToWebp } from '$lib/imagePreview';
 	import type { ArtStyle } from '$lib/types';
 	import type { ThumbnailPrompt, ThumbnailRequest } from '$lib/api/characters';
 	import { getNaiModel } from '$lib/naiModels';
@@ -16,10 +16,11 @@
 		/** NSFW 캐릭터 여부(rating:nsfw). */
 		nsfw?: boolean;
 		/**
-		 * "이 썸네일 사용" → webp File 을 폼 썸네일로 등록하는 콜백.
+		 * "이 썸네일 사용" → webp File(1024²)을 폼 썸네일로 등록하는 콜백.
 		 * styleId 는 그 썸네일을 만들 때 쓴 그림체 id(없으면 '') — 폼이 추천 그림체로 반영한다.
+		 * original 은 NovelAI 원본 PNG — 폼이 저장 시 2048² 로 업스케일해 상세용으로 쓴다.
 		 */
-		onuse: (file: File, styleId: string) => void;
+		onuse: (file: File, styleId: string, original: Blob) => void;
 	} = $props();
 
 	const DIRECTION_MAX = 1000;
@@ -201,37 +202,14 @@
 		prompt.characters.splice(i, 1);
 	}
 
-	/** "이 썸네일 사용": NAI 2x 업스케일 → webp 변환 → 폼 썸네일 등록. */
+	/** "이 썸네일 사용": 1024² 원본을 webp 로 바꿔 폼에 등록(업스케일은 폼이 저장할 때). */
 	async function useThumb() {
 		if (!finalBlob || using) return;
 		using = true;
 		error = null;
-		noKey = false;
 		try {
-			// 1) 원본 치수(업스케일 요청에 필요).
-			const bmp = await createImageBitmap(finalBlob);
-			const w = bmp.width;
-			const h = bmp.height;
-			bmp.close?.();
-
-			// 2) NAI 업스케일(서버 경유 — 키는 서버에만). 실패 시 사유 노출, 등록 안 함.
-			const b64 = await blobToBase64(finalBlob);
-			const res = await fetch('/api/characters/thumbnail/upscale', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ image: b64, width: w, height: h })
-			});
-			if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) {
-				const d = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-				error = d.message ?? '업스케일에 실패했어요.';
-				if (d.error === 'no_key') noKey = true;
-				return;
-			}
-			const upscaled = await res.blob();
-
-			// 3) webp 변환 후 등록.
-			const webp = await blobToWebp(upscaled);
-			onuse(new File([webp], 'thumbnail.webp', { type: 'image/webp' }), usedStyleId);
+			const webp = await blobToWebp(finalBlob);
+			onuse(new File([webp], 'thumbnail.webp', { type: 'image/webp' }), usedStyleId, finalBlob);
 		} catch (e) {
 			error = e instanceof Error ? e.message : '썸네일 변환에 실패했어요.';
 		} finally {
@@ -383,7 +361,7 @@
 			{generating ? '생성 중…' : previewUrl ? '다시 생성' : '썸네일 생성'}
 		</button>
 		<button class="t-use" onclick={useThumb} disabled={!finalBlob || generating || using}>
-			{using ? '업스케일 중…' : '이 썸네일 사용'}
+			{using ? '변환 중…' : '이 썸네일 사용'}
 		</button>
 	</div>
 	<p class="t-note">
@@ -448,7 +426,7 @@
 		width: 100%;
 		max-width: 220px;
 		margin: 0 auto 14px;
-		aspect-ratio: 832 / 1216;
+		aspect-ratio: 1 / 1;
 		border-radius: var(--radius);
 		overflow: hidden;
 		background: var(--bg-elev);

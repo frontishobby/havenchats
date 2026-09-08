@@ -105,11 +105,20 @@ charactersRouter.post('/', async (c) => {
 	await bucket.put(key, await data.image.arrayBuffer(), {
 		httpMetadata: { contentType: data.image.type }
 	});
+	// 상세용 고해상도(선택).
+	let fullKey: string | null = null;
+	if (data.imageFull) {
+		fullKey = `charfull/${id}.${ALLOWED_IMAGE[data.imageFull.type]}`;
+		await bucket.put(fullKey, await data.imageFull.arrayBuffer(), {
+			httpMetadata: { contentType: data.imageFull.type }
+		});
+	}
 
 	// 장면 이미지(grid|named) 업로드. 생성이므로 기존 세트 없음. 실패 시 썸네일 정리.
 	const committed = await commitSceneImages(form, bucket, id, null);
 	if (!committed.ok) {
 		await bucket.delete(key).catch(() => {});
+		if (fullKey) await bucket.delete(fullKey).catch(() => {});
 		return c.json({ error: committed.error }, 400);
 	}
 	const { imageSet, uploadedKeys } = committed.result;
@@ -129,6 +138,7 @@ charactersRouter.post('/', async (c) => {
 			intro: data.intro,
 			description: data.description,
 			thumbnailKey: key,
+			fullImageKey: fullKey,
 			audience: data.audience,
 			contentRating: data.contentRating,
 			visibility: data.visibility,
@@ -497,7 +507,7 @@ function normalizeAssistDraft(
 }
 
 // ── POST /api/characters/thumbnail — 썸네일 생성(스트리밍) ─────
-const THUMB_RESOLUTION: ResolutionKey = '832x1216';
+const THUMB_RESOLUTION: ResolutionKey = '1024x1024';
 const MAX_DESC_CHARS = 6000;
 const MAX_STYLE_CHARS = 1500;
 const MAX_DIRECTION_CHARS = 1000;
@@ -515,7 +525,7 @@ function pickPromptModel(requested?: string): string {
 }
 
 const THUMB_SYSTEM = [
-	`You convert a Korean character setup sheet (plus an optional creator's direction) into a structured image-generation prompt for a CHARACTER CARD THUMBNAIL (NovelAI Diffusion V4.5/V5, anime illustration, portrait orientation 832x1216), using its MULTI-CHARACTER feature.`,
+	`You convert a Korean character setup sheet (plus an optional creator's direction) into a structured image-generation prompt for a CHARACTER CARD THUMBNAIL (NovelAI Diffusion V4.5/V5, anime illustration, square 1024x1024), using its MULTI-CHARACTER feature.`,
 	`You are given the [Character] setup text for the main character, and optionally a [Direction] written by the creator in Korean or English describing what the thumbnail should show — the scene, mood, pose, background, and WHICH people appear (the main character alone, or together with other people mentioned in the setup or in the direction, e.g. a rival, a sister, several club members).`,
 	`Use the setup text ONLY for fixed physical appearance and a representative outfit of each person. Ignore non-visual text (personality, backstory, rules, command/keyword lists, status windows, output-format instructions).`,
 	``,
@@ -750,7 +760,7 @@ charactersRouter.post('/thumbnail', async (c) => {
 });
 
 // ── POST /api/characters/thumbnail/upscale — 썸네일 2배 업스케일 ─
-/** 입력 한도 — 폭주 방지. 썸네일은 보통 832×1216(~1MP). */
+/** 입력 한도 — 폭주 방지. 썸네일은 1024×1024(~1MP). */
 const MAX_PIXELS = 3_000_000;
 const MAX_DIM = 4096;
 
@@ -860,18 +870,29 @@ charactersRouter.put('/:id', async (c) => {
 
 	// 새 이미지가 있으면 교체, 없으면 기존 썸네일 유지.
 	let newKey: string | undefined;
+	// 상세용 고해상도: 새 썸네일이 오면 같이 온 고해상도로 교체(없으면 제거), 썸네일 변경 없으면 유지.
+	let newFullKey: string | null | undefined;
 	if (data.image) {
 		const ext = ALLOWED_IMAGE[data.image.type];
 		newKey = `char/${id}.${ext}`;
 		await bucket.put(newKey, await data.image.arrayBuffer(), {
 			httpMetadata: { contentType: data.image.type }
 		});
+		if (data.imageFull) {
+			newFullKey = `charfull/${id}.${ALLOWED_IMAGE[data.imageFull.type]}`;
+			await bucket.put(newFullKey, await data.imageFull.arrayBuffer(), {
+				httpMetadata: { contentType: data.imageFull.type }
+			});
+		} else {
+			newFullKey = null;
+		}
 	}
 
 	// 장면 이미지(grid|named) 업로드/keep. 실패 시 방금 올린 썸네일 정리.
 	const committed = await commitSceneImages(form, bucket, id, oldSet);
 	if (!committed.ok) {
 		if (newKey) await bucket.delete(newKey).catch(() => {});
+		if (newFullKey) await bucket.delete(newFullKey).catch(() => {});
 		return c.json({ error: committed.error }, 400);
 	}
 	const { imageSet, uploadedKeys, staleKeys } = committed.result;
@@ -900,11 +921,13 @@ charactersRouter.put('/:id', async (c) => {
 				data.recommendedStyleId && (await styleExists(db, data.recommendedStyleId))
 					? data.recommendedStyleId
 					: null,
-			thumbnailKey: newKey
+			thumbnailKey: newKey,
+			fullImageKey: newFullKey
 		});
 	} catch (e) {
 		// DB 실패 시 새로 올린 이미지(썸네일·장면)는 정리.
 		if (newKey) await bucket.delete(newKey).catch(() => {});
+		if (newFullKey) await bucket.delete(newFullKey).catch(() => {});
 		await deleteKeys(bucket, uploadedKeys);
 		console.error('[update] character update failed:', e);
 		return c.json({ error: '캐릭터 저장에 실패했어요. 잠시 후 다시 시도해 주세요.' }, 500);
@@ -913,6 +936,10 @@ charactersRouter.put('/:id', async (c) => {
 	// 확장자가 바뀌어 키가 달라진 경우 옛 이미지 정리(같은 키면 덮어쓰여 정리 불필요).
 	if (newKey && owner.thumbnailKey && owner.thumbnailKey !== newKey) {
 		await bucket.delete(owner.thumbnailKey).catch(() => {});
+	}
+	// 고해상도가 제거되거나 키가 바뀐 경우 옛 파일 정리.
+	if (newFullKey !== undefined && owner.fullImageKey && owner.fullImageKey !== newFullKey) {
+		await bucket.delete(owner.fullImageKey).catch(() => {});
 	}
 	// DB 성공 후 더 이상 참조되지 않는 옛 장면 이미지 정리.
 	await deleteKeys(bucket, staleKeys);
@@ -944,6 +971,7 @@ charactersRouter.delete('/:id', async (c) => {
 
 	await deleteCharacter(db, id);
 	if (owner.thumbnailKey) await bucket?.delete(owner.thumbnailKey).catch(() => {});
+	if (owner.fullImageKey) await bucket?.delete(owner.fullImageKey).catch(() => {});
 	// 장면 이미지(charimg/<id>/*) 전부 정리.
 	if (bucket) await deleteAllSceneImages(bucket, id);
 

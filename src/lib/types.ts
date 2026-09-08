@@ -70,7 +70,10 @@ export interface DisplayScript {
 export interface Character {
 	id: string;
 	name: string;
+	/** 카드용 썸네일(1024²). */
 	avatarUrl: string;
+	/** 상세 모달용 고해상도(2048², 저장 시 업스케일). 없으면 null → avatarUrl 사용. */
+	fullImageUrl: string | null;
 	tagline: string;
 	/**
 	 * 설명 — 캐릭터를 눌렀을 때 상세 모달에 보이는 소개글.

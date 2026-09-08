@@ -17,6 +17,8 @@ export const ALLOWED_IMAGE: Record<string, string> = {
 	'image/avif': 'avif'
 };
 export const MAX_IMAGE_BYTES = 3 * 1024 * 1024; // 3MB
+/** 상세용 고해상도(2048², 업스케일 webp) 상한. */
+export const MAX_FULL_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB
 
 const NAME_MAX = 30;
 const TAGLINE_MAX = 100;
@@ -51,6 +53,8 @@ export interface ParsedCharacterForm {
 	recommendedStyleId: string | null;
 	/** 업로드된 이미지(있으면). 없으면 null. */
 	image: File | null;
+	/** 상세용 고해상도 이미지(선택, 폼이 저장 시 업스케일해 보냄). */
+	imageFull: File | null;
 }
 
 type ParseResult =
@@ -72,6 +76,7 @@ export function parseCharacterForm(form: FormData): ParseResult {
 	const isPrivate = String(form.get('visibility') ?? 'public') === 'private';
 	const recommendedStyleId = String(form.get('recommendedStyleId') ?? '').trim() || null;
 	const imageRaw = form.get('image');
+	const imageFullRaw = form.get('imageFull');
 
 	let tags: string[] = [];
 	try {
@@ -150,10 +155,18 @@ export function parseCharacterForm(form: FormData): ParseResult {
 			return { ok: false, error: '이미지 용량이 너무 큽니다 (최대 3MB).' };
 		image = imageRaw;
 	}
+	let imageFull: File | null = null;
+	if (imageFullRaw instanceof File && imageFullRaw.size > 0) {
+		if (!ALLOWED_IMAGE[imageFullRaw.type])
+			return { ok: false, error: '고해상도 이미지는 webp 또는 avif 만 가능합니다.' };
+		if (imageFullRaw.size > MAX_FULL_IMAGE_BYTES)
+			return { ok: false, error: '고해상도 이미지 용량이 너무 큽니다 (최대 8MB).' };
+		imageFull = imageFullRaw;
+	}
 
 	return {
 		ok: true,
-		data: { name, tagline, intro, description, audience, contentRating, visibility, recommendedStyleId, tags: tagsClean, greetings, lorebook, scriptData, image }
+		data: { name, tagline, intro, description, audience, contentRating, visibility, recommendedStyleId, tags: tagsClean, greetings, lorebook, scriptData, image, imageFull }
 	};
 }
 

@@ -24,6 +24,8 @@ export interface NewCharacter {
 	description: string;
 	/** R2 오브젝트 키 (char/<id>.<ext>). 이미지 없으면 null. */
 	thumbnailKey: string | null;
+	/** 상세용 고해상도 키(선택). */
+	fullImageKey?: string | null;
 	audience: Audience;
 	contentRating: ContentRating;
 	/** 공개 범위. 'private'면 제작자 본인 프로필에서만 노출. */
@@ -52,6 +54,7 @@ interface CharacterRow {
 	intro: string;
 	description: string;
 	thumbnail_key: string | null;
+	full_image_key: string | null;
 	audience: string;
 	content_rating: string;
 	visibility: string;
@@ -256,6 +259,7 @@ function rowToCharacter(row: CharacterRow): Character {
 		avatarUrl: row.thumbnail_key
 			? withVersion(imgSrc(row.thumbnail_key), row.updated_at)
 			: fallbackAvatar(row.id),
+		fullImageUrl: row.full_image_key ? withVersion(imgSrc(row.full_image_key), row.updated_at) : null,
 		tagline: row.tagline,
 		intro: row.intro,
 		// charx import 캐릭터의 프롬프트는 클라이언트에 절대 노출하지 않는다(빈 문자열).
@@ -287,7 +291,7 @@ function rowToCharacter(row: CharacterRow): Character {
 // chats = 이 캐릭터의 모든 세션에 실제로 남아있는 메시지 행 수 합(개별 삭제 반영).
 // characters.chats 컬럼은 더 이상 증가시키지 않으므로 실측 서브쿼리로 대체.
 const SELECT_COLS =
-	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.lorebook, c.display_scripts, c.imported, c.recommended_style_id, c.updated_at, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key, u.updated_at AS creator_updated_at";
+	"c.id, c.name, c.tagline, c.intro, c.description, c.thumbnail_key, c.full_image_key, c.audience, c.content_rating, c.visibility, c.tags, c.greetings, c.image_set, c.lorebook, c.display_scripts, c.imported, c.recommended_style_id, c.updated_at, (SELECT COUNT(*) FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.character_id = c.id) AS chats, c.creator_id, u.display_name AS creator_name, u.avatar_url AS creator_avatar_key, u.updated_at AS creator_updated_at";
 const FROM_JOIN = 'FROM characters c LEFT JOIN users u ON u.id = c.creator_id';
 
 /** 캐릭터 전체 (최신순). 1인 모드라 공개/비공개 구분 없이 전부. */
@@ -302,15 +306,16 @@ export async function listCharacters(db: D1Database): Promise<Character[]> {
 export async function getCharacterOwnership(
 	db: D1Database,
 	id: string
-): Promise<{ creatorId: string; thumbnailKey: string | null; visibility: Visibility } | null> {
+): Promise<{ creatorId: string; thumbnailKey: string | null; fullImageKey: string | null; visibility: Visibility } | null> {
 	const row = await db
-		.prepare(`SELECT creator_id, thumbnail_key, visibility FROM characters WHERE id = ?`)
+		.prepare(`SELECT creator_id, thumbnail_key, full_image_key, visibility FROM characters WHERE id = ?`)
 		.bind(id)
-		.first<{ creator_id: string; thumbnail_key: string | null; visibility: string }>();
+		.first<{ creator_id: string; thumbnail_key: string | null; full_image_key: string | null; visibility: string }>();
 	return row
 		? {
 				creatorId: row.creator_id,
 				thumbnailKey: row.thumbnail_key,
+				fullImageKey: row.full_image_key,
 				visibility: row.visibility === 'private' ? 'private' : 'public'
 			}
 		: null;
@@ -410,6 +415,8 @@ export interface CharacterUpdate {
 	recommendedStyleId: string | null;
 	/** 새 이미지 키. undefined 면 썸네일 변경 없음. */
 	thumbnailKey?: string;
+	/** 상세용 고해상도 키. undefined 면 변경 없음, null 이면 제거. */
+	fullImageKey?: string | null;
 }
 
 /** 기존 캐릭터 수정. */
@@ -420,6 +427,7 @@ export async function updateCharacter(
 ): Promise<void> {
 	const now = Date.now();
 	const setThumb = c.thumbnailKey !== undefined;
+	const setFull = c.fullImageKey !== undefined;
 	await db
 		.prepare(
 			`UPDATE characters SET
@@ -427,6 +435,7 @@ export async function updateCharacter(
 			   audience = ?, content_rating = ?, visibility = ?, tags = ?, greetings = ?, image_set = ?, lorebook = ?, script_data = ?,
 			   recommended_style_id = ?,
 			   ${setThumb ? 'thumbnail_key = ?,' : ''}
+			   ${setFull ? 'full_image_key = ?,' : ''}
 			   updated_at = ?
 			 WHERE id = ?`
 		)
@@ -446,6 +455,7 @@ export async function updateCharacter(
 				c.scriptData ? JSON.stringify(c.scriptData) : null,
 				c.recommendedStyleId ?? null,
 				...(setThumb ? [c.thumbnailKey] : []),
+				...(setFull ? [c.fullImageKey ?? null] : []),
 				now,
 				id
 			]
@@ -476,8 +486,8 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 	await db
 		.prepare(
 			`INSERT INTO characters
-			   (id, creator_id, name, tagline, intro, description, thumbnail_key, audience, content_rating, visibility, tags, greetings, image_set, lorebook, script_data, display_scripts, imported, recommended_style_id, chats, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+			   (id, creator_id, name, tagline, intro, description, thumbnail_key, full_image_key, audience, content_rating, visibility, tags, greetings, image_set, lorebook, script_data, display_scripts, imported, recommended_style_id, chats, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
 		)
 		.bind(
 			c.id,
@@ -487,6 +497,7 @@ export async function createCharacter(db: D1Database, c: NewCharacter): Promise<
 			c.intro,
 			c.description,
 			c.thumbnailKey,
+			c.fullImageKey ?? null,
 			c.audience,
 			c.contentRating,
 			c.visibility,

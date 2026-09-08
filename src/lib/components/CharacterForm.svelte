@@ -18,6 +18,7 @@
 		type AssistCharacter
 	} from '$lib/components/CharacterAssistPanel.svelte';
 	import CharacterThumbnailPanel from '$lib/components/CharacterThumbnailPanel.svelte';
+	import { blobToBase64, blobToWebp } from '$lib/imagePreview';
 	import { isGrid, isNamed, namedUrl } from '$lib/imageCodes';
 	import { estimatePromptTokens } from '$lib/tokens';
 	import type {
@@ -123,6 +124,9 @@
 	let tags = $state<string[]>(init?.tags ? [...init.tags] : []);
 
 	let imageFile = $state<File | null>(null);
+	/** AI 썸네일 패널이 준 NovelAI 원본(PNG 1024²). 저장 시 2048² 로 업스케일해 상세용 이미지로 보낸다. 수동 업로드면 null. */
+	let upscaleSource = $state<Blob | null>(null);
+	let upscaling = $state(false);
 	let imagePreview = $state<string | null>(null);
 	let dragOver = $state(false);
 	let fileInput = $state<HTMLInputElement | null>(null);
@@ -276,6 +280,7 @@
 		if (imagePreview) URL.revokeObjectURL(imagePreview);
 		imageFile = file;
 		imagePreview = URL.createObjectURL(file);
+		upscaleSource = null;
 	}
 
 	function onFileChange(e: Event) {
@@ -293,7 +298,36 @@
 		if (imagePreview) URL.revokeObjectURL(imagePreview);
 		imageFile = null;
 		imagePreview = null;
+		upscaleSource = null;
 		if (fileInput) fileInput.value = '';
+	}
+
+	/**
+	 * 저장 직전: AI 생성 썸네일이면 NovelAI 2x 업스케일(2048²) → webp → 상세용 이미지.
+	 * 실패하면 에러를 던져 저장을 막는다(다시 저장하면 재시도).
+	 */
+	async function buildFullImage(): Promise<File | null> {
+		if (!upscaleSource) return null;
+		upscaling = true;
+		try {
+			const bmp = await createImageBitmap(upscaleSource);
+			const w = bmp.width;
+			const h = bmp.height;
+			bmp.close?.();
+			const res = await fetch('/api/characters/thumbnail/upscale', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ image: await blobToBase64(upscaleSource), width: w, height: h })
+			});
+			if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) {
+				const d = (await res.json().catch(() => ({}))) as { message?: string };
+				throw new Error(d.message ?? '고해상도 업스케일에 실패했어요. 다시 저장해 주세요.');
+			}
+			const webp = await blobToWebp(await res.blob());
+			return new File([webp], 'full.webp', { type: 'image/webp' });
+		} finally {
+			upscaling = false;
+		}
 	}
 
 	function addTag() {
@@ -401,6 +435,10 @@
 				)
 			);
 			if (imageFile) fd.set('image', imageFile);
+			if (imageFile && upscaleSource) {
+				const full = await buildFullImage();
+				if (full) fd.set('imageFull', full);
+			}
 
 			// 로어북(키워드 동적 설정) 전달.
 			fd.set('lorebook', JSON.stringify(loreEntries));
@@ -870,7 +908,7 @@
 
 	<button class="submit" onclick={submit} disabled={!canSubmit}>
 		{#if submitting}
-			저장 중…
+			{upscaling ? '고해상도 업스케일 중…' : '저장 중…'}
 		{:else}
 			{isEdit ? '변경 사항 저장' : '캐릭터 등록'}
 		{/if}
@@ -914,8 +952,9 @@
 			<CharacterThumbnailPanel
 				{description}
 				{nsfw}
-				onuse={(file, styleId) => {
+				onuse={(file, styleId, original) => {
 					setImage(file);
+					upscaleSource = original;
 					// 이 썸네일을 만든 그림체를 추천 그림체로 자동 반영(목록에 있을 때만).
 					if (styleId && myStyles.some((s) => s.id === styleId)) recommendedStyleId = styleId;
 					closeAssistSheet();
