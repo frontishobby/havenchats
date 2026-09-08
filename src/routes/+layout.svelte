@@ -6,7 +6,7 @@
 	import StorageLanding from '$lib/components/StorageLanding.svelte';
 	import StorageModal from '$lib/components/StorageModal.svelte';
 	import { storageModal } from '$lib/state/storageModal.svelte';
-	import { sync, refreshTokenInGesture } from '$lib/local/sync.svelte';
+	import { sync } from '$lib/local/sync.svelte';
 	import { profileModal } from '$lib/state/profileModal.svelte';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { privacyMode } from '$lib/state/privacyMode.svelte';
@@ -106,8 +106,6 @@
 </script>
 
 <svelte:window onclick={onWindowClick} onkeydown={onWindowKey} />
-<!-- Drive 토큰(1시간)이 만료 임박이면 유저 제스처 안에서 미리 갱신(팝업이 바로 닫힘). -->
-<svelte:document onclickcapture={refreshTokenInGesture} />
 
 <div class="app" class:chat-route={isChatRoute}>
 	<header class="topbar">
@@ -140,7 +138,9 @@
 					{sync.status === 'syncing'
 						? '⟳ 동기화 중'
 						: sync.status === 'needs-auth'
-							? '⚠ Drive 재연결'
+							? sync.pending > 0
+								? `⚠ 재연결 · 대기 ${sync.pending}`
+								: '⚠ Drive 재연결'
 							: sync.status === 'conflict'
 								? '⚠ 충돌 · 선택 필요'
 							: sync.status === 'error'

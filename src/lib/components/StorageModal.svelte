@@ -159,7 +159,9 @@
 			: sync.status === 'syncing'
 				? sync.phase || '동기화 중…'
 				: sync.status === 'needs-auth'
-					? 'Drive 재연결 필요'
+					? sync.pending > 0
+						? `Drive 재연결 필요 · 올릴 변경 ${sync.pending}건 대기 — '지금 동기화'를 누르면 로그인 창이 뜹니다`
+						: 'Drive 재연결 필요 — \'지금 동기화\'를 누르면 로그인 창이 뜹니다'
 					: sync.status === 'conflict'
 						? '충돌 — 어느 쪽 데이터를 쓸지 골라 주세요'
 					: sync.status === 'error'

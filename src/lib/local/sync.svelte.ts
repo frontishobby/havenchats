@@ -43,7 +43,6 @@ import {
 	forgetToken,
 	getMeta,
 	getQuota,
-	hasStoredToken,
 	listAll,
 	listChangedSince,
 	updateFile,
@@ -242,7 +241,8 @@ export async function initStorage(): Promise<void> {
 	if (currentToken()) {
 		await runOp(reconcile);
 	} else {
-		// 토큰 만료 — 팝업은 제스처가 필요하니 칩(또는 랜딩)의 '다시 연결' 을 기다린다. 변경은 dirty 로 쌓인다.
+		// 토큰 만료 — 팝업을 자동으로 띄우지 않는다. 변경은 dirty 로 쌓이고 칩에 '재연결 · 대기 n' 으로 보이며,
+		// 저장소 모달 '지금 동기화'(또는 첫 연결 랜딩의 '다시 연결')를 눌렀을 때만 로그인 창을 띄운다.
 		sync.status = 'needs-auth';
 	}
 	startPolling();
@@ -432,16 +432,6 @@ export async function resetToDrive(): Promise<void> {
 		if (remote) await pull(token, remote, { refreshIndex: false });
 		else await push(token, null);
 	});
-}
-
-/** 유저 제스처 안에서 호출 — 토큰 만료가 임박했으면 미리 갱신(팝업이 바로 닫힘). */
-export function refreshTokenInGesture(): void {
-	if (sync.mode !== 'drive' || !hasStoredToken() || currentToken()) return;
-	void ensureToken(true)
-		.then(() => {
-			if (sync.status === 'needs-auth') schedulePush(0);
-		})
-		.catch(() => {});
 }
 
 /** 진행 중인 이미지 업로드/다운로드를 중단한다(대기열은 남아 다음에 이어짐). */
