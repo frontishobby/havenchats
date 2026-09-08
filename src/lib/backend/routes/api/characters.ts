@@ -883,12 +883,15 @@ charactersRouter.put('/:id', async (c) => {
 	let newFullKey: string | null | undefined;
 	if (data.image) {
 		const ext = ALLOWED_IMAGE[data.image.type];
-		newKey = `char/${id}.${ext}`;
+		// 교체는 항상 **새 키**(시각 접미) — 같은 키에 덮어쓰면 다른 기기의 서비스워커 캐시가 옛 파일을 계속 서빙하므로
+		// 캐시 무효화 대신 키를 바꿔 miss → 새로 받게 한다. 옛 키는 아래에서 지운다.
+		const stamp = Date.now().toString(36);
+		newKey = `char/${id}-${stamp}.${ext}`;
 		await bucket.put(newKey, await data.image.arrayBuffer(), {
 			httpMetadata: { contentType: data.image.type }
 		});
 		if (data.imageFull) {
-			newFullKey = `charfull/${id}.${ALLOWED_IMAGE[data.imageFull.type]}`;
+			newFullKey = `charfull/${id}-${stamp}.${ALLOWED_IMAGE[data.imageFull.type]}`;
 			await bucket.put(newFullKey, await data.imageFull.arrayBuffer(), {
 				httpMetadata: { contentType: data.imageFull.type }
 			});
@@ -942,7 +945,7 @@ charactersRouter.put('/:id', async (c) => {
 		return c.json({ error: '캐릭터 저장에 실패했어요. 잠시 후 다시 시도해 주세요.' }, 500);
 	}
 
-	// 확장자가 바뀌어 키가 달라진 경우 옛 이미지 정리(같은 키면 덮어쓰여 정리 불필요).
+	// 썸네일 교체는 늘 새 키이므로 옛 이미지 정리.
 	if (newKey && owner.thumbnailKey && owner.thumbnailKey !== newKey) {
 		await bucket.delete(owner.thumbnailKey).catch(() => {});
 	}

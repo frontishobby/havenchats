@@ -22,7 +22,7 @@ export interface NewCharacter {
 	/** 설명 — 상세 모달 표시 전용(프롬프트 미반영). */
 	intro: string;
 	description: string;
-	/** R2 오브젝트 키 (char/<id>.<ext>). 이미지 없으면 null. */
+	/** R2 오브젝트 키 (char/<id>.<ext>, 교체 뒤엔 char/<id>-<시각>.<ext>). 이미지 없으면 null. */
 	thumbnailKey: string | null;
 	/** 상세용 고해상도 키(선택). */
 	fullImageKey?: string | null;

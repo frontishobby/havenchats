@@ -16,7 +16,7 @@
 | 프론트 | SvelteKit 정적 SPA(`adapter-static`, `ssr=false`), Svelte 5 |
 | '백엔드' | **Hono 앱을 브라우저에서 실행**(`src/lib/local/app.ts`). `app.html` 의 fetch 래퍼가 같은 오리진 `/api/*`·`/img/*` 를 `window.__havenFetch` 로 보내고, `<img src="/img/…">` 는 서비스워커(`static/img-sw.js`)가 IndexedDB 에서 응답 |
 | DB | **sql.js(SQLite WASM) 인메모리 + D1 호환 shim**(`src/lib/local/d1.ts`). 스냅샷(`db.export()`)을 IndexedDB `haven-meta.kv.db` 에 디바운스 저장. 스키마는 `migrations/*.sql` 을 그대로 적용(`_migrations` 테이블로 추적) |
-| 이미지 | **IndexedDB `haven-images.objects` + R2 호환 shim**(`src/lib/local/r2.ts`). 키 규칙은 예전 R2 와 동일(`char/…`, `charimg/<cid>/<id>.<ext>`, `chatimg/<sid>/<mid>.<ext>`, `style/…`, `avatar/…`) |
+| 이미지 | **IndexedDB `haven-images.objects` + R2 호환 shim**(`src/lib/local/r2.ts`). 키 규칙은 예전 R2 와 동일(`char/…`, `charimg/<cid>/<id>.<ext>`, `chatimg/<sid>/<mid>.<ext>`, `style/…`, `avatar/…`). **캐릭터 썸네일 교체는 새 키**(`char/<id>-<시각>.<ext>`, `charfull/` 도 동일, 옛 키 삭제) — 같은 키 덮어쓰기는 다른 기기 서비스워커 캐시가 옛 파일을 서빙해 delta cTag 무효화에 기대야 했음(2026-09-09 실사용에서 안 먹는 사례) |
 | 동기화 | **OneDrive 앱 폴더**(`src/lib/local/onedrive.ts`, `sync.svelte.ts`). MSAL(`@azure/msal-browser`, 동적 import) SPA 코드 플로우 PKCE — 시크릿 없이 refresh token, **팝업 없이 갱신**(SPA refresh token 24h → 이후 숨은 iframe `static/auth.html`, Safari/iOS 는 서드파티 쿠키 차단으로 하루 1회 로그인). 스코프 `Files.ReadWrite.AppFolder`(`/me/drive/special/approot` = Apps/Haven). `haven.sqlite` 1파일 + 이미지 파일(키를 경로 그대로 `char/<id>.webp`). 변경 감지 cTag, 덮어쓰기 방지 `If-Match: eTag`(412→충돌), 목록은 delta. 이미지는 **지연 다운로드**(서비스워커가 miss 시 downloadUrl 로 받아 캐시) |
 | LLM | Vercel AI Gateway (AI SDK v6 `ai` + `@ai-sdk/gateway`) — **브라우저가 직접 호출**(CORS 허용 실측). 키는 유저 등록(로컬 DB `user_keys` 평문) |
 | 이미지 생성 | NovelAI — 브라우저 직접 호출(기존과 동일). 구독 검증(`api.novelai.net`)은 CORS 불가라 생략 |
