@@ -34,7 +34,6 @@
 import { invalidateAll } from '$app/navigation';
 import { kvGet, kvSet, kvDelete, objClear, objDelete, objGet, objKeys, objPut, type StoredObject } from './idb';
 import { getLocalRuntime, onDatabaseSaved, onObjectsChanged, type LocalRuntime } from './runtime';
-import { goto } from '$app/navigation';
 import {
 	delta,
 	deleteFile,
@@ -226,9 +225,8 @@ function updateOtherActive(): void {
 export async function initStorage(): Promise<void> {
 	rt = getLocalRuntime();
 	sync.mode = readMode();
-	// 리디렉트 로그인(팝업이 막힌 기기)에서 돌아온 경우 먼저 처리하고 원래 경로로.
-	const back = await handleRedirect();
-	if (back && back !== location.pathname + location.search) void goto(back, { replaceState: true });
+	// 리디렉트 로그인(팝업이 막힌 기기)에서 돌아온 경우 먼저 처리(코드 교환).
+	await handleRedirect();
 	sync.lastSyncAt = (await kvGet<number>(K_LAST)) ?? null;
 	index = (await kvGet<Record<string, RemoteRef>>(K_INDEX)) ?? {};
 	await refreshPendingCount();

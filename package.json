@@ -7,7 +7,8 @@
     "dev": "vite dev",
     "build": "vite build && cp build/index.html build/404.html",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "preview": "npm run build && vite preview"
+    "preview": "npm run build && vite preview",
+    "prebuild": "cp node_modules/@azure/msal-browser/lib/redirect-bridge/msal-redirect-bridge.min.js static/"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260603.1",

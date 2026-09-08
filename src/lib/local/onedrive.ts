@@ -27,7 +27,9 @@ const AUTHORITY = 'https://login.microsoftonline.com/common';
 const SCOPES = ['Files.ReadWrite.AppFolder'];
 /** 서비스워커(static/img-sw.js)가 지연 다운로드에 쓰는 kv 키(액세스 토큰 복사본). */
 export const TOKEN_KV_KEY = 'od:token';
-const RETURN_KEY = 'haven:od:returnTo';
+/** MSAL 이 전체 리디렉트 응답을 잠시 담아 두는 sessionStorage 키(redirect bridge 가 쓰고 handleRedirectPromise 가 읽음). */
+const PENDING_REDIRECT_KEY = `msal.${MS_CLIENT_ID}.urlHash`;
+const INTERACTION_STATUS_KEY = 'msal.interaction.status';
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const APPROOT = `${GRAPH}/me/drive/special/approot`;
 const SELECT = 'id,name,size,lastModifiedDateTime,cTag,eTag,file,folder,deleted,parentReference,description';
@@ -126,24 +128,25 @@ export function hasStoredToken(): boolean {
 	}
 }
 
-/** 앱 시작 시 1회: 리디렉트 로그인에서 돌아온 경우 결과를 처리한다(해시의 code 교환). 돌아갈 경로가 있으면 반환. */
-export async function handleRedirect(): Promise<string | null> {
-	if (!MS_CLIENT_ID) return null;
-	if (!location.hash.includes('code=') && !location.hash.includes('error=')) return null;
+/**
+ * 앱 시작 시 1회: 전체 리디렉트 로그인에서 돌아온 경우 결과를 처리한다. auth.html 의 redirect bridge 가 응답을
+ * sessionStorage 에 넣고 요청을 시작한 페이지로 되돌려 보내므로, 그 키가 있을 때만 MSAL 을 로드해 코드를 교환한다.
+ */
+export async function handleRedirect(): Promise<void> {
+	if (!MS_CLIENT_ID) return;
+	let pending = false;
+	try {
+		pending = !!sessionStorage.getItem(PENDING_REDIRECT_KEY) || location.hash.includes('code=') || location.hash.includes('error=');
+	} catch {
+		/* ignore */
+	}
+	if (!pending) return;
 	try {
 		const app = await client();
-		// 돌아갈 경로는 sessionStorage 로 직접 관리(MSAL 의 loginRequestUrl 복귀는 끔).
 		const r = await app.handleRedirectPromise({ navigateToLoginRequestUrl: false });
 		if (r) remember(r);
 	} catch (e) {
 		console.warn('[onedrive] 리디렉트 처리 실패', e);
-	}
-	try {
-		const back = sessionStorage.getItem(RETURN_KEY);
-		sessionStorage.removeItem(RETURN_KEY);
-		return back;
-	} catch {
-		return null;
 	}
 }
 
@@ -185,21 +188,15 @@ export async function ensureToken(interactive = true): Promise<string> {
 	const acc = account(app);
 	const req: Msal.PopupRequest = { scopes: SCOPES, account: acc ?? undefined, prompt: acc ? undefined : 'select_account' };
 	try {
-		const r = await app.acquireTokenPopup(req);
-		return remember(r);
+		return remember(await popupOnce(app, req));
 	} catch (e) {
 		const code = (e as { errorCode?: string }).errorCode ?? '';
 		if (code === 'user_cancelled') {
 			throw new CloudAuthError('로그인이 취소됐어요.', 'denied');
 		}
 		if (code === 'popup_window_error' || code === 'empty_window_error' || code === 'block_iframe_reload') {
-			// 팝업 불가 → 전체 페이지 리디렉트. 돌아오면 initStorage 의 handleRedirect 가 처리하고 원래 경로로 복귀.
-			try {
-				sessionStorage.setItem(RETURN_KEY, location.pathname + location.search);
-			} catch {
-				/* ignore */
-			}
-			await app.acquireTokenRedirect({ ...req, redirectUri: `${location.origin}/` });
+			// 팝업 불가 → 전체 페이지 리디렉트(auth.html 로 돌아오면 bridge 가 이 페이지로 되돌리고, initStorage 의 handleRedirect 가 교환).
+			await app.acquireTokenRedirect(req);
 			// 여기 도달하지 않음(페이지 이동). 혹시 남아 있으면:
 			throw new CloudAuthError('로그인 페이지로 이동 중…', 'other');
 		}
@@ -207,6 +204,25 @@ export async function ensureToken(interactive = true): Promise<string> {
 			throw new CloudAuthError(e.errorMessage || '로그인이 필요해요.', 'other');
 		}
 		throw new CloudAuthError(e instanceof Error ? e.message : String(e), 'other');
+	}
+}
+
+/**
+ * 팝업 1회. 이전 팝업이 끝맺지 못해(창을 그냥 닫음 등) MSAL 이 '진행 중' 표시를 sessionStorage 에 남겨 두면
+ * `interaction_in_progress` 가 나므로, 그 표시를 지우고 한 번 더 시도한다.
+ */
+async function popupOnce(app: Msal.PublicClientApplication, req: Msal.PopupRequest): Promise<Msal.AuthenticationResult> {
+	try {
+		return await app.acquireTokenPopup(req);
+	} catch (e) {
+		if ((e as { errorCode?: string }).errorCode !== 'interaction_in_progress') throw e;
+		console.warn('[onedrive] 이전 로그인 진행 표시가 남아 있어 지우고 재시도');
+		try {
+			sessionStorage.removeItem(INTERACTION_STATUS_KEY);
+		} catch {
+			/* ignore */
+		}
+		return app.acquireTokenPopup(req);
 	}
 }
 

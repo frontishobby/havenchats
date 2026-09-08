@@ -1,3 +1,14 @@
 <!doctype html>
-<!-- MSAL 리디렉트 URI 전용 빈 페이지 — 팝업·숨은 iframe 이 여기로 돌아오면 부모 창의 MSAL 이 주소의 해시(code)를 읽는다. 앱을 로드하지 않는다. -->
-<html lang="ko"><head><meta charset="utf-8"><title>Haven 로그인</title></head><body></body></html>
+<!--
+  MSAL 리디렉트 URI 페이지. 팝업·숨은 iframe·전체 리디렉트가 로그인 뒤 여기로 돌아오면 MSAL 5 의 "redirect bridge" 가
+  주소의 응답(code/error)을 부모 창에 BroadcastChannel 로 보내고 창을 닫는다(전체 리디렉트면 요청을 시작한 페이지로 이동).
+  앱은 로드하지 않는다. msal-redirect-bridge.min.js 는 node_modules/@azure/msal-browser/lib/redirect-bridge/ 복사본(prebuild 가 갱신).
+-->
+<html lang="ko"><head><meta charset="utf-8"><title>Haven 로그인</title></head><body>
+<script src="/msal-redirect-bridge.min.js"></script>
+<script>
+	msalRedirectBridge.broadcastResponseToMainFrame().catch(function (e) {
+		document.body.textContent = '로그인 응답 처리 실패: ' + (e && e.message ? e.message : e) + ' — 이 창을 닫고 다시 시도하세요.';
+	});
+</script>
+</body></html>
