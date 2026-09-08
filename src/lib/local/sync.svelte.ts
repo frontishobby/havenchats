@@ -388,9 +388,13 @@ export async function resolveConflict(pick: 'remote' | 'local'): Promise<void> {
 	sync.conflict = null;
 	await runOp(async (token) => {
 		const remote = index[DB_NAME] ? await getMeta(token, index[DB_NAME].id) : await findByName(token, DB_NAME);
-		if (pick === 'remote' && remote) await pull(token, remote);
-		else await push(token, remote);
-		await processImageQueue(token);
+		if (pick === 'remote' && remote) {
+			await pull(token, remote);
+			await processImageQueue(token);
+		} else {
+			await processImageQueue(token);
+			await push(token, remote);
+		}
 	});
 }
 
@@ -497,7 +501,11 @@ async function runOp(job: (token: string) => Promise<void>): Promise<void> {
 	running = null;
 }
 
-/** 핵심: 원격 DB 와 로컬의 관계를 판정해 필요한 한 가지를 하고, 이미지 대기열을 처리한다. */
+/**
+ * 핵심: 원격 DB 와 로컬의 관계를 판정해 필요한 한 가지를 하고, 이미지 대기열을 처리한다.
+ * 올릴 때는 **이미지 먼저, DB 마지막** — 다른 기기는 DB md5 변화를 보고 받아가므로, 그 시점에 DB 가 참조하는 이미지가
+ * 이미 Drive 에 있어야 한다(반대 순서면 상대가 DB 만 받고 옛 썸네일 캐시를 계속 쓰는데, 다음 DB 변경까지 갱신 계기가 없다).
+ */
 async function reconcile(token: string): Promise<void> {
 	sync.phase = 'Drive 확인 중…';
 	let remote: DriveFile | null = null;
@@ -518,27 +526,28 @@ async function reconcile(token: string): Promise<void> {
 	const dirty = await isDirty();
 
 	if (!remote) {
+		await processImageQueue(token);
 		sync.phase = 'Drive 에 처음 올리는 중…';
 		await push(token, null);
 	} else if (!base) {
 		// 이 기기에서 처음 연결. 로컬이 비어 있으면 받아오고, 데이터가 있으면 유저가 고른다.
 		if (await localIsEmpty()) {
 			await pull(token, remote);
+			await processImageQueue(token);
 		} else {
 			setConflict(remote);
-			return;
 		}
 	} else if (remote.md5Checksum === base.md5) {
+		await processImageQueue(token);
 		if (dirty) await push(token, remote);
 	} else if (!dirty) {
 		// 다른 기기가 썼고 이쪽은 깨끗함 → 받아온다. 요청(채팅 스트림 등)이 진행 중이면 다음 확인으로.
 		if (rt!.busy) throw new SyncDeferred();
 		await pull(token, remote);
+		await processImageQueue(token);
 	} else {
 		setConflict(remote);
-		return;
 	}
-	await processImageQueue(token);
 }
 
 function setConflict(remote: DriveFile): void {
