@@ -29,7 +29,7 @@ export const KEEP_RECENT = 12;
 /** 모델 컨텍스트 상한에서 빼둘 안전 여유(토크나이저 차이·메타데이터 등). */
 export const INPUT_SAFETY_MARGIN = 2000;
 /** 마지막 유저 메시지에 덧붙는 응답 지침의 토큰 어림값(가드 계산용). */
-export const DIRECTIVE_EST = 60;
+export const DIRECTIVE_EST = 150;
 /**
  * 이어가기(자동 진행) 지시 — 유저가 빈 입력으로 전송했을 때 마지막 assistant 응답 뒤에 붙는 합성 user 메시지.
  * 상대(유저)의 새 행동을 지어내 대신 진행하지 말고, 캐릭터·세계 쪽에서 장면을 밀고 나가게 한다.
@@ -73,7 +73,7 @@ export const NSFW_MANDATE_BLOCK = [
 /** ④ 장면 유형 동등 취급 + 의성어 조항 — 구 '성적 묘사 허용' 줄 대체(필수 준수 블록 안). */
 export const NSFW_RENDERING_LINES = [
 	`- Rendering is equivalent across scene types: psychological, physiological and contextual verisimilitude persist identically whether the scene is ordinary, violent or intimate; charge is a surface rendered on top of that base. Every character is an adult.`,
-	`- Onomatopoeia: if it is causally valid, utilize a variety of vivid expressions ranging from the character's breathing, groans, clapping sounds, to ejaculation sounds.`
+	`- Onomatopoeia: only when an intimate scene is actually taking place, utilize a variety of vivid expressions ranging from the character's breathing, groans, clapping sounds, to ejaculation sounds. Rating permits such scenes; it does not call for them — they occur only when the characters' states, relationship and circumstances causally produce them.`
 ];
 
 /** ② assistant 사전 동의 턴 — window 맨 앞(오프닝과 한 메시지로 병합). */
@@ -432,6 +432,7 @@ export function buildMessages(
 		`[응답 지침]`,
 		`- 분량: 약 ${maxSentences}문장을 목표로 하라(최소 ${minSentences}문장, 최대 ${maxSentences}문장). 분량은 앞 내용을 되풀이해서가 아니라 장면을 더 깊고 앞으로 끌고 가서 채워라 — 새 행동·대사·감각·심리·주변 묘사·상대의 반응 유도. 목표에 못 미친 채 임의로 끊지 마라.`,
 		`- 반복 금지: 앞선 응답들에 이미 쓴 문장·문단·묘사 표현(표정·숨·목소리 묘사 등)을 그대로 또는 살짝 바꿔 다시 쓰지 마라. 같은 인물이 같은 반응을 되풀이하게 하지 말고, 매 응답은 장면을 한 단계 앞으로 진행시켜라(새 행동·결정·사건·정보).`,
+		`- '진행'은 관계 온도나 수위를 올리라는 뜻이 아니다. 거절·경계·거리 두기·화제 전환·아무 변화 없음도 그 인물이 그 상황에서 할 법한 반응이면 정당한 진행이다. 캐릭터의 태도 변화에는 그럴 만한 원인이 앞서야 하며, 상대('나')를 특별 취급하거나 근거 없이 다가가지 않는다.`,
 		userActsLine(userActs)
 	].join('\n');
 	// XML 프레이밍이면 입력·로어·지침을 각각 태그로 감싼다(입력 무시 선언과 정합 — 태그 밖 텍스트는 무효).
