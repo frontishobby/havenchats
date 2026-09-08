@@ -10,6 +10,8 @@
 	let remote = $state<{ files: number; bytes: number } | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let progress = $state<BackupProgress | null>(null);
+	const PRUNE_KEEP = 50;
+	let prune = $state<{ total: number; prunable: number; images: number } | null>(null);
 
 	$effect(() => {
 		if (storageModal.open) {
@@ -17,6 +19,11 @@
 			err = null;
 			remote = null;
 			if (sync.mode === 'drive') void remoteSummary().then((r) => (remote = r));
+			prune = null;
+			void fetch(`/api/chat/prune?keep=${PRUNE_KEEP}`)
+				.then((r) => (r.ok ? r.json() : null))
+				.then((j) => (prune = j as typeof prune))
+				.catch(() => {});
 		}
 	});
 
@@ -80,6 +87,26 @@
 		guard('download', async () => {
 			const r = await downloadAllImages();
 			msg = r.total === 0 ? '이미 전부 이 기기에 있어요.' : `이미지 ${r.downloaded}/${r.total}개를 내려받았어요.`;
+		});
+	const onPrune = () =>
+		guard('prune', async () => {
+			if (!prune || prune.prunable === 0) return;
+			if (
+				!confirm(
+					`최근 ${PRUNE_KEEP}개를 제외한 오래된 채팅 ${prune.prunable}개(이미지 ${prune.images}장 포함)를 삭제할까요? 되돌릴 수 없습니다.`
+				)
+			)
+				return;
+			const res = await fetch('/api/chat/prune', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ keep: PRUNE_KEEP })
+			});
+			if (!res.ok) throw new Error('정리에 실패했어요.');
+			const j = (await res.json()) as { deleted: number; images: number };
+			await invalidateAll();
+			prune = (await (await fetch(`/api/chat/prune?keep=${PRUNE_KEEP}`)).json()) as typeof prune;
+			msg = `채팅 ${j.deleted}개, 이미지 ${j.images}장을 지웠어요.${sync.mode === 'drive' ? ' Drive 에서도 지워져요.' : ''}`;
 		});
 	function onPickImport() {
 		fileInput?.click();
@@ -156,6 +183,21 @@
 						</button>
 					</div>
 				{/if}
+			</section>
+
+			<section>
+				<h3>정리</h3>
+				<p class="hint">
+					오래된 채팅을 지워 용량을 줄여요. 마지막 대화 기준 최근 {PRUNE_KEEP}개만 남깁니다(생성 이미지도 함께 삭제).
+					{#if prune}
+						현재 {prune.total}개{prune.prunable > 0 ? ` · 지울 수 있는 것 ${prune.prunable}개(이미지 ${prune.images}장)` : ' · 지울 것 없음'}
+					{/if}
+				</p>
+				<div class="actions">
+					<button class="ghost" onclick={onPrune} disabled={!!busy || !prune || prune.prunable === 0}>
+						{busy === 'prune' ? '지우는 중…' : `오래된 채팅 정리`}
+					</button>
+				</div>
 			</section>
 
 			<section>

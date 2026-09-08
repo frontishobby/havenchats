@@ -5,14 +5,14 @@
 **브라우저 안에서** sql.js(SQLite WASM) + IndexedDB 위에서 그대로 돈다. 저장소는 이 기기(IndexedDB) 또는 **Google Drive appDataFolder 동기화**.
 로그인·계정 없음: `users` 테이블의 유일한 행이 '나'. 다른 Google 계정으로 Drive 를 연결하면 그 계정의 데이터가 따로 생긴다.
 
-- **Prod**: https://havenchats.com (Cloudflare Worker **정적 자산 전용**, 코드 없음. `wrangler.jsonc` 에 `main` 없음)
+- **Prod**: https://havenchats.com — **GitHub Pages**(`.github/workflows/pages.yml`, main 푸시 시 빌드·배포). DNS 는 Cloudflare 에 그대로(CNAME → `frontishobby.github.io`, DNS only)
 - 과거 설계(Worker/D1/R2 시절): `docs/ARCHITECTURE.md` (도메인 로직 설명은 유효)
 
 ## 스택
 
 | 영역 | 선택 |
 |---|---|
-| 호스팅 | Cloudflare Worker **assets-only**(`build/` 서빙, SPA fallback). 어떤 정적 호스팅이든 됨(https 오리진 필요 — Google OAuth 때문) |
+| 호스팅 | **GitHub Pages**(비공개 레포, Pro). `build/` 정적 파일. 딥링크는 `404.html`(= index.html 복사본)로 SPA 진입, `static/.nojekyll`(Jekyll 이 `_app/` 무시 방지), `static/CNAME`. https 오리진 필요(Google OAuth) |
 | 프론트 | SvelteKit 정적 SPA(`adapter-static`, `ssr=false`), Svelte 5 |
 | '백엔드' | **Hono 앱을 브라우저에서 실행**(`src/lib/local/app.ts`). `app.html` 의 fetch 래퍼가 같은 오리진 `/api/*`·`/img/*` 를 `window.__havenFetch` 로 보내고, `<img src="/img/…">` 는 서비스워커(`static/img-sw.js`)가 IndexedDB 에서 응답 |
 | DB | **sql.js(SQLite WASM) 인메모리 + D1 호환 shim**(`src/lib/local/d1.ts`). 스냅샷(`db.export()`)을 IndexedDB `haven-meta.kv.db` 에 디바운스 저장. 스키마는 `migrations/*.sql` 을 그대로 적용(`_migrations` 테이블로 추적) |
@@ -96,7 +96,7 @@ wrangler.jsonc        # assets-only 배포 설정
 
 ## 구현된 기능
 
-- **메인**: 캐릭터 그리드 + 검색/태그 필터(내 캐릭터 전부).
+- **메인**: 캐릭터 그리드 + 검색(내 캐릭터 전부). 태그 필터 칩은 제거.
 - **캐릭터 제작/관리**: `/create`로 캐릭터 등록(이름·소개·프롬프트·태그·오프닝 다중·썸네일·장면 이미지). 소유자만 수정(`/characters/[id]/edit`)·삭제. 폼/이미지 파싱은 `characterForm.ts`, R2 정리는 `imageStore.ts`.
 - **AI 도우미(제작 폼)**: `CharacterAssistPanel`(러프 입력 → `POST /api/characters/assist` — `streamObject` 구조화 출력을 **NDJSON 스트림**(`progress`/`ping`/`done`/`error`, 타입 `AssistStreamEvent`)으로 흘려 폼 채움·기존 내용 보존 수정. 비스트리밍 `generateObject` 시절 12k+ 토큰 응답을 기다리는 동안 어느 홉도 바이트를 안 보내 무한 대기가 났던 것을 고침: 서버 heartbeat 10s·상한 5분·`maxRetries:1`, 클라 60s 무수신 감지·취소 버튼) + `CharacterThumbnailPanel`(NovelAI 썸네일 — **자연어 연출**(선택, 한국어) + 설정을 `POST /api/characters/thumbnail` 이 `generateObject` 로 `{ base, scene, characters[] }` 구조화(스키마·sanitizer 는 채팅 이미지와 공용 `lib/server/imagePrompt.ts`) → 인물별 캡션을 NAI `char_captions` 로 분리해 **여러 인물 동시 등장** 가능. 패널에서 base/장면 문장/인물 캡션을 편집해 그림만 다시 뽑거나(`prompt` 전송) '↻ 설정·연출 반영'으로 재생성(`regen`). 상황 프롬프트 모델은 `IMAGE_PROMPT_MODELS`(GLM 5.3 Flash), 미성년 하드차단 동일 적용). **허용 모델 `ASSIST_MODELS`: Claude Opus 4.6·GPT-5.6 Sol·DeepSeek V4 Pro·GLM 5.3 Flash(기본)** — 구조화 출력 안정 모델만(Gemini Flash 는 NSFW 설정 입력 content-filter 로 제외. DeepSeek V4 Pro 는 Opus·Sol 이 NSFW 설정을 거부할 때의 상위 대안 — 2026-09-07 실측 4/4 정상, 30~35s). PC(≥1080px)는 폼 우측 sticky 열, **모바일은 우하단 ✦ FAB → 바텀시트**(탭: 캐릭터 생성/썸네일) — 같은 DOM 인스턴스를 CSS 로만 배치 전환.
 - **유저 프로필 페이지**(`/user/[id]`): 공개 프로필 + 제작 캐릭터 목록. 본인이면 전체, 외부 방문자에겐 NSFW 숨김.
@@ -111,7 +111,7 @@ wrangler.jsonc        # assets-only 배포 설정
 - **그림체**(`/styles`, 내 목록만 — Hub 공유·즐겨찾기 개념 제거): **깎기 워크숍**(`StyleWorkshopModal`)에서 화풍+상황(테스트)으로 자기 NovelAI 키로 미리보기 생성 → 공유 시 제목·메모 + **고정 표준 장면**(`THUMBNAIL_SITUATION`, SFW)으로 일관 썸네일 리롤·결정 → R2 저장. 카드(썸네일+제목+작성자) 클릭 시 상세(프롬프트+즐겨찾기). **선택 퀄리티·네거티브 프롬프트**(워크숍 접이식 섹션, `art_styles.negative/quality`): 비면 모델별 고정 `QUALITY_TAIL(_V5)`/`NEGATIVE_PROMPT(_V5)`, 있으면 **통째로 대체**(`resolveQualityTail`/`negativeFor(model, custom)`) — 단 네거티브 앞 아동 차단 접두(`MINOR_BLOCK_NEGATIVE`)는 항상 유지, V5 연도·complexity 자동 주입은 그림체 또는 퀄리티에 이미 있으면 생략. 워크숍 미리보기·썸네일·채팅(`styleNegative/styleQuality`)·캐릭터 썸네일 모두 고른 그림체의 값을 보낸다. 채팅 이미지 모달은 즐겨찾기 그림체 중 택1(캐릭터 추천 그림체 상단). 캐릭터 제작 폼에서 추천 그림체 지정 가능. 본인 그림체는 상세의 '수정'으로 같은 워크숍 모달을 채워 열어 수정(`edit` prop → `PATCH /api/styles/:id` multipart, 썸네일은 선택·미첨부 시 유지, 공개 여부는 그대로. JSON `{shared}` PATCH 는 공개 토글). API: `/api/styles*`(목록·생성·수정·상세·삭제·즐겨찾기·`mine`·`generate`).
 - **모듈**(`/modules`, 내 목록만): 캐릭터 무관·재사용 가능한 **일반 지침**(출력 규칙 추가, 문체, 금기 등)(`ModuleEditorModal`: 제목·메모·본문, JSON `POST/PATCH /api/modules(/:id)`, `{shared}` 만 보내면 공개 토글). 채팅 헤더 🧩 버튼(설정 왼쪽) 모달에서 **내 모듈 + 즐겨찾기** 중 여러 개를 켜고 끔(최대 `MAX_ACTIVE_MODULES`=8, 켠 순서 번호 표시, localStorage `haven:modules:active` JSON 배열 — 전역 설정). 전송 시 `moduleIds` 로 보내면 서버가 `getModulesForChat`(공유 or 본인 소유만, 클라 순서 유지)로 해석해 `assembleTurn({modules})` → `buildModulesBlock`(`[추가 규칙 — 모듈]` 헤더 + `## 제목`/본문, `{{char}}`·`{{나}}` 치환) → **프롬프트 가장 마지막**: `[응답 지침]` 뒤 같은 user 메시지에 부착(이어가기 턴도 동일, XML 프레임이면 `<Guide:Modules>`). 꼬리 블록이라 prefix 캐시 무영향. 디버그 스냅샷 `modulesBlock`·패널 '모듈' 섹션, `/api/chat/inspect` 도 `moduleIds` 수용.
 - **프로필**: 첫 실행 시 프로필 모달(이름·대화용 이름·페르소나·아바타). 네비바 이름 클릭 › 프로필 설정 / API 키 관리 / 저장소 · 백업 / charx 가져오기.
-- **저장소**(`StorageLanding`/`StorageModal`): 첫 화면에서 'Google Drive 에 저장' 또는 '이 기기에만 저장'. Drive 모드는 헤더 칩(☁ 동기화됨/대기 n/⚠ 재연결)으로 상태 표시, 모달에서 지금 동기화·이미지 전부 내려받기·연결 해제·zip 내보내기/가져오기.
+- **저장소**(`StorageLanding`/`StorageModal`): 첫 화면에서 'Google Drive 에 저장' 또는 '이 기기에만 저장'. Drive 모드는 헤더 칩(☁ 동기화됨/대기 n/⚠ 재연결)으로 상태 표시, 모달에서 지금 동기화·이미지 전부 내려받기·연결 해제·**오래된 채팅 정리**(최근 50개만 보유, 생성 이미지 포함 삭제)·zip 내보내기/가져오기.
 
 
 ## 환경 변수
@@ -119,7 +119,6 @@ wrangler.jsonc        # assets-only 배포 설정
 서버가 없으므로 **공개 값만** 있고 빌드 시 인라인된다(`.env`, gitignore / `.env.example` 참고).
 - `PUBLIC_GOOGLE_CLIENT_ID`(선택) — GIS 용 OAuth 클라이언트 ID(비밀 아님). 비우면 `src/lib/local/drive.ts` 의 기본값. **Google 콘솔에서 '승인된 JavaScript 원본'에 `https://havenchats.com`·`http://localhost:5173` 등록 필요**, 클라이언트 시크릿·리디렉트 URI 불필요. OAuth 앱은 '테스트' 상태 + 테스트 사용자에 본인만.
 - `AI_GATEWAY_API_KEY`(선택) — 재현 스크립트(tsx)용. 앱은 유저가 등록한 키(로컬 DB)를 쓴다.
-- `.env` 에 `CLOUDFLARE_API_TOKEN` 을 두지 않는다(wrangler 가 그 계정으로 붙음). wrangler 는 `wrangler login`.
 - NovelAI·Gateway 키는 앱 '프로필 › API 키 관리'에서 등록 → 로컬 DB `user_keys` 평문(Drive 스냅샷에도 포함됨 — appDataFolder 는 본인만 접근).
 
 ## 명령어
@@ -128,8 +127,8 @@ wrangler.jsonc        # assets-only 배포 설정
 npm run dev            # vite (:5173) — 이게 전부. API/DB/이미지는 브라우저 안
 npm run check          # svelte-check (커밋 전 필수)
 npm run build          # vite build → build/ (정적 SPA)
-npm run preview        # build + wrangler dev(assets-only 로컬 서빙)
-npm run deploy         # 수동 배포(평시엔 main 푸시 → CF Workers Builds)
+npm run preview        # build + vite preview
+# 배포 = main 푸시 → GitHub Actions(pages.yml)
 
 # 구 데이터 이전(1회): D1 덤프 → 백업 zip → 앱 '저장소 · 백업 › zip 가져오기' → API 키 재등록
 npx wrangler d1 export haven --remote --output haven-d1.sql
@@ -138,17 +137,17 @@ node scripts/export-legacy.mjs haven-d1.sql --out haven-legacy-backup.zip   # �
 
 ## 인프라
 
-- **Worker `havenchats`**: 정적 자산 전용(`wrangler.jsonc` 에 `main` 없음, 바인딩 없음). 커스텀 도메인 `havenchats.com`(`routes custom_domain`). 배포는 **CF Workers Builds**(main 푸시 → `npm run build` → `wrangler deploy`). CPU 를 안 쓰므로 무료 플랜으로 내려도 됨.
-- **Cloudflare 계정** `frontishobby`(id `91e905352aff208653b16dd55b3f7e60`). 구 D1 `haven`(`4ddf590a-…`)·R2 `haven-images` 는 이전(zip) 검증 후 삭제 대상. 구 무료 계정 `HavenChats` 리소스도 삭제 대상.
+- **GitHub Pages**(레포 `frontishobby/havenchats.com`, Settings › Pages › Source = GitHub Actions, 커스텀 도메인 `havenchats.com`). 워크플로 `.github/workflows/pages.yml`: `npm ci` → `npm run build` → `upload-pages-artifact(build)` → `deploy-pages`.
+- **Cloudflare 는 DNS 만**: `havenchats.com` CNAME → `frontishobby.github.io`(DNS only/회색 구름 — GitHub 가 인증서 발급). Worker `havenchats`·D1 `haven`·R2 `haven-images`(계정 `frontishobby`)는 이전 검증 후 삭제 대상, wrangler 는 레포에서 제거됨. 구 무료 계정 `HavenChats` 리소스도 삭제 대상.
 - **Google Drive**: 유저 계정의 appDataFolder(앱 전용 숨김 폴더, 15GB 무료 용량 공유). 파일 = `haven.sqlite` + 이미지(name=키). 다른 앱/유저는 못 봄.
 - **Google OAuth 클라이언트**(웹): `965110096401-…apps.googleusercontent.com`. JS 원본에 prod·localhost 등록.
 
 ## 아직 안 된 것 / 다음 단계
 
 - **Drive 실사용 검증 미완**: 코드는 GIS 토큰·REST·동기화 엔진까지 있으나 실제 Google 계정으로 end-to-end 는 아직(헤드리스에서 OAuth 팝업 불가). 첫 연결 시 Google 콘솔 JS 원본 등록이 선행돼야 한다.
-- **구 Worker/D1/R2 삭제**: zip 이전 확인 후. 삭제 전엔 `scripts/export-legacy.mjs` 가 `havenchats.com/img` 에서 이미지를 받을 수 있다.
+- **구 Worker/D1/R2 삭제**: zip 이전 확인 후. 삭제 전엔 `scripts/export-legacy.mjs` 가 (구 Worker 가 서빙하는) `/img/<key>` 에서 이미지를 받을 수 있다 — DNS 를 GitHub 로 바꾸면 `--base https://havenchats.workers.dev` 류 옛 주소를 써야 한다.
 - 다기기 동시 편집은 통째 스냅샷이라 마지막 쓰기 승리 + 시작 시 충돌 선택뿐(1인 전제).
-- 캐릭터/세션 삭제 시 고아 이미지(IndexedDB·Drive) 정리 없음(예전 R2 캐비엇과 동일).
+- 캐릭터 삭제 시 고아 이미지 정리 없음. 세션은 '저장소 · 백업 › 정리'(최근 50개만 보유, `POST /api/chat/prune`)가 이미지까지 지운다.
 - 모바일 사파리는 IndexedDB 용량·서비스워커 제약이 커서 1.8GB 이미지 캐시가 부담 — 지연 다운로드라 필요한 것만 받지만 캐시 축출은 미처리.
 - `isAdmin`/`canSeeNsfw`/`visibility`/`shared`/`favorites` 등 다인 흔적이 코드·스키마에 남아 있음(동작은 전부 허용). 점진 제거.
 - 빌트인 캐릭터 없음, 결제 없음, 장기 기억은 rolling summary 까지(변경 없음).

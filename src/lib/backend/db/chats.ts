@@ -255,6 +255,63 @@ export async function deleteSession(
 	return true;
 }
 
+/** 최근 keep 개를 제외한 오래된 세션 수·그 세션들의 이미지 수(정리 미리보기). */
+export async function countPrunableSessions(
+	db: D1Database,
+	userId: string,
+	keep: number
+): Promise<{ total: number; prunable: number; images: number }> {
+	const total =
+		(await db
+			.prepare('SELECT count(*) AS n FROM chat_sessions WHERE user_id = ?')
+			.bind(userId)
+			.first<{ n: number }>())?.n ?? 0;
+	const prunable = Math.max(0, total - keep);
+	if (prunable === 0) return { total, prunable: 0, images: 0 };
+	const images =
+		(await db
+			.prepare(
+				`SELECT count(*) AS n FROM chat_messages WHERE role = 'image_generation' AND session_id IN (${OLD_SESSIONS_SQL})`
+			)
+			.bind(userId, keep)
+			.first<{ n: number }>())?.n ?? 0;
+	return { total, prunable, images };
+}
+
+/** 최근 keep 개(마지막 대화 시각 기준) 밖의 세션 id 서브쿼리. bind: (userId, keep) */
+const OLD_SESSIONS_SQL = `SELECT id FROM chat_sessions WHERE user_id = ?
+	 ORDER BY last_message_at DESC NULLS LAST, created_at DESC LIMIT -1 OFFSET ?`;
+
+/**
+ * 오래된 세션 정리: 최근 keep 개만 남기고 나머지 세션·메시지를 지운다.
+ * 반환: 지운 세션 수 + 지워야 할 이미지 키(image_generation 행의 content) — 호출부가 스토리지에서 삭제.
+ */
+export async function pruneOldSessions(
+	db: D1Database,
+	userId: string,
+	keep: number
+): Promise<{ deleted: number; imageKeys: string[] }> {
+	const ids = (
+		await db.prepare(OLD_SESSIONS_SQL).bind(userId, keep).all<{ id: string }>()
+	).results.map((r) => r.id);
+	if (ids.length === 0) return { deleted: 0, imageKeys: [] };
+	const imageKeys = (
+		await db
+			.prepare(
+				`SELECT content FROM chat_messages WHERE role = 'image_generation' AND session_id IN (${OLD_SESSIONS_SQL})`
+			)
+			.bind(userId, keep)
+			.all<{ content: string }>()
+	).results.map((r) => r.content);
+	await db.batch([
+		db
+			.prepare(`DELETE FROM chat_messages WHERE session_id IN (${OLD_SESSIONS_SQL})`)
+			.bind(userId, keep),
+		db.prepare(`DELETE FROM chat_sessions WHERE id IN (${OLD_SESSIONS_SQL})`).bind(userId, keep)
+	]);
+	return { deleted: ids.length, imageKeys };
+}
+
 /**
  * 메시지 1건 삭제(소유권 확인 — 메시지가 속한 세션이 이 유저 것인지). 반환: 실제 삭제 여부.
  * seq 는 재배열하지 않고 session.message_count 도 줄이지 않는다 → 삭제로 생긴 seq 공백은

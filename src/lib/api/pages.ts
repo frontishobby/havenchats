@@ -22,6 +22,5 @@ export interface MeData {
 /** GET /api/home — 메인 캐릭터 그리드. */
 export interface HomeData {
 	characters: Character[];
-	tags: string[];
 }
 

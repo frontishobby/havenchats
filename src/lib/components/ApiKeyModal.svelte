@@ -195,7 +195,7 @@
 				<p class="hint">
 					채팅(AI 응답)에 사용할 키예요. <strong>필수</strong> — 없으면 채팅을 사용할 수 없어요. 키는
 					<a href="https://vercel.com/dashboard/ai-gateway/api-keys" target="_blank" rel="noreferrer noopener">Vercel AI Gateway</a>
-					대시보드에서 발급해요. 서버에 암호화되어 저장됩니다.
+					대시보드에서 발급해요. 이 기기의 로컬 DB(Drive 동기화 시 내 appData)에 저장됩니다.
 				</p>
 
 				<div class="field">
@@ -204,7 +204,9 @@
 						id="gw-key"
 						type="password"
 						placeholder="vck_..."
-						autocomplete="off"
+						autocomplete="new-password"
+						data-1p-ignore
+						data-lpignore="true"
 						bind:value={gKeyInput}
 					/>
 				</div>
@@ -251,7 +253,9 @@
 						id="nai-key"
 						type="password"
 						placeholder="pst-..."
-						autocomplete="off"
+						autocomplete="new-password"
+						data-1p-ignore
+						data-lpignore="true"
 						bind:value={keyInput}
 					/>
 				</div>

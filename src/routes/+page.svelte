@@ -7,7 +7,6 @@
 	let { data }: { data: PageData } = $props();
 
 	let query = $state('');
-	let activeTag = $state<string | null>(null);
 	let detail = $state<Character | null>(null);
 
 	const filtered = $derived(
@@ -18,14 +17,10 @@
 				c.name.toLowerCase().includes(q) ||
 				c.tagline.toLowerCase().includes(q) ||
 				c.description.toLowerCase().includes(q);
-			const matchesTag = !activeTag || c.tags.includes(activeTag);
-			return matchesQuery && matchesTag;
+			return matchesQuery;
 		})
 	);
 
-	function toggleTag(tag: string) {
-		activeTag = activeTag === tag ? null : tag;
-	}
 </script>
 
 <svelte:head>
@@ -36,16 +31,15 @@
 <section class="hero">
 	<div class="search">
 		<span class="search-icon">🔍</span>
-		<input type="text" placeholder="캐릭터 이름, 설명으로 검색…" bind:value={query} />
+		<input
+			type="search"
+			name="character-search"
+			autocomplete="off"
+			placeholder="캐릭터 이름, 설명으로 검색…"
+			bind:value={query}
+		/>
 	</div>
 
-	<div class="tags" role="group" aria-label="태그 필터">
-		{#each data.tags as tag (tag)}
-			<button class="tag" class:active={activeTag === tag} onclick={() => toggleTag(tag)}>
-				{tag}
-			</button>
-		{/each}
-	</div>
 </section>
 
 <section class="grid-wrap">
@@ -98,30 +92,6 @@
 	}
 	.search input::placeholder {
 		color: var(--text-faint);
-	}
-	.tags {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-		justify-content: center;
-	}
-	.tag {
-		background: var(--bg-card);
-		border: 1px solid var(--border);
-		color: var(--text-dim);
-		font-size: 0.82rem;
-		padding: 6px 14px;
-		border-radius: 999px;
-		transition: all 0.15s ease;
-	}
-	.tag:hover {
-		color: var(--text);
-		border-color: var(--text-faint);
-	}
-	.tag.active {
-		background: var(--accent);
-		border-color: var(--accent);
-		color: #fff;
 	}
 
 	.grid-wrap {

@@ -41,8 +41,7 @@ pagesRouter.get('/me', async (c) => {
 pagesRouter.get('/home', async (c) => {
 	const user = c.get('user');
 	const visible = await getVisibleCharacters(c.env.DB, canSeeNsfw(user));
-	const tags = [...new Set(visible.flatMap((ch) => ch.tags))];
-	const data: HomeData = { characters: visible, tags };
+	const data: HomeData = { characters: visible };
 	return c.json(data);
 });
 

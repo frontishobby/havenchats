@@ -26,7 +26,9 @@ import {
 	getOwnedMessage,
 	messageExists,
 	updateMessageContentCost,
-	updateImageLedgers
+	updateImageLedgers,
+	countPrunableSessions,
+	pruneOldSessions
 } from '$lib/backend/db/chats';
 import type { AppearanceLedger, Character, ChatSession, OutfitLedger, StoredMessage } from '$lib/types';
 import { pinSceneCodes } from '$lib/imageCodes';
@@ -650,6 +652,37 @@ chatRouter.delete('/session', async (c) => {
 	if (!ok) return c.json({ error: 'session not found' }, 404);
 
 	return c.json({ ok: true });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// GET/POST '/prune'  — 오래된 세션 정리(최근 N개만 보유). GET=미리보기, POST=실행(이미지 포함 삭제)
+// ════════════════════════════════════════════════════════════════════════════
+
+const PRUNE_KEEP_DEFAULT = 50;
+
+function parseKeep(raw: unknown): number {
+	const n = Number(raw);
+	return Number.isInteger(n) && n >= 1 && n <= 10_000 ? n : PRUNE_KEEP_DEFAULT;
+}
+
+chatRouter.get('/prune', async (c) => {
+	const user = requireUser(c);
+	const db = c.env.DB;
+	if (!db) return c.json({ error: 'db unavailable' }, 500);
+	const keep = parseKeep(c.req.query('keep'));
+	return c.json({ keep, ...(await countPrunableSessions(db, user.id, keep)) });
+});
+
+chatRouter.post('/prune', async (c) => {
+	const user = requireUser(c);
+	const db = c.env.DB;
+	if (!db) return c.json({ error: 'db unavailable' }, 500);
+	const body = (await c.req.json().catch(() => ({}))) as { keep?: unknown };
+	const keep = parseKeep(body.keep);
+	const { deleted, imageKeys } = await pruneOldSessions(db, user.id, keep);
+	// 이미지(chatimg/...)는 스토리지에서도 삭제 — 실패해도 DB 정리는 유지(고아 파일만 남음).
+	if (imageKeys.length) await c.env.IMAGES?.delete(imageKeys).catch(() => {});
+	return c.json({ deleted, images: imageKeys.length });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
