@@ -127,6 +127,10 @@ let running: Promise<void> | null = null;
 let hooked = false;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let lastPollAt = 0;
+/** 세션당 1회: 덮어쓰기 키의 로컬 캐시를 원격과 직접 대조했는지. */
+let cacheVerified = false;
+/** 같은 키에 새 내용을 덮어쓰는 이미지 접두(썸네일·상세·그림체·아바타). 장면·채팅 이미지는 id 별 불변. */
+const OVERWRITABLE_PREFIXES = ['char/', 'charfull/', 'style/', 'avatar/'];
 
 function writeMode(m: StorageMode) {
 	sync.mode = m;
@@ -573,19 +577,44 @@ async function refreshIndex(token: string): Promise<DriveFile[]> {
 	const next: Record<string, RemoteRef> = {};
 	for (const f of files) next[f.name] = { id: f.id, md5: f.md5Checksum };
 	const puts = new Set((await kvGet<string[]>(K_PUTS)) ?? []);
-	const stale: string[] = [];
+	const stale = new Set<string>();
 	for (const [k, old] of Object.entries(prev)) {
 		if (k === DB_NAME || puts.has(k)) continue;
 		const cur = next[k];
-		if (!cur || (old.md5 && cur.md5 && old.md5 !== cur.md5)) stale.push(k);
+		if (!cur || (old.md5 && cur.md5 && old.md5 !== cur.md5)) stale.add(k);
 	}
-	if (stale.length) {
-		await objDelete(stale);
-		console.info(`[sync] 다른 기기가 바꾼 이미지 캐시 ${stale.length}개 정리`);
+	// 인덱스 diff 로 못 잡는 경우(인덱스는 이미 새 md5 인데 캐시는 옛 파일 — 이 로직 이전 버전이 동기화한 기기)를
+	// 위해 덮어쓰기 키는 로컬 오브젝트를 원격과 직접 대조한다(세션당 1회, 대상이 수백 개라 부담 적음).
+	if (!cacheVerified) {
+		cacheVerified = true;
+		for (const k of await findStaleOverwritable(files, puts)) stale.add(k);
+	}
+	if (stale.size) {
+		await objDelete([...stale]);
+		console.info(`[sync] 다른 기기가 바꾼 이미지 캐시 ${stale.size}개 정리`);
 	}
 	index = next;
 	await kvSet(K_INDEX, index);
 	return files;
+}
+
+/**
+ * 덮어쓰기 접두 키 중 로컬 캐시가 원격과 다른 것. etag 가 Drive md5 와 같으면(Drive 에서 받았거나 올린 뒤 기록) 최신.
+ * 아니면(로컬 생성 etag 는 임의값) 크기로 판정 — 같은 크기의 다른 이미지는 사실상 없다.
+ */
+async function findStaleOverwritable(files: DriveFile[], puts: Set<string>): Promise<string[]> {
+	const byName = new Map(files.map((f) => [f.name, f] as const));
+	const keys = (await objKeys()).filter(
+		(k) => !puts.has(k) && byName.has(k) && OVERWRITABLE_PREFIXES.some((p) => k.startsWith(p))
+	);
+	const out: string[] = [];
+	for (const k of keys) {
+		const f = byName.get(k)!;
+		const obj = await objGet(k);
+		if (!obj || obj.etag === f.md5Checksum) continue;
+		if (f.size > 0 && obj.size !== f.size) out.push(k);
+	}
+	return out;
 }
 
 async function syncImages(token: string): Promise<void> {
@@ -629,6 +658,8 @@ async function syncImages(token: string): Promise<void> {
 				? await updateFile(token, ref.id, obj.blob, obj.contentType)
 				: await createFile(token, key, obj.blob, obj.contentType);
 			index[key] = { id: f.id, md5: f.md5Checksum };
+			// 로컬 etag 를 Drive md5 로 맞춰 두면 이후 캐시 대조가 정확해진다(refreshIndex).
+			if (f.md5Checksum && obj.etag !== f.md5Checksum) await objPut({ ...obj, etag: f.md5Checksum });
 		}
 		puts.delete(key);
 		n++;
