@@ -389,6 +389,40 @@ export async function syncNow(): Promise<void> {
 	else await flush();
 }
 
+/**
+ * 설정 모달 'Drive 기준으로 맞추기'(제스처 안): Drive 를 원본으로 이 기기를 통째 맞춘다 — **올리지 않은 로컬 변경은 버린다**.
+ *  ① 이미지 대기열(put/delete) 비움 ② Drive 에 없는 로컬 이미지 삭제 + 덮어쓰기 키(썸네일 등) 내용 대조
+ *  ③ 인덱스 재구성 ④ DB 를 Drive 것으로 교체 + 화면 갱신. 결과는 지운 이미지 수. 실패는 sync.error.
+ */
+export async function resetToDrive(): Promise<{ removed: number }> {
+	if (sync.mode !== 'drive') return { removed: 0 };
+	await ensureToken(true);
+	let removed = 0;
+	await run(async (token) => {
+		sync.phase = 'Drive 확인 중…';
+		sync.conflict = null;
+		await kvSet(K_PUTS, []);
+		await kvSet(K_DELS, []);
+		const files = await listAll(token);
+		const byName = new Set(files.map((f) => f.name));
+		const stale = new Set((await objKeys()).filter((k) => !byName.has(k)));
+		sync.phase = '이미지 캐시 대조 중…';
+		for (const k of await findStaleOverwritable(files, new Set())) stale.add(k);
+		if (stale.size) await objDelete([...stale]);
+		removed = stale.size;
+		index = {};
+		for (const f of files) index[f.name] = { id: f.id, md5: f.md5Checksum };
+		await kvSet(K_INDEX, index);
+		cacheVerified = true;
+		if (index[DB_NAME]) {
+			sync.phase = 'Drive 데이터 받는 중…';
+			await pullDb(token, { refreshIndex: false });
+		}
+		await finishOk();
+	});
+	return { removed };
+}
+
 /** 유저 제스처 안에서 호출 — 토큰 만료가 임박했으면 미리 갱신(팝업이 바로 닫힘). */
 export function refreshTokenInGesture(): void {
 	if (sync.mode !== 'drive' || !hasStoredToken() || currentToken()) return;

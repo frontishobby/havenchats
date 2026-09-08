@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { storageModal } from '$lib/state/storageModal.svelte';
-	import { sync, connectDrive, disconnectDrive, syncNow, remoteSummary, downloadAllImages, cancelSync, type RemoteSummary } from '$lib/local/sync.svelte';
+	import { sync, connectDrive, disconnectDrive, syncNow, resetToDrive, remoteSummary, downloadAllImages, cancelSync, type RemoteSummary } from '$lib/local/sync.svelte';
 	import { exportBackup, importBackup, type BackupProgress } from '$lib/local/backup';
 
 	let busy = $state<string | null>(null);
@@ -63,6 +63,15 @@
 			await syncNow();
 			if (sync.error) err = sync.error;
 			else msg = '동기화했어요.';
+			remote = await remoteSummary();
+		});
+	const onResetToDrive = () =>
+		guard('reset', async () => {
+			const pending = sync.pending > 0 ? ` 아직 올리지 않은 이 기기의 변경 ${sync.pending}건은 사라져요.` : '';
+			if (!confirm(`Drive 의 데이터로 이 기기를 맞출까요? 캐릭터·대화·설정이 Drive 것으로 바뀌고, Drive 와 다른 이미지 캐시는 지워져요.${pending}`)) return;
+			const r = await resetToDrive();
+			if (sync.error) err = sync.error;
+			else msg = `Drive 기준으로 맞췄어요.${r.removed > 0 ? ` 이미지 캐시 ${r.removed}개를 정리했어요.` : ''}`;
 			remote = await remoteSummary();
 		});
 	const onDisconnect = () =>
@@ -210,6 +219,9 @@
 						{/if}
 						<button class="ghost" onclick={onDownloadAll} disabled={!!busy} title="다른 기기에서 만든 이미지는 볼 때 내려받아요. 오프라인 대비로 미리 전부 받으려면.">
 							{busy === 'download' ? sync.phase || '내려받는 중…' : '이미지 전부 내려받기'}
+						</button>
+						<button class="ghost" onclick={onResetToDrive} disabled={!!busy || sync.status === 'syncing'} title="Drive 를 원본으로 이 기기의 데이터와 이미지 캐시를 통째 맞춰요. 다른 기기에서 바꾼 썸네일이 옛것으로 보일 때.">
+							{busy === 'reset' ? sync.phase || '맞추는 중…' : 'Drive 기준으로 맞추기'}
 						</button>
 						<button class="ghost" onclick={onDisconnect} disabled={!!busy}>연결 해제</button>
 					</div>
