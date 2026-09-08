@@ -35,6 +35,10 @@
 		};
 	});
 
+	// 크레딧 뱃지 분기: 잔액(정상) / 키 무효(401 → 재등록 경고) / 없음.
+	const creditsOk = $derived(me?.credits && !('invalid' in me.credits) ? me.credits : null);
+	const creditsInvalid = $derived(!!me?.credits && 'invalid' in me.credits);
+
 	// app.html 의 부트 스켈레톤(#boot): 앱 셸이 마운트되면 페이드아웃 후 제거.
 	// (SPA 라 JS 번들 + 페이지 load 가 끝나기 전까진 아무것도 렌더되지 않으므로 그동안 대신 보여준다)
 	onMount(() => {
@@ -144,15 +148,23 @@
 									: '☁ 동기화됨'}
 				</button>
 			{/if}
-			{#if me?.credits}
+			{#if creditsInvalid}
+				<button
+					class="credits-badge warn"
+					onclick={openApiKeys}
+					title="저장된 Vercel AI Gateway 키가 거부됐습니다(401). API 키 관리에서 다시 등록하세요."
+				>
+					⚠ Gateway 키 재등록
+				</button>
+			{:else if creditsOk}
 				<button
 					class="credits-badge"
-					class:low={me.credits.balance < 5}
+					class:low={creditsOk.balance < 5}
 					onclick={openApiKeys}
-					title={`Vercel AI Gateway 크레딧 잔여 · 총 사용 $${me.credits.totalUsed.toFixed(2)}`}
+					title={`Vercel AI Gateway 크레딧 잔여 · 총 사용 $${creditsOk.totalUsed.toFixed(2)}`}
 				>
 					<span class="credits-k">▲ 크레딧</span>
-					<span class="credits-v">${me.credits.balance.toFixed(2)}</span>
+					<span class="credits-v">${creditsOk.balance.toFixed(2)}</span>
 				</button>
 			{/if}
 		</div>
@@ -352,6 +364,11 @@
 	}
 	.credits-badge.low {
 		border-color: color-mix(in srgb, var(--nsfw) 40%, transparent);
+	}
+	.credits-badge.warn {
+		color: #ffb04d;
+		border-color: #ffb04d66;
+		font-weight: 600;
 	}
 	.credits-badge.low .credits-v {
 		color: var(--nsfw);

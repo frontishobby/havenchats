@@ -9,6 +9,10 @@ export interface GatewayCredits {
 	balance: number;
 	totalUsed: number;
 }
+/** 저장된 Gateway 키가 401/403 으로 거부됨 → 뱃지에 '키 재등록' 경고. */
+export interface GatewayCreditsInvalid {
+	invalid: true;
+}
 
 /** GET /api/me — 레이아웃 데이터(유저 + 사이드바 첫 페이지 + 크레딧 뱃지). */
 export interface MeData {
@@ -16,7 +20,7 @@ export interface MeData {
 	recentChats: RecentChat[];
 	recentChatsCursor: string | null;
 	recentChatsHasMore: boolean;
-	credits: GatewayCredits | null;
+	credits: GatewayCredits | GatewayCreditsInvalid | null;
 }
 
 /** GET /api/home — 메인 캐릭터 그리드. */
