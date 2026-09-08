@@ -269,6 +269,40 @@ function multipart(meta: Record<string, unknown>, blob: Blob, contentType: strin
 	return body;
 }
 
+/** 이름으로 파일 1개 찾기(appDataFolder, 요청 1회). 없으면 null. */
+export async function findByName(token: string, name: string): Promise<DriveFile | null> {
+	const q = new URLSearchParams({
+		spaces: 'appDataFolder',
+		q: `name = '${name.replace(/'/g, "\\'")}' and trashed = false`,
+		pageSize: '1',
+		fields: `files(${FIELDS})`
+	});
+	const res = await call(token, `${API}/files?${q}`);
+	const j = (await res.json()) as { files?: Record<string, unknown>[] };
+	const f = j.files?.[0];
+	return f ? toFile(f) : null;
+}
+
+/** `since`(epoch ms) 이후에 바뀐 파일만(appDataFolder, 페이지 순회 — 보통 1회). 증분 인덱스 갱신용. */
+export async function listChangedSince(token: string, since: number): Promise<DriveFile[]> {
+	const out: DriveFile[] = [];
+	let pageToken: string | undefined;
+	do {
+		const q = new URLSearchParams({
+			spaces: 'appDataFolder',
+			q: `modifiedTime > '${new Date(since).toISOString()}' and trashed = false`,
+			pageSize: '1000',
+			fields: `nextPageToken,files(${FIELDS})`
+		});
+		if (pageToken) q.set('pageToken', pageToken);
+		const res = await call(token, `${API}/files?${q}`);
+		const j = (await res.json()) as { files?: Record<string, unknown>[]; nextPageToken?: string };
+		for (const f of j.files ?? []) out.push(toFile(f));
+		pageToken = j.nextPageToken;
+	} while (pageToken);
+	return out;
+}
+
 /** 새 파일 생성(multipart). `appProperties` 는 선택(DB 파일의 작성 기기 표시용). */
 export async function createFile(
 	token: string,

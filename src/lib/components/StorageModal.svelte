@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { storageModal } from '$lib/state/storageModal.svelte';
-	import { sync, connectDrive, disconnectDrive, syncNow, resetToDrive, remoteSummary, downloadAllImages, cancelSync, type RemoteSummary } from '$lib/local/sync.svelte';
+	import { sync, connectDrive, disconnectDrive, syncNow, resetToDrive, resolveConflict, remoteSummary, downloadAllImages, cancelSync, type RemoteSummary } from '$lib/local/sync.svelte';
 	import { exportBackup, importBackup, type BackupProgress } from '$lib/local/backup';
 
 	let busy = $state<string | null>(null);
@@ -69,11 +69,22 @@
 		guard('reset', async () => {
 			const pending = sync.pending > 0 ? ` 아직 올리지 않은 이 기기의 변경 ${sync.pending}건은 사라져요.` : '';
 			if (!confirm(`Drive 의 데이터로 이 기기를 맞출까요? 캐릭터·대화·설정이 Drive 것으로 바뀌고, Drive 와 다른 이미지 캐시는 지워져요.${pending}`)) return;
-			const r = await resetToDrive();
+			await resetToDrive();
 			if (sync.error) err = sync.error;
-			else msg = `Drive 기준으로 맞췄어요.${r.removed > 0 ? ` 이미지 캐시 ${r.removed}개를 정리했어요.` : ''}`;
+			else msg = 'Drive 기준으로 맞췄어요. 이미지는 볼 때 다시 내려받아요.';
 			remote = await remoteSummary();
 		});
+	const onResolve = (pick: 'remote' | 'local') =>
+		guard('resolve', async () => {
+			await resolveConflict(pick);
+			if (sync.error) err = sync.error;
+			else msg = pick === 'remote' ? 'Drive 데이터로 맞췄어요.' : '이 기기 데이터를 Drive 에 올렸어요.';
+			remote = await remoteSummary();
+		});
+	const fmtIso = (iso: string) => {
+		const d = new Date(iso);
+		return isNaN(d.getTime()) ? iso : d.toLocaleString('ko-KR');
+	};
 	const onDisconnect = () =>
 		guard('disconnect', async () => {
 			if (!confirm('Drive 연결을 해제할까요? 이 기기의 데이터는 그대로 남고, Drive 의 파일도 지우지 않아요.')) return;
@@ -149,6 +160,8 @@
 				? sync.phase || '동기화 중…'
 				: sync.status === 'needs-auth'
 					? 'Drive 재연결 필요'
+					: sync.status === 'conflict'
+						? '충돌 — 어느 쪽 데이터를 쓸지 골라 주세요'
 					: sync.status === 'error'
 						? '동기화 오류'
 						: sync.pending > 0
@@ -211,11 +224,24 @@
 						<p class="hint legend"><span class="sw haven"></span>Haven <span class="sw other"></span>다른 파일</p>
 					{/if}
 					{#if sync.error}<p class="err">{sync.error}</p>{/if}
+					{#if sync.conflict}
+						<div class="conflict">
+							<p class="hint">
+								Drive 와 이 기기가 서로 다른 변경을 갖고 있어요. (Drive 마지막 수정: {fmtIso(sync.conflict.remoteModified)}{sync.conflict.writer
+									? `, ${sync.conflict.writer.deviceName}`
+									: ''}) 고르기 전까지는 어느 쪽도 덮어쓰지 않아요.
+							</p>
+							<div class="actions">
+								<button class="primary" onclick={() => onResolve('remote')} disabled={!!busy}>Drive 데이터 사용</button>
+								<button class="ghost" onclick={() => onResolve('local')} disabled={!!busy}>이 기기 데이터 사용</button>
+							</div>
+						</div>
+					{/if}
 					<div class="actions">
 						{#if sync.status === 'syncing' && sync.cancellable}
 							<button class="primary" onclick={cancelSync}>동기화 취소</button>
 						{:else}
-							<button class="primary" onclick={onSync} disabled={!!busy || sync.status === 'syncing'}>지금 동기화</button>
+							<button class="primary" onclick={onSync} disabled={!!busy || sync.status === 'syncing' || !!sync.conflict}>지금 동기화</button>
 						{/if}
 						<button class="ghost" onclick={onDownloadAll} disabled={!!busy} title="다른 기기에서 만든 이미지는 볼 때 내려받아요. 오프라인 대비로 미리 전부 받으려면.">
 							{busy === 'download' ? sync.phase || '내려받는 중…' : '이미지 전부 내려받기'}
@@ -281,6 +307,16 @@
 {/if}
 
 <style>
+	.conflict {
+		margin: 10px 0 4px;
+		padding: 10px 12px;
+		border: 1px solid var(--warn, #d99a2b);
+		border-radius: 10px;
+		background: color-mix(in srgb, var(--warn, #d99a2b) 10%, transparent);
+	}
+	.conflict .hint {
+		margin: 0 0 8px;
+	}
 	.backdrop {
 		position: fixed;
 		inset: 0;

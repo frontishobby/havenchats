@@ -1,41 +1,51 @@
 /**
- * 저장소 모드 + Google Drive 동기화 엔진(반응형 상태 포함).
+ * 저장소 모드 + Google Drive 동기화 엔진(반응형 상태 포함). 2026-09-08 재설계.
  *
  * 모드(localStorage `haven:storage`):
  *  - 'local' : 이 기기(IndexedDB)에만 저장.
  *  - 'drive' : IndexedDB 를 캐시로 두고 Google Drive appDataFolder 와 동기화(원본 = Drive).
  *  - 미설정  : 랜딩(StorageLanding)에서 고른다.
  *
- * 동기화 단위: DB 스냅샷 `haven.sqlite` 통째 1파일 + 이미지 파일(name = R2 키).
- * 로컬 스냅샷이 저장될 때(runtime.onDatabaseSaved) dirty 표시 → 디바운스 후 Drive 에 업로드.
- * 이미지 put/delete(runtime.onObjectsChanged)는 대기열(IndexedDB 에 영속)에 넣고 같이 처리한다.
+ * 원칙
+ *  1. **앱은 로컬 데이터로 즉시 뜬다.** 동기화는 뒤에서 돌고 헤더 칩이 상태를 보인다. 화면을 막는 경우는 둘뿐:
+ *     저장소를 아직 안 골랐을 때, Drive 를 처음 연결하는데 로컬이 비어 있어 받아와야 할 때(`sync.ready=false`).
+ *  2. **Drive 가 원본.** 로컬 DB 는 `base`(마지막으로 맞춘 원격 DB 의 md5) + `dirty`(그 뒤 로컬 변경) 로 표현된다.
+ *  3. **한 번에 한 작업.** 모든 작업은 `reconcile` 하나로 수렴한다(부팅·저장 후 디바운스·주기 확인·수동 동기화 전부):
+ *       원격 없음            → push(생성)
+ *       base 없음(첫 연결)   → 로컬 비었으면 pull, 아니면 conflict
+ *       원격 == base         → dirty 면 push
+ *       원격 != base         → clean 이면 pull, dirty 면 conflict
+ *     push 는 이 판정 직후 같은 작업 안에서만 일어나므로 다른 기기 변경을 덮어쓰지 않는다(Drive 에 CAS 가 없어
+ *     작업 길이만큼의 경쟁 창은 남는다 — 1인 전제).
+ *  4. **이미지는 대기열만.** put/delete 대기열(IndexedDB 영속)을 처리할 뿐, 로컬 전체를 원격과 대조하지 않는다
+ *     (예전 '원격에 없는 로컬 파일 전부 올리기' 스캔이 모바일에서 수십 초를 먹던 원인). 백업 가져오기만 명시적으로
+ *     전체를 대기열에 넣는다. 다른 기기가 올린 이미지는 볼 때 지연 다운로드(서비스워커/miss 핸들러, 인덱스 필요).
+ *  5. **인덱스는 증분 갱신.** pull 뒤 `modifiedTime > 마지막 동기화` 로 바뀐 파일만 받아(요청 1회) 인덱스에 합치고,
+ *     그중 md5 가 달라진 키의 로컬 캐시를 지운다(같은 키에 덮어쓰는 썸네일 교체가 다른 기기에서도 보이게).
+ *     전체 목록(`listAll`)은 첫 연결·'Drive 기준으로 맞추기'·이미지 전부 내려받기에서만.
  *
- * 다기기(PocketRisu 의 서버 동기화를 Drive 위에 흉내): 탭이 보이는 동안 주기적으로(`POLL_MS`) 원격 DB 의
- * md5 를 확인해, 다른 기기가 썼고 로컬이 clean 이면 조용히 pull(`invalidateAll`). 탭 포커스/표시 전환 시 즉시 확인.
- * 모든 push 는 직전에 원격 md5 가 마지막 동기화 기록과 같은지 확인(선행조건)해서 다른 기기 변경을 덮어쓰지 않는다.
- * DB 파일의 appProperties 에 마지막으로 쓴 기기(`deviceId`/`deviceName`)를 남겨 '다른 기기 사용 중' 을 표시한다.
+ * 다기기: 탭이 보이는 동안 `POLL_MS`(다른 기기가 최근 썼으면 `POLL_ACTIVE_MS`)마다 원격 DB 메타 1회 조회 + 탭 표시/
+ * 포커스 전환 시 즉시. 바뀌었으면 reconcile. 채팅 스트림 등 요청이 진행 중(`rt.busy`)이면 pull 을 다음으로 미룬다.
+ * DB 파일 appProperties 에 마지막으로 쓴 기기(`deviceId`/`deviceName`)를 남겨 '다른 기기 사용 중' 을 표시한다.
  *
- * 충돌: 원격 DB 의 md5 가 마지막 동기화 기록과 다르고(다른 기기가 씀) 로컬도 dirty 면
- * 자동으로 고르지 않고 `conflict` 를 띄워 유저가 고른다(시작 시·주기 확인·push 직전 모두 같은 규칙).
+ * 충돌은 화면을 막지 않는다(첫 연결 중만 랜딩에서 선택). `status='conflict'` 칩 → 저장소 모달에서 어느 쪽을 쓸지 고르고,
+ * 고르기 전까지 push/pull 은 멈춘다(데이터는 양쪽 다 보존).
  */
 import { invalidateAll } from '$app/navigation';
-import { kvGet, kvSet, kvDelete, objDelete, objGet, objKeys, objPut, type StoredObject } from './idb';
-import {
-	getLocalRuntime,
-	onDatabaseSaved,
-	onObjectsChanged,
-	type LocalRuntime
-} from './runtime';
+import { kvGet, kvSet, kvDelete, objClear, objDelete, objGet, objKeys, objPut, type StoredObject } from './idb';
+import { getLocalRuntime, onDatabaseSaved, onObjectsChanged, type LocalRuntime } from './runtime';
 import {
 	createFile,
 	deleteFile,
 	download,
 	ensureToken,
+	findByName,
 	forgetToken,
+	getMeta,
+	getQuota,
 	hasStoredToken,
 	listAll,
-	getQuota,
-	getMeta,
+	listChangedSince,
 	updateFile,
 	currentToken,
 	DriveAuthError,
@@ -45,10 +55,12 @@ import {
 } from './drive';
 
 export type StorageMode = 'unset' | 'local' | 'drive';
-export type SyncStatus = 'off' | 'syncing' | 'idle' | 'needs-auth' | 'error';
+export type SyncStatus = 'off' | 'idle' | 'syncing' | 'conflict' | 'needs-auth' | 'error';
 
 const MODE_KEY = 'haven:storage';
 const DB_NAME = 'haven.sqlite';
+const DB_MIME = 'application/x-sqlite3';
+/** 로컬 저장 뒤 이 시간 안에 더 저장이 없으면 올린다. */
 const PUSH_DEBOUNCE_MS = 3000;
 /** 원격 변경 확인 주기(탭이 보일 때만). 다른 기기가 최근에 썼으면 짧게. */
 const POLL_MS = 20_000;
@@ -58,9 +70,9 @@ const OTHER_ACTIVE_MS = 3 * 60_000;
 /** 이미지 업로드/다운로드 동시 수. */
 const PARALLEL = 4;
 
-// IndexedDB kv 키
+// IndexedDB kv 키(이전 버전과 같은 이름 — 기존 기기의 상태를 그대로 이어받는다)
 const K_INDEX = 'drive:index'; // Record<name, {id, md5}>
-const K_DB = 'drive:db'; // {id, md5} — 마지막 push/pull 시점의 원격 DB
+const K_BASE = 'drive:db'; // {id, md5} — 마지막으로 맞춘 원격 DB
 const K_DIRTY = 'drive:dbDirty';
 const K_PUTS = 'drive:pendingPuts';
 const K_DELS = 'drive:pendingDeletes';
@@ -95,8 +107,9 @@ export const sync = $state({
 	status: 'off' as SyncStatus,
 	/** 진행 설명(랜딩·모달 표시용). */
 	phase: '',
-	/** 초기 동기화(또는 로컬 모드 선택)가 끝나 앱을 렌더해도 되는지. 로컬 모드는 즉시. */
+	/** 앱을 렌더해도 되는지. false 면 StorageLanding 이 덮는다(모드 미선택, 첫 연결 pull 중, 첫 연결 충돌). */
 	ready: initialMode === 'local',
+	/** 올릴 것(DB dirty 1 + 이미지 대기열). */
 	pending: 0,
 	lastSyncAt: null as number | null,
 	error: null as string | null,
@@ -113,24 +126,16 @@ export const sync = $state({
 	cancellable: false
 });
 
-let abortFlag = false;
-
-/** 진행 중인 이미지 업로드/다운로드를 중단한다(대기열은 남아 다음에 이어짐). */
-export function cancelSync(): void {
-	if (sync.status === 'syncing') abortFlag = true;
-}
-
 let rt: LocalRuntime | null = null;
 let index: Record<string, RemoteRef> = {};
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
-let running: Promise<void> | null = null;
-let hooked = false;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let lastPollAt = 0;
-/** 세션당 1회: 덮어쓰기 키의 로컬 캐시를 원격과 직접 대조했는지. */
-let cacheVerified = false;
-/** 같은 키에 새 내용을 덮어쓰는 이미지 접두(썸네일·상세·그림체·아바타). 장면·채팅 이미지는 id 별 불변. */
-const OVERWRITABLE_PREFIXES = ['char/', 'charfull/', 'style/', 'avatar/'];
+let running: Promise<void> | null = null;
+let hooked = false;
+let abortFlag = false;
+
+// ── 유틸 ────────────────────────────────────────────────────
 
 function writeMode(m: StorageMode) {
 	sync.mode = m;
@@ -149,60 +154,26 @@ async function refreshPendingCount() {
 	sync.pending = puts.length + dels.length + (dirty ? 1 : 0);
 }
 
-/** 앱 시작 시(런타임 부팅 후) 호출. Drive 모드면 초기 동기화를 시도한다. */
-export async function initStorage(): Promise<void> {
-	rt = getLocalRuntime();
-	sync.mode = readMode();
-	sync.lastSyncAt = (await kvGet<number>(K_LAST)) ?? null;
-	index = (await kvGet<Record<string, RemoteRef>>(K_INDEX)) ?? {};
-	await refreshPendingCount();
-	await ensureDeviceIdentity();
-	hookRuntime();
-	// 로컬에 없는 이미지(다른 기기에서 만든 것)는 볼 때 Drive 에서 내려받는다.
-	rt.r2.setMissHandler((key) => (sync.mode === 'drive' ? fetchImageFromDrive(key) : Promise.resolve(null)));
-
-	if (sync.mode === 'local') {
-		sync.status = 'off';
-		sync.ready = true;
-		return;
-	}
-	if (sync.mode === 'drive') {
-		if (currentToken()) {
-			await runInitialSync();
-		} else {
-			// 토큰 만료 — 팝업은 제스처가 필요하니 랜딩에서 '다시 연결' 을 누르게 한다.
-			sync.status = 'needs-auth';
-			sync.ready = false;
-		}
-	}
+async function isDirty(): Promise<boolean> {
+	return ((await kvGet<boolean>(K_DIRTY)) ?? false) || !!rt?.dirty;
 }
 
-function hookRuntime() {
-	if (hooked) return;
-	hooked = true;
-	onDatabaseSaved(() => {
-		if (sync.mode !== 'drive') return;
-		void kvSet(K_DIRTY, true).then(refreshPendingCount);
-		schedulePush();
-	});
-	onObjectsChanged((kind, keys) => {
-		if (sync.mode !== 'drive') return;
-		void enqueue(kind === 'put' ? K_PUTS : K_DELS, keys, kind === 'put' ? K_DELS : K_PUTS).then(() => {
-			void refreshPendingCount();
-			schedulePush();
-		});
-	});
-	window.addEventListener('online', () => {
-		if (sync.mode === 'drive' && sync.pending > 0) schedulePush(500);
-	});
-	const onVisible = () => {
-		if (document.visibilityState === 'visible') void poll(true);
-	};
-	document.addEventListener('visibilitychange', onVisible);
-	window.addEventListener('focus', onVisible);
+async function localIsEmpty(): Promise<boolean> {
+	const r = rt!.db.exec(
+		'SELECT (SELECT count(*) FROM characters) + (SELECT count(*) FROM chat_sessions) + (SELECT count(*) FROM art_styles) + (SELECT count(*) FROM prompt_modules)'
+	);
+	return Number(r[0]?.values[0]?.[0] ?? 0) === 0;
 }
 
-/** 기기 id 는 브라우저 프로필당 1회 생성해 kv 에 보관, 이름은 UA 로 대충(iPhone/Android/Mac/Windows/Linux) + id 앞 4자. */
+async function saveIndex() {
+	await kvSet(K_INDEX, index);
+}
+
+function toRef(f: DriveFile): RemoteRef {
+	return { id: f.id, md5: f.md5Checksum };
+}
+
+/** 기기 id 는 브라우저 프로필당 1회 생성해 kv 에 보관, 이름은 UA 로 대충(iPhone/Android/Mac/…) + id 앞 4자. */
 async function ensureDeviceIdentity(): Promise<void> {
 	let id = await kvGet<string>(K_DEVICE);
 	if (!id) {
@@ -244,7 +215,89 @@ function updateOtherActive(): void {
 	sync.otherActive = !!w && w.deviceId !== sync.deviceId && Date.now() - w.at < OTHER_ACTIVE_MS;
 }
 
+// ── 시작 ────────────────────────────────────────────────────
+
+/** 앱 시작 시(런타임 부팅 후) 호출. Drive 모드면 뒤에서 reconcile 을 돌린다(로컬이 비어 있지 않으면 화면은 바로 연다). */
+export async function initStorage(): Promise<void> {
+	rt = getLocalRuntime();
+	sync.mode = readMode();
+	sync.lastSyncAt = (await kvGet<number>(K_LAST)) ?? null;
+	index = (await kvGet<Record<string, RemoteRef>>(K_INDEX)) ?? {};
+	await refreshPendingCount();
+	await ensureDeviceIdentity();
+	hookRuntime();
+	// 로컬에 없는 이미지(다른 기기에서 만든 것)는 볼 때 Drive 에서 내려받는다.
+	rt.r2.setMissHandler((key) => (sync.mode === 'drive' ? fetchImageFromDrive(key) : Promise.resolve(null)));
+
+	if (sync.mode === 'local') {
+		sync.status = 'off';
+		sync.ready = true;
+		return;
+	}
+	if (sync.mode !== 'drive') return; // 미설정 → 랜딩
+
+	// 첫 연결인데 로컬이 비어 있으면 받아올 때까지만 막는다. 그 외엔 로컬 데이터로 바로 연다.
+	const base = await kvGet<RemoteRef>(K_BASE);
+	sync.ready = !!base || !(await localIsEmpty());
+	if (currentToken()) {
+		await runOp(reconcile);
+	} else {
+		// 토큰 만료 — 팝업은 제스처가 필요하니 칩(또는 랜딩)의 '다시 연결' 을 기다린다. 변경은 dirty 로 쌓인다.
+		sync.status = 'needs-auth';
+	}
+	startPolling();
+}
+
+function hookRuntime() {
+	if (hooked) return;
+	hooked = true;
+	onDatabaseSaved(() => {
+		if (sync.mode !== 'drive') return;
+		void kvSet(K_DIRTY, true).then(refreshPendingCount);
+		schedulePush();
+	});
+	onObjectsChanged((kind, keys) => {
+		if (sync.mode !== 'drive') return;
+		void enqueue(kind === 'put' ? K_PUTS : K_DELS, keys, kind === 'put' ? K_DELS : K_PUTS).then(() => {
+			void refreshPendingCount();
+			schedulePush();
+		});
+	});
+	window.addEventListener('online', () => {
+		if (sync.mode === 'drive' && sync.pending > 0) schedulePush(500);
+	});
+	const onVisible = () => {
+		if (document.visibilityState === 'visible') void poll(true);
+	};
+	document.addEventListener('visibilitychange', onVisible);
+	window.addEventListener('focus', onVisible);
+}
+
+async function enqueue(key: string, keys: string[], oppositeKey: string) {
+	const cur = new Set((await kvGet<string[]>(key)) ?? []);
+	for (const k of keys) cur.add(k);
+	await kvSet(key, [...cur]);
+	// 같은 키가 반대 대기열에 있으면 제거(put 후 delete, delete 후 put 정리)
+	const opp = (await kvGet<string[]>(oppositeKey)) ?? [];
+	const filtered = opp.filter((k) => !keys.includes(k));
+	if (filtered.length !== opp.length) await kvSet(oppositeKey, filtered);
+}
+
+function schedulePush(delay = PUSH_DEBOUNCE_MS) {
+	if (pushTimer) clearTimeout(pushTimer);
+	pushTimer = setTimeout(() => {
+		pushTimer = null;
+		if (sync.mode === 'drive' && sync.ready && !sync.conflict) void runOp(reconcile);
+	}, delay);
+}
+
 // ── 주기 확인(다른 기기 변경 감지) ────────────────────────────
+
+function startPolling(): void {
+	if (pollTimer) return;
+	schedulePoll();
+}
+
 function schedulePoll(): void {
 	if (pollTimer) clearTimeout(pollTimer);
 	pollTimer = setTimeout(
@@ -261,12 +314,7 @@ function stopPolling(): void {
 	pollTimer = null;
 }
 
-/**
- * 원격 DB md5 를 한 번 확인한다(요청 1회). 다른 기기가 썼으면:
- *  - 로컬 clean → 바로 pull + 화면 갱신(다른 기기가 올린 이미지를 알기 위해 인덱스도 갱신).
- *  - 로컬 dirty → push 를 앞당긴다(pushDb 선행조건에서 conflict 로 이어짐).
- * 팝업이 필요한 토큰 갱신은 하지 않는다(제스처 경로가 담당).
- */
+/** 원격 DB 메타 1회 조회(요청 1회). 바뀌었으면 reconcile. 팝업이 필요한 토큰 갱신은 하지 않는다(제스처 경로가 담당). */
 async function poll(force = false): Promise<void> {
 	if (sync.mode !== 'drive' || !sync.ready || sync.conflict || running) return;
 	if (!force && document.visibilityState === 'hidden') return;
@@ -284,43 +332,13 @@ async function poll(force = false): Promise<void> {
 	}
 	if (!meta) return;
 	noteWriter(meta);
-	const rec = await kvGet<RemoteRef>(K_DB);
-	if (!rec?.md5 || !meta.md5Checksum || meta.md5Checksum === rec.md5) return;
-	const dirty = ((await kvGet<boolean>(K_DIRTY)) ?? false) || rt!.dirty;
-	if (dirty) {
-		schedulePush(0);
-		return;
-	}
-	// 요청(채팅 스트림 등)이 진행 중이면 DB 를 바꾸지 않고 다음 확인으로 미룬다.
-	if (rt!.busy) return;
-	await run(async (token) => {
-		sync.phase = '다른 기기의 변경 받는 중…';
-		index[DB_NAME] = { id: meta!.id, md5: meta!.md5Checksum };
-		await kvSet(K_INDEX, index);
-		await pullDb(token);
-		await finishOk();
-	});
-}
-
-async function enqueue(key: string, keys: string[], oppositeKey: string) {
-	const cur = new Set((await kvGet<string[]>(key)) ?? []);
-	for (const k of keys) cur.add(k);
-	await kvSet(key, [...cur]);
-	// 같은 키가 반대 대기열에 있으면 제거(put 후 delete, delete 후 put 정리)
-	const opp = (await kvGet<string[]>(oppositeKey)) ?? [];
-	const filtered = opp.filter((k) => !keys.includes(k));
-	if (filtered.length !== opp.length) await kvSet(oppositeKey, filtered);
-}
-
-function schedulePush(delay = PUSH_DEBOUNCE_MS) {
-	if (pushTimer) clearTimeout(pushTimer);
-	pushTimer = setTimeout(() => {
-		pushTimer = null;
-		void flush();
-	}, delay);
+	const base = await kvGet<RemoteRef>(K_BASE);
+	if (base?.md5 && meta.md5Checksum === base.md5) return;
+	await runOp(reconcile);
 }
 
 // ── 사용자 액션 ──────────────────────────────────────────────
+
 /** 랜딩: 이 기기에만 저장. */
 export function chooseLocal(): void {
 	writeMode('local');
@@ -328,7 +346,7 @@ export function chooseLocal(): void {
 	sync.ready = true;
 }
 
-/** 랜딩/설정: Drive 연결(유저 제스처 안에서 호출 — GIS 팝업). */
+/** 랜딩/설정: Drive 연결(유저 제스처 안에서 호출 — GIS 팝업). 첫 연결은 판정이 끝날 때까지 랜딩이 진행을 보인다. */
 export async function connectDrive(): Promise<void> {
 	sync.error = null;
 	try {
@@ -339,7 +357,9 @@ export async function connectDrive(): Promise<void> {
 		return;
 	}
 	writeMode('drive');
-	await runInitialSync();
+	sync.ready = false;
+	await runOp(reconcile);
+	startPolling();
 }
 
 /** Drive 연결 해제(로컬 데이터는 그대로, 원격 파일도 지우지 않음). */
@@ -350,14 +370,14 @@ export async function disconnectDrive(): Promise<void> {
 	index = {};
 	sync.writer = null;
 	sync.otherActive = false;
-	await Promise.all([kvDelete(K_INDEX), kvDelete(K_DB), kvDelete(K_DIRTY), kvDelete(K_PUTS), kvDelete(K_DELS)]);
+	await Promise.all([kvDelete(K_INDEX), kvDelete(K_BASE), kvDelete(K_DIRTY), kvDelete(K_PUTS), kvDelete(K_DELS)]);
 	sync.status = 'off';
 	sync.pending = 0;
 	sync.conflict = null;
 	sync.ready = true;
 }
 
-/** 로컬 모드에서 '오프라인으로 계속'(토큰 만료 상태로 앱 진입 — 변경은 대기열에 쌓임). */
+/** 랜딩(첫 연결·토큰 만료)에서 '연결 없이 계속' — 변경은 dirty 로 쌓여 다음 연결 때 올라간다. */
 export function continueOffline(): void {
 	sync.ready = true;
 }
@@ -366,12 +386,11 @@ export function continueOffline(): void {
 export async function resolveConflict(pick: 'remote' | 'local'): Promise<void> {
 	if (!sync.conflict) return;
 	sync.conflict = null;
-	await run(async (token) => {
-		sync.phase = pick === 'remote' ? 'Drive 데이터 받는 중…' : 'Drive 에 올리는 중…';
-		if (pick === 'remote') await pullDb(token);
-		else await pushDb(token, { verified: true });
-		await syncImages(token);
-		await finishOk();
+	await runOp(async (token) => {
+		const remote = index[DB_NAME] ? await getMeta(token, index[DB_NAME].id) : await findByName(token, DB_NAME);
+		if (pick === 'remote' && remote) await pull(token, remote);
+		else await push(token, remote);
+		await processImageQueue(token);
 	});
 }
 
@@ -385,42 +404,30 @@ export async function syncNow(): Promise<void> {
 		sync.status = 'needs-auth';
 		return;
 	}
-	if (!sync.ready) await runInitialSync();
-	else await flush();
+	await runOp(reconcile);
+	startPolling();
 }
 
 /**
  * 설정 모달 'Drive 기준으로 맞추기'(제스처 안): Drive 를 원본으로 이 기기를 통째 맞춘다 — **올리지 않은 로컬 변경은 버린다**.
- *  ① 이미지 대기열(put/delete) 비움 ② Drive 에 없는 로컬 이미지 삭제 + 덮어쓰기 키(썸네일 등) 내용 대조
- *  ③ 인덱스 재구성 ④ DB 를 Drive 것으로 교체 + 화면 갱신. 결과는 지운 이미지 수. 실패는 sync.error.
+ * 이미지 대기열과 로컬 이미지 캐시를 전부 비우고(전부 Drive 에서 지연 다운로드 가능), 인덱스를 전체 목록으로 다시 만들고,
+ * DB 를 Drive 것으로 교체한다. 다른 기기가 바꾼 썸네일이 옛것으로 보이는 등 캐시가 꼬였을 때의 복구용.
  */
-export async function resetToDrive(): Promise<{ removed: number }> {
-	if (sync.mode !== 'drive') return { removed: 0 };
+export async function resetToDrive(): Promise<void> {
+	if (sync.mode !== 'drive') return;
 	await ensureToken(true);
-	let removed = 0;
-	await run(async (token) => {
-		sync.phase = 'Drive 확인 중…';
+	await runOp(async (token) => {
 		sync.conflict = null;
+		sync.phase = '이미지 캐시 비우는 중…';
 		await kvSet(K_PUTS, []);
 		await kvSet(K_DELS, []);
-		const files = await listAll(token);
-		const byName = new Set(files.map((f) => f.name));
-		const stale = new Set((await objKeys()).filter((k) => !byName.has(k)));
-		sync.phase = '이미지 캐시 대조 중…';
-		for (const k of await findStaleOverwritable(files, new Set())) stale.add(k);
-		if (stale.size) await objDelete([...stale]);
-		removed = stale.size;
-		index = {};
-		for (const f of files) index[f.name] = { id: f.id, md5: f.md5Checksum };
-		await kvSet(K_INDEX, index);
-		cacheVerified = true;
-		if (index[DB_NAME]) {
-			sync.phase = 'Drive 데이터 받는 중…';
-			await pullDb(token, { refreshIndex: false });
-		}
-		await finishOk();
+		await objClear();
+		sync.phase = 'Drive 목록 받는 중…';
+		await loadFullIndex(token);
+		const remote = index[DB_NAME] ? await getMeta(token, index[DB_NAME].id) : null;
+		if (remote) await pull(token, remote, { refreshIndex: false });
+		else await push(token, null);
 	});
-	return { removed };
 }
 
 /** 유저 제스처 안에서 호출 — 토큰 만료가 임박했으면 미리 갱신(팝업이 바로 닫힘). */
@@ -433,8 +440,18 @@ export function refreshTokenInGesture(): void {
 		.catch(() => {});
 }
 
+/** 진행 중인 이미지 업로드/다운로드를 중단한다(대기열은 남아 다음에 이어짐). */
+export function cancelSync(): void {
+	if (sync.status === 'syncing') abortFlag = true;
+}
+
 // ── 엔진 ────────────────────────────────────────────────────
-async function run(job: (token: string) => Promise<void>): Promise<void> {
+
+/**
+ * 작업 하나를 직렬로 실행한다(동시에 둘 이상 돌지 않음). 토큰은 저장된 것만 쓴다(팝업 없음 → 없으면 needs-auth).
+ * 정상 종료 + 충돌 없음 → idle/ready. 충돌 → status 'conflict'(ready 는 그대로 — 첫 연결이면 랜딩이 보여준다).
+ */
+async function runOp(job: (token: string) => Promise<void>): Promise<void> {
 	if (running) await running.catch(() => {});
 	running = (async () => {
 		let token: string;
@@ -448,15 +465,23 @@ async function run(job: (token: string) => Promise<void>): Promise<void> {
 		sync.error = null;
 		try {
 			await job(token);
+			if (sync.conflict) {
+				sync.status = 'conflict';
+			} else {
+				sync.lastSyncAt = Date.now();
+				await kvSet(K_LAST, sync.lastSyncAt);
+				sync.status = 'idle';
+				sync.ready = true;
+			}
 		} catch (e) {
 			if (e instanceof SyncCancelled) {
 				sync.status = 'idle';
 				sync.ready = true;
-			} else if (e instanceof DriveHttpError && e.status === 401) {
+			} else if (e instanceof SyncDeferred) {
+				sync.status = 'idle';
+			} else if ((e instanceof DriveHttpError && e.status === 401) || e instanceof DriveAuthError) {
 				sync.status = 'needs-auth';
-			} else if (e instanceof DriveAuthError) {
-				sync.status = 'needs-auth';
-				sync.error = e.message;
+				if (e instanceof DriveAuthError) sync.error = e.message;
 			} else {
 				sync.status = 'error';
 				sync.error = e instanceof Error ? e.message : String(e);
@@ -464,6 +489,7 @@ async function run(job: (token: string) => Promise<void>): Promise<void> {
 			}
 		} finally {
 			sync.phase = '';
+			updateOtherActive();
 			await refreshPendingCount();
 		}
 	})();
@@ -471,192 +497,145 @@ async function run(job: (token: string) => Promise<void>): Promise<void> {
 	running = null;
 }
 
-async function finishOk() {
-	sync.lastSyncAt = Date.now();
-	await kvSet(K_LAST, sync.lastSyncAt);
-	sync.status = 'idle';
-	sync.ready = true;
-	updateOtherActive();
-	if (!pollTimer) schedulePoll();
-}
-
-async function runInitialSync(): Promise<void> {
-	await run(async (token) => {
-		sync.phase = 'Drive 확인 중…';
-		const files = await refreshIndex(token);
-
-		const remoteDb = files.find((f) => f.name === DB_NAME) ?? null;
-		if (remoteDb) noteWriter(remoteDb);
-		const rec = await kvGet<RemoteRef>(K_DB);
-		const dirty = (await kvGet<boolean>(K_DIRTY)) ?? false;
-		const conflict = () => ({ remoteModified: remoteDb!.modifiedTime, writer: sync.writer });
-
-		if (!remoteDb) {
-			sync.phase = 'Drive 에 처음 올리는 중…';
-			await pushDb(token, { verified: true });
-		} else if (!rec) {
-			// 이 기기에서 처음 연결. 로컬이 비어 있으면 받아오고, 데이터가 있으면 유저가 고른다.
-			if (await localIsEmpty()) {
-				sync.phase = 'Drive 데이터 받는 중…';
-				await pullDb(token);
-			} else {
-				sync.conflict = conflict();
-				sync.status = 'idle';
-				return;
-			}
-		} else if (remoteDb.md5Checksum === rec.md5) {
-			if (dirty) {
-				sync.phase = '변경 사항 올리는 중…';
-				await pushDb(token, { verified: true });
-			}
-		} else {
-			// 원격이 다른 기기에서 바뀜.
-			if (!dirty) {
-				sync.phase = 'Drive 데이터 받는 중…';
-				await pullDb(token, { refreshIndex: false });
-			} else {
-				sync.conflict = conflict();
-				sync.status = 'idle';
-				return;
-			}
-		}
-		// DB 가 맞춰졌으면 화면을 연다. 이미지 업로드는 뒤에서(헤더 칩에 진행 표시, 취소 가능).
-		sync.ready = true;
-		await syncImages(token);
-		await finishOk();
-	});
-}
-
-/**
- * 백업 가져오기 직후: 로컬 이미지가 zip 내용으로 통째 바뀌었으므로 Drive 도 그에 맞춘다 —
- * zip 에 없는 원격 이미지는 삭제 대기열에, 대기 중이던 업로드 목록은 비운다(없어진 키 업로드 방지).
- */
-export async function reconcileAfterImport(): Promise<void> {
-	if (sync.mode !== 'drive') return;
-	const local = new Set(await objKeys());
-	const extras = Object.keys(index).filter((k) => k !== DB_NAME && !local.has(k));
-	await kvSet(K_PUTS, []);
-	await kvSet(K_DELS, extras);
-	await refreshPendingCount();
-	schedulePush(500);
-}
-
-async function localIsEmpty(): Promise<boolean> {
-	const r = rt!.db.exec(
-		'SELECT (SELECT count(*) FROM characters) + (SELECT count(*) FROM chat_sessions) + (SELECT count(*) FROM art_styles) + (SELECT count(*) FROM prompt_modules)'
-	);
-	return Number(r[0]?.values[0]?.[0] ?? 0) === 0;
-}
-
-/**
- * 로컬 DB 스냅샷을 Drive 에 올린다. `verified` 가 아니면 먼저 원격 md5 가 마지막 동기화 기록과 같은지
- * 확인하고, 다른 기기가 그새 썼으면 올리지 않고 `conflict` 를 띄운다(false 반환). 원격 파일이 지워졌으면 새로 만든다.
- */
-async function pushDb(token: string, opts: { verified?: boolean } = {}): Promise<boolean> {
-	const existing = index[DB_NAME];
-	if (existing && !opts.verified) {
-		const [meta, rec] = await Promise.all([getMeta(token, existing.id), kvGet<RemoteRef>(K_DB)]);
-		if (!meta) {
-			delete index[DB_NAME];
-		} else if (rec?.md5 && meta.md5Checksum && meta.md5Checksum !== rec.md5) {
-			noteWriter(meta);
-			index[DB_NAME] = { id: meta.id, md5: meta.md5Checksum };
-			await kvSet(K_INDEX, index);
-			sync.conflict = { remoteModified: meta.modifiedTime, writer: sync.writer };
-			return false;
+/** 핵심: 원격 DB 와 로컬의 관계를 판정해 필요한 한 가지를 하고, 이미지 대기열을 처리한다. */
+async function reconcile(token: string): Promise<void> {
+	sync.phase = 'Drive 확인 중…';
+	let remote: DriveFile | null = null;
+	if (index[DB_NAME]) {
+		remote = await getMeta(token, index[DB_NAME].id);
+		if (!remote) delete index[DB_NAME]; // 원격에서 지워짐
+	}
+	if (!remote && !index[DB_NAME]) {
+		remote = await findByName(token, DB_NAME);
+		if (remote) {
+			index[DB_NAME] = toRef(remote);
+			await saveIndex();
 		}
 	}
-	await rt!.flush();
-	const bytes = rt!.exportDatabase();
-	const blob = new Blob([bytes as BlobPart], { type: 'application/x-sqlite3' });
-	const cur = index[DB_NAME];
-	const f: DriveFile = cur
-		? await updateFile(token, cur.id, blob, 'application/x-sqlite3', deviceProps())
-		: await createFile(token, DB_NAME, blob, 'application/x-sqlite3', deviceProps());
-	index[DB_NAME] = { id: f.id, md5: f.md5Checksum };
-	await kvSet(K_INDEX, index);
-	await kvSet(K_DB, index[DB_NAME]);
-	await kvSet(K_DIRTY, false);
-	noteWriter(f);
-	return true;
+	if (remote) noteWriter(remote);
+
+	const base = await kvGet<RemoteRef>(K_BASE);
+	const dirty = await isDirty();
+
+	if (!remote) {
+		sync.phase = 'Drive 에 처음 올리는 중…';
+		await push(token, null);
+	} else if (!base) {
+		// 이 기기에서 처음 연결. 로컬이 비어 있으면 받아오고, 데이터가 있으면 유저가 고른다.
+		if (await localIsEmpty()) {
+			await pull(token, remote);
+		} else {
+			setConflict(remote);
+			return;
+		}
+	} else if (remote.md5Checksum === base.md5) {
+		if (dirty) await push(token, remote);
+	} else if (!dirty) {
+		// 다른 기기가 썼고 이쪽은 깨끗함 → 받아온다. 요청(채팅 스트림 등)이 진행 중이면 다음 확인으로.
+		if (rt!.busy) throw new SyncDeferred();
+		await pull(token, remote);
+	} else {
+		setConflict(remote);
+		return;
+	}
+	await processImageQueue(token);
 }
 
-/**
- * 원격 DB 로 로컬을 덮어쓴다. 기본으로 파일 인덱스도 다시 받는다 — 다른 기기가 올린 이미지는
- * 인덱스에 있어야 지연 다운로드(miss 핸들러/서비스워커)가 찾을 수 있다. 초기 동기화는 직전에 받았으니 생략.
- */
-async function pullDb(token: string, opts: { refreshIndex?: boolean } = {}): Promise<void> {
-	const ref = index[DB_NAME];
-	if (!ref) return;
-	const blob = await download(token, ref.id);
+function setConflict(remote: DriveFile): void {
+	index[DB_NAME] = toRef(remote);
+	void saveIndex();
+	sync.conflict = { remoteModified: remote.modifiedTime, writer: sync.writer };
+}
+
+/** 로컬 DB 스냅샷을 Drive 에 올린다(`remote` 가 있으면 그 파일을 교체). base 갱신, dirty 해제. */
+async function push(token: string, remote: DriveFile | null): Promise<void> {
+	sync.phase = '변경 사항 올리는 중…';
+	await rt!.flush();
+	const bytes = rt!.exportDatabase();
+	const blob = new Blob([bytes as BlobPart], { type: DB_MIME });
+	const f = remote
+		? await updateFile(token, remote.id, blob, DB_MIME, deviceProps())
+		: await createFile(token, DB_NAME, blob, DB_MIME, deviceProps());
+	index[DB_NAME] = toRef(f);
+	await saveIndex();
+	await kvSet(K_BASE, index[DB_NAME]);
+	await kvSet(K_DIRTY, false);
+	noteWriter(f);
+}
+
+/** 원격 DB 로 로컬을 덮어쓴다. base 갱신, dirty 해제, 인덱스 증분 갱신(+낡은 캐시 정리), 화면 갱신. */
+async function pull(token: string, remote: DriveFile, opts: { refreshIndex?: boolean } = {}): Promise<void> {
+	sync.phase = 'Drive 데이터 받는 중…';
+	const blob = await download(token, remote.id);
 	const bytes = new Uint8Array(await blob.arrayBuffer());
 	// replaceDatabase 는 flush → onDatabaseSaved 를 부르므로 dirty 가 다시 켜진다 → 뒤에서 끈다.
 	await rt!.replaceDatabase(bytes);
-	await kvSet(K_DB, ref);
+	index[DB_NAME] = toRef(remote);
+	await saveIndex();
+	await kvSet(K_BASE, index[DB_NAME]);
 	await kvSet(K_DIRTY, false);
 	if (opts.refreshIndex !== false) await refreshIndex(token);
 	await invalidateAll();
 }
 
+/** 전체 목록으로 인덱스를 다시 만든다(첫 연결·복구·전부 내려받기). */
+async function loadFullIndex(token: string): Promise<void> {
+	const files = await listAll(token);
+	index = {};
+	for (const f of files) index[f.name] = toRef(f);
+	await saveIndex();
+}
+
 /**
- * Drive 파일 목록으로 인덱스를 다시 만들고, 그 사이 **다른 기기가 바꾼 이미지의 로컬 캐시를 지운다**:
- *  - md5 가 달라진 키(썸네일 `char/<id>.webp` 처럼 같은 키에 덮어쓰는 교체) → 지워서 다음 표시 때 지연 다운로드.
- *  - 원격에서 사라진 키 → 지워서 고아 캐시가 남거나 syncImages 가 '원격에 없는 로컬 파일' 로 다시 올리지 않게.
- * 이 기기가 아직 올리지 않은 키(put 대기열)는 이 기기 것이 최신이므로 건드리지 않는다.
+ * 인덱스 갱신. 인덱스가 DB 파일뿐이면(첫 연결) 전체 목록, 아니면 마지막 동기화 이후 바뀐 파일만(요청 1회).
+ * 바뀐 파일 중 인덱스의 md5 와 다른 키는 다른 기기가 교체한 것 → 로컬 캐시를 지워 다음 표시 때 새로 받게 한다.
+ * 이 기기가 올릴 차례인 키(put 대기열)는 이 기기 것이 최신이므로 건드리지 않는다.
  * idb.objDelete 는 R2 shim 을 거치지 않아 삭제 대기열(Drive 삭제)로 번지지 않는다.
  */
-async function refreshIndex(token: string): Promise<DriveFile[]> {
-	const files = await listAll(token);
-	const prev = index;
-	const next: Record<string, RemoteRef> = {};
-	for (const f of files) next[f.name] = { id: f.id, md5: f.md5Checksum };
+async function refreshIndex(token: string): Promise<void> {
+	const known = Object.keys(index).filter((k) => k !== DB_NAME).length;
+	if (known === 0 || !sync.lastSyncAt) {
+		sync.phase = 'Drive 목록 받는 중…';
+		await loadFullIndex(token);
+		return;
+	}
+	sync.phase = '바뀐 파일 확인 중…';
+	const changed = await listChangedSince(token, sync.lastSyncAt - 60_000);
 	const puts = new Set((await kvGet<string[]>(K_PUTS)) ?? []);
-	const stale = new Set<string>();
-	for (const [k, old] of Object.entries(prev)) {
-		if (k === DB_NAME || puts.has(k)) continue;
-		const cur = next[k];
-		if (!cur || (old.md5 && cur.md5 && old.md5 !== cur.md5)) stale.add(k);
+	const stale: string[] = [];
+	for (const f of changed) {
+		if (f.name === DB_NAME) continue;
+		const old = index[f.name];
+		if (old && old.md5 && f.md5Checksum && old.md5 !== f.md5Checksum && !puts.has(f.name)) stale.push(f.name);
+		index[f.name] = toRef(f);
 	}
-	// 인덱스 diff 로 못 잡는 경우(인덱스는 이미 새 md5 인데 캐시는 옛 파일 — 이 로직 이전 버전이 동기화한 기기)를
-	// 위해 덮어쓰기 키는 로컬 오브젝트를 원격과 직접 대조한다(세션당 1회, 대상이 수백 개라 부담 적음).
-	if (!cacheVerified) {
-		cacheVerified = true;
-		for (const k of await findStaleOverwritable(files, puts)) stale.add(k);
+	await saveIndex();
+	if (stale.length) {
+		await objDelete(stale);
+		console.info(`[sync] 다른 기기가 바꾼 이미지 캐시 ${stale.length}개 정리`);
 	}
-	if (stale.size) {
-		await objDelete([...stale]);
-		console.info(`[sync] 다른 기기가 바꾼 이미지 캐시 ${stale.size}개 정리`);
-	}
-	index = next;
-	await kvSet(K_INDEX, index);
-	return files;
 }
 
 /**
- * 덮어쓰기 접두 키 중 로컬 캐시가 원격과 다른 것. etag 가 Drive md5 와 같으면(Drive 에서 받았거나 올린 뒤 기록) 최신.
- * 아니면(로컬 생성 etag 는 임의값) 크기로 판정 — 같은 크기의 다른 이미지는 사실상 없다.
+ * 백업 가져오기 직후: 로컬이 zip 내용으로 통째 바뀌었으므로 Drive 도 그에 맞춘다 —
+ * 로컬 이미지 전부를 업로드 대기열에, zip 에 없는 원격 이미지는 삭제 대기열에. DB 는 replaceDatabase 가 dirty 로 만들었다.
  */
-async function findStaleOverwritable(files: DriveFile[], puts: Set<string>): Promise<string[]> {
-	const byName = new Map(files.map((f) => [f.name, f] as const));
-	const keys = (await objKeys()).filter(
-		(k) => !puts.has(k) && byName.has(k) && OVERWRITABLE_PREFIXES.some((p) => k.startsWith(p))
-	);
-	const out: string[] = [];
-	for (const k of keys) {
-		const f = byName.get(k)!;
-		const obj = await objGet(k);
-		if (!obj || obj.etag === f.md5Checksum) continue;
-		if (f.size > 0 && obj.size !== f.size) out.push(k);
-	}
-	return out;
+export async function reconcileAfterImport(): Promise<void> {
+	if (sync.mode !== 'drive') return;
+	const local = await objKeys();
+	const localSet = new Set(local);
+	const extras = Object.keys(index).filter((k) => k !== DB_NAME && !localSet.has(k));
+	await kvSet(K_PUTS, local);
+	await kvSet(K_DELS, extras);
+	await refreshPendingCount();
+	schedulePush(500);
 }
 
-async function syncImages(token: string): Promise<void> {
-	const localKeys = new Set(await objKeys());
-	const puts = new Set((await kvGet<string[]>(K_PUTS)) ?? []);
-	const dels = new Set((await kvGet<string[]>(K_DELS)) ?? []);
+// ── 이미지 ──────────────────────────────────────────────────
 
-	// 1) 삭제 대기열(병렬)
+/** 대기열 처리: 삭제 → 업로드. 20개마다 진행 상태 저장(중단돼도 재개). 취소 가능. */
+async function processImageQueue(token: string): Promise<void> {
+	const dels = new Set((await kvGet<string[]>(K_DELS)) ?? []);
 	if (dels.size) {
 		let d = 0;
 		const total = dels.size;
@@ -671,47 +650,42 @@ async function syncImages(token: string): Promise<void> {
 			sync.phase = `Drive 에서 지우는 중… (${d}/${total})`;
 			if (d % 20 === 0) {
 				await kvSet(K_DELS, [...dels]);
-				await kvSet(K_INDEX, index);
+				await saveIndex();
 			}
 		});
 		await kvSet(K_DELS, [...dels]);
-		await kvSet(K_INDEX, index);
+		await saveIndex();
 		await refreshPendingCount();
 	}
 
-	// 2) 업로드(병렬): 대기열 + 원격에 없는 로컬 파일
-	const toUpload = new Set<string>([...puts]);
-	for (const k of localKeys) if (!index[k]) toUpload.add(k);
-	let n = 0;
-	let sinceSave = 0;
-	await parallel([...toUpload], async (key) => {
-		const obj = await objGet(key);
-		if (obj) {
-			const ref = index[key];
-			const f = ref
-				? await updateFile(token, ref.id, obj.blob, obj.contentType)
-				: await createFile(token, key, obj.blob, obj.contentType);
-			index[key] = { id: f.id, md5: f.md5Checksum };
-			// 로컬 etag 를 Drive md5 로 맞춰 두면 이후 캐시 대조가 정확해진다(refreshIndex).
-			if (f.md5Checksum && obj.etag !== f.md5Checksum) await objPut({ ...obj, etag: f.md5Checksum });
-		}
-		puts.delete(key);
-		n++;
-		sync.phase = `이미지 올리는 중… (${n}/${toUpload.size})`;
-		// 인덱스/대기열은 20개마다 저장(중단돼도 재개 가능, IndexedDB 쓰기 부담 완화)
-		if (++sinceSave >= 20) {
-			sinceSave = 0;
-			await kvSet(K_PUTS, [...puts]);
-			await kvSet(K_INDEX, index);
-			await refreshPendingCount();
-		}
-	});
-	await kvSet(K_PUTS, [...puts]);
-	await kvSet(K_INDEX, index);
-	await refreshPendingCount();
-
-	// 3) 다운로드는 하지 않는다 — 로컬에 없는 원격 이미지는 볼 때 지연 다운로드(서비스워커/miss 핸들러).
-	await kvSet(K_INDEX, index);
+	const puts = new Set((await kvGet<string[]>(K_PUTS)) ?? []);
+	if (puts.size) {
+		let n = 0;
+		const total = puts.size;
+		await parallel([...puts], async (key) => {
+			const obj = await objGet(key);
+			if (obj) {
+				const ref = index[key];
+				const f = ref
+					? await updateFile(token, ref.id, obj.blob, obj.contentType)
+					: await createFile(token, key, obj.blob, obj.contentType);
+				index[key] = toRef(f);
+				// 로컬 etag 를 Drive md5 로 맞춰 둔다(서비스워커 ETag 응답과 일치).
+				if (f.md5Checksum && obj.etag !== f.md5Checksum) await objPut({ ...obj, etag: f.md5Checksum });
+			}
+			puts.delete(key);
+			n++;
+			sync.phase = `이미지 올리는 중… (${n}/${total})`;
+			if (n % 20 === 0) {
+				await kvSet(K_PUTS, [...puts]);
+				await saveIndex();
+				await refreshPendingCount();
+			}
+		});
+		await kvSet(K_PUTS, [...puts]);
+		await saveIndex();
+		await refreshPendingCount();
+	}
 }
 
 /** Drive 에서 이미지 1개를 받아 IndexedDB 에 넣는다(지연 다운로드). 인덱스에 없거나 토큰 없으면 null. */
@@ -736,18 +710,20 @@ async function fetchImageFromDrive(key: string): Promise<StoredObject | null> {
 /** 설정 모달: 원격 이미지를 전부 이 기기에 내려받기(오프라인 대비, 선택). 진행은 sync.phase. */
 export async function downloadAllImages(): Promise<{ downloaded: number; total: number }> {
 	if (sync.mode !== 'drive') return { downloaded: 0, total: 0 };
-	const localKeys = new Set(await objKeys());
-	const todo = Object.keys(index).filter((k) => k !== DB_NAME && !localKeys.has(k));
 	let n = 0;
-	await run(async () => {
+	let total = 0;
+	await runOp(async (token) => {
+		await loadFullIndex(token);
+		const localKeys = new Set(await objKeys());
+		const todo = Object.keys(index).filter((k) => k !== DB_NAME && !localKeys.has(k));
+		total = todo.length;
 		await parallel(todo, async (key) => {
 			await fetchImageFromDrive(key);
 			n++;
-			sync.phase = `이미지 받는 중… (${n}/${todo.length})`;
+			sync.phase = `이미지 받는 중… (${n}/${total})`;
 		});
-		await finishOk();
 	});
-	return { downloaded: n, total: todo.length };
+	return { downloaded: n, total };
 }
 
 async function parallel<T>(items: T[], fn: (item: T) => Promise<void>): Promise<void> {
@@ -781,6 +757,13 @@ class SyncCancelled extends Error {
 	}
 }
 
+/** pull 을 지금 하면 안 되는 상황(요청 진행 중) — 오류가 아니라 다음 확인으로 미룸. */
+class SyncDeferred extends Error {
+	constructor() {
+		super('deferred');
+	}
+}
+
 function guessType(key: string): string {
 	const ext = key.split('.').pop()?.toLowerCase();
 	return ext === 'png'
@@ -794,23 +777,7 @@ function guessType(key: string): string {
 					: 'application/octet-stream';
 }
 
-/** 대기열 처리(디바운스 후). */
-async function flush(): Promise<void> {
-	if (sync.mode !== 'drive' || !sync.ready || sync.conflict) return;
-	await run(async (token) => {
-		const dirty = (await kvGet<boolean>(K_DIRTY)) ?? false;
-		if (dirty) {
-			sync.phase = '변경 사항 올리는 중…';
-			if (!(await pushDb(token))) {
-				// 다른 기기가 먼저 썼다 — 유저가 고를 때까지 올리지 않는다(이미지 대기열은 남겨 둔다).
-				sync.status = 'idle';
-				return;
-			}
-		}
-		await syncImages(token);
-		await finishOk();
-	});
-}
+// ── 설정 모달 정보 ─────────────────────────────────────────
 
 export interface RemoteSummary {
 	/** Haven(appDataFolder) 파일 수·바이트. */

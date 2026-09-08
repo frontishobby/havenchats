@@ -132,7 +132,7 @@
 			{#if sync.mode === 'drive'}
 				<button
 					class="sync-chip"
-					class:warn={sync.status === 'needs-auth' || sync.status === 'error'}
+					class:warn={sync.status === 'needs-auth' || sync.status === 'error' || sync.status === 'conflict'}
 					class:busy={sync.status === 'syncing'}
 					onclick={() => (storageModal.open = true)}
 					title={sync.error ?? 'Google Drive 동기화 상태'}
@@ -141,6 +141,8 @@
 						? '⟳ 동기화 중'
 						: sync.status === 'needs-auth'
 							? '⚠ Drive 재연결'
+							: sync.status === 'conflict'
+								? '⚠ 충돌 · 선택 필요'
 							: sync.status === 'error'
 								? '⚠ 동기화 오류'
 								: sync.pending > 0
@@ -237,7 +239,7 @@
 />
 <ProfileModal user={me?.user ?? null} />
 <StorageModal />
-{#if !sync.ready || sync.conflict}
+{#if !sync.ready}
 	<StorageLanding />
 {/if}
 {#if me?.user}
