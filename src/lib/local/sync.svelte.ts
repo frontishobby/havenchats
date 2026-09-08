@@ -19,7 +19,7 @@
  * 자동으로 고르지 않고 `conflict` 를 띄워 유저가 고른다(시작 시·주기 확인·push 직전 모두 같은 규칙).
  */
 import { invalidateAll } from '$app/navigation';
-import { kvGet, kvSet, kvDelete, objGet, objKeys, objPut, type StoredObject } from './idb';
+import { kvGet, kvSet, kvDelete, objDelete, objGet, objKeys, objPut, type StoredObject } from './idb';
 import {
 	getLocalRuntime,
 	onDatabaseSaved,
@@ -445,10 +445,7 @@ async function finishOk() {
 async function runInitialSync(): Promise<void> {
 	await run(async (token) => {
 		sync.phase = 'Drive 확인 중…';
-		const files = await listAll(token);
-		index = {};
-		for (const f of files) index[f.name] = { id: f.id, md5: f.md5Checksum };
-		await kvSet(K_INDEX, index);
+		const files = await refreshIndex(token);
 
 		const remoteDb = files.find((f) => f.name === DB_NAME) ?? null;
 		if (remoteDb) noteWriter(remoteDb);
@@ -559,14 +556,36 @@ async function pullDb(token: string, opts: { refreshIndex?: boolean } = {}): Pro
 	await rt!.replaceDatabase(bytes);
 	await kvSet(K_DB, ref);
 	await kvSet(K_DIRTY, false);
-	if (opts.refreshIndex !== false) {
-		const files = await listAll(token);
-		const next: Record<string, RemoteRef> = {};
-		for (const f of files) next[f.name] = { id: f.id, md5: f.md5Checksum };
-		index = next;
-		await kvSet(K_INDEX, index);
-	}
+	if (opts.refreshIndex !== false) await refreshIndex(token);
 	await invalidateAll();
+}
+
+/**
+ * Drive 파일 목록으로 인덱스를 다시 만들고, 그 사이 **다른 기기가 바꾼 이미지의 로컬 캐시를 지운다**:
+ *  - md5 가 달라진 키(썸네일 `char/<id>.webp` 처럼 같은 키에 덮어쓰는 교체) → 지워서 다음 표시 때 지연 다운로드.
+ *  - 원격에서 사라진 키 → 지워서 고아 캐시가 남거나 syncImages 가 '원격에 없는 로컬 파일' 로 다시 올리지 않게.
+ * 이 기기가 아직 올리지 않은 키(put 대기열)는 이 기기 것이 최신이므로 건드리지 않는다.
+ * idb.objDelete 는 R2 shim 을 거치지 않아 삭제 대기열(Drive 삭제)로 번지지 않는다.
+ */
+async function refreshIndex(token: string): Promise<DriveFile[]> {
+	const files = await listAll(token);
+	const prev = index;
+	const next: Record<string, RemoteRef> = {};
+	for (const f of files) next[f.name] = { id: f.id, md5: f.md5Checksum };
+	const puts = new Set((await kvGet<string[]>(K_PUTS)) ?? []);
+	const stale: string[] = [];
+	for (const [k, old] of Object.entries(prev)) {
+		if (k === DB_NAME || puts.has(k)) continue;
+		const cur = next[k];
+		if (!cur || (old.md5 && cur.md5 && old.md5 !== cur.md5)) stale.push(k);
+	}
+	if (stale.length) {
+		await objDelete(stale);
+		console.info(`[sync] 다른 기기가 바꾼 이미지 캐시 ${stale.length}개 정리`);
+	}
+	index = next;
+	await kvSet(K_INDEX, index);
+	return files;
 }
 
 async function syncImages(token: string): Promise<void> {
