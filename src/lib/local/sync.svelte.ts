@@ -577,6 +577,9 @@ async function pull(token: string, remote: DriveFile, opts: { refreshIndex?: boo
 	sync.phase = 'Drive 데이터 받는 중…';
 	const blob = await download(token, remote.id);
 	const bytes = new Uint8Array(await blob.arrayBuffer());
+	// 판정 뒤 내려받는 몇 초 사이에 로컬 쓰기(캐릭터 저장 등)가 끼어들었으면 덮어쓰지 않고 다음 reconcile 로 넘긴다
+	// (그때는 dirty + 원격 변경 = conflict 로 유저가 고른다). 진행 중 요청도 마찬가지.
+	if ((await isDirty()) || rt!.busy) throw new SyncDeferred();
 	// replaceDatabase 는 flush → onDatabaseSaved 를 부르므로 dirty 가 다시 켜진다 → 뒤에서 끈다.
 	await rt!.replaceDatabase(bytes);
 	index[DB_NAME] = toRef(remote);

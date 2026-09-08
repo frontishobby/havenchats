@@ -13,8 +13,8 @@
 <CharacterForm
 	mode="edit"
 	characterId={c.id}
-	returnTo={`/user/${data.ownerId}`}
-	returnLabel="내 캐릭터"
+	returnTo="/"
+	returnLabel="메인"
 	allowScriptVars={data.allowScriptVars}
 	initial={{
 		name: c.name,
