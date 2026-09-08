@@ -46,6 +46,28 @@
 	let naiModel = $state(DEFAULT_NAI_MODEL);
 	const naiModelInfo = $derived(getNaiModel(naiModel));
 
+	// 기존 그림체 불러오기(드롭다운): 열릴 때 내 목록을 받아 두고, 고르면 프롬프트·모델·네거티브·퀄리티를 채운다.
+	let mine = $state<ArtStyle[]>([]);
+	let loadFrom = $state('');
+	$effect(() => {
+		if (!open) return;
+		fetch('/api/styles/mine')
+			.then((r) => (r.ok ? (r.json() as Promise<{ styles: ArtStyle[] }>) : { styles: [] }))
+			.then((d) => (mine = d.styles))
+			.catch(() => (mine = []));
+	});
+	const loadable = $derived(mine.filter((s) => s.id !== edit?.id));
+	function applyStyle(id: string) {
+		loadFrom = id;
+		const s = mine.find((x) => x.id === id);
+		if (!s) return;
+		style = s.prompt;
+		negative = s.negative ?? '';
+		quality = s.quality ?? '';
+		extrasOpen = !!(s.negative || s.quality);
+		naiModel = getNaiModel(s.model).id;
+	}
+
 	// 장면 미리보기(자유 생성)
 	let previewUrl = $state<string | null>(null);
 	let generating = $state(false);
@@ -85,6 +107,7 @@
 		quality = '';
 		extrasOpen = false;
 		naiModel = DEFAULT_NAI_MODEL;
+		loadFrom = '';
 	}
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Escape' && open) close();
@@ -279,6 +302,15 @@
 				</div>
 
 				<div class="controls">
+					{#if loadable.length}
+						<label class="fl" for="ws-load">기존 그림체 불러오기</label>
+						<select id="ws-load" value={loadFrom} onchange={(e) => applyStyle(e.currentTarget.value)}>
+							<option value="">— 직접 입력 —</option>
+							{#each loadable as s (s.id)}
+								<option value={s.id}>{s.title} · {getNaiModel(s.model).label}</option>
+							{/each}
+						</select>
+					{/if}
 					<span class="fl">모델</span>
 					<div class="res-row model-row" role="radiogroup" aria-label="NovelAI 모델">
 						{#each NAI_MODELS as m (m.id)}
@@ -544,6 +576,7 @@
 		font-weight: 400;
 	}
 	.controls textarea,
+	.controls select,
 	.share-sec textarea,
 	.share-sec input {
 		width: 100%;
@@ -559,6 +592,7 @@
 		outline: none;
 	}
 	.controls textarea:focus,
+	.controls select:focus,
 	.share-sec textarea:focus,
 	.share-sec input:focus {
 		border-color: var(--accent);
