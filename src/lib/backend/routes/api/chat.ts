@@ -930,7 +930,7 @@ const MAX_OUTFIT_CHARS = 200;
 /** 자연어 장면 문장 최대 길이(자). V5 Curated base 예산(~703 토큰)에 그림체+꼬리와 함께 들어가야 해서 짧게. */
 const MAX_SCENE_CHARS = 400;
 
-/** 요청의 상황 프롬프트 모델 검증 — 구조화 출력 안정 모델(Gemini 계열)만. 미허용이면 기본 모델. */
+/** 요청의 상황 프롬프트 모델 검증 — IMAGE_PROMPT_MODELS 허용목록만. 미허용이면 기본 모델(Gemini 3.8 Flash). */
 function pickPromptModel(requested?: string): string {
 	return requested && IMAGE_PROMPT_MODEL_IDS.has(requested)
 		? requested
@@ -1192,6 +1192,38 @@ async function generateObjectWithRetry(
 }
 
 
+/** 상황 프롬프트 검열 감지 시 총 시도 횟수(첫 시도 포함). temperature 0.7 이라 재시도마다 출력이 달라진다. */
+const SITUATION_CENSOR_ATTEMPTS = 3;
+
+/**
+ * 상황 프롬프트 generateObject 가 **검열로** 실패한 것인지(채팅의 isCensoredTurn 과 같은 기준, 모델 무관).
+ *  - 에러: 공급자 검열 에러(data_inspection_failed·content_filter…) 또는 NoObjectGeneratedError 인데
+ *    finishReason 이 content-filter 이거나, 모델이 JSON 대신 거부 문구를 썼거나, 본문이 아예 비어 있음
+ *    (Gemini 는 입력 필터 차단을 에러가 아니라 빈 응답으로 돌려준다 — 2026-09 실측).
+ *  - 결과: finishReason content-filter, 또는 base·scene·characters 전부 비어 있음, 또는 base/scene 에 거부 문구.
+ * 스키마 불일치·네트워크 등 다른 실패는 false → 기존 502 경로.
+ */
+function isCensoredSituationError(e: unknown): boolean {
+	if (isProviderCensorError(e)) return true;
+	const err = e as { name?: string; text?: unknown; finishReason?: unknown } | undefined;
+	if (err?.name !== 'AI_NoObjectGeneratedError') return false;
+	const text = typeof err.text === 'string' ? err.text.trim() : '';
+	if (err.finishReason === 'content-filter' || !text) return true;
+	return isCensoredTurn(text, err.finishReason);
+}
+function isCensoredSituationResult(
+	finishReason: unknown,
+	obj: { base?: unknown; scene?: unknown; characters?: unknown }
+): boolean {
+	if (finishReason === 'content-filter') return true;
+	const base = str(obj.base).trim();
+	const scene = str(obj.scene).trim();
+	const chars = Array.isArray(obj.characters) ? obj.characters.length : 0;
+	if (!base && !scene && chars === 0) return true;
+	return isCensoredTurn(`${base}\n${scene}`, finishReason);
+}
+
+
 /**
  * prepare 응답 — 클라가 NovelAI 를 직접 호출하는 데 필요한 것만 돌려준다.
  * (NovelAI 요청 바디는 서버가 조립: 네거티브·파라미터·NSFW 판정 정책을 서버에 둔다)
@@ -1348,19 +1380,55 @@ chatRouter.post('/image/prepare', async (c) => {
 		promptParts.push(canvasHint(resolution));
 		if (solo) promptParts.push(soloMale ? SOLO_MALE_HINT : SOLO_HINT);
 		const userPrompt = promptParts.join('\n\n');
-		// 게이트웨이가 일시적 503/500 을 자동 재시도하지 않으므로 직접 백오프 재시도한다.
-		const result = await generateObjectWithRetry({
-			model: gateway(promptModel),
-			schema: SCENE_PROMPT_SCHEMA,
-			system: SITUATION_SYSTEM,
-			prompt: userPrompt,
-			temperature: 0.7,
-			// 상황 프롬프트는 단순 태그 변환이라 thinking 을 끈다(지연·빈응답 감소). 그래도 thinking 을
-			// 못 끄는 모델 대비 headroom 은 남겨 둔다(maxOutputTokens 는 상한이라 지연엔 영향 없음).
-			maxOutputTokens: 2000 + reasoningHeadroom(promptModel),
-			providerOptions: buildProviderOptions(promptModel, { noThinking: true })
-		});
-		const obj = (result.object ?? {}) as { base?: unknown; scene?: unknown; characters?: unknown };
+		// 게이트웨이가 일시적 503/500 을 자동 재시도하지 않으므로 직접 백오프 재시도한다(generateObjectWithRetry).
+		// 그와 별개로 **검열**(content-filter·빈 응답·거부 문구·공급자 검열 에러)이면 같은 요청을 최대
+		// SITUATION_CENSOR_ATTEMPTS 회까지 다시 보내고(temperature 0.7 이라 출력이 달라짐), 전부 막히면
+		// 'censored' 로 실패를 알린다 — 채팅 턴의 검열 자동 취소와 같은 판정(isCensoredTurn), 모델 무관.
+		const callSituation = () =>
+			generateObjectWithRetry({
+				model: gateway(promptModel),
+				schema: SCENE_PROMPT_SCHEMA,
+				system: SITUATION_SYSTEM,
+				prompt: userPrompt,
+				temperature: 0.7,
+				// 상황 프롬프트는 단순 태그 변환이라 thinking 을 끈다(지연·빈응답 감소). 그래도 thinking 을
+				// 못 끄는 모델 대비 headroom 은 남겨 둔다(maxOutputTokens 는 상한이라 지연엔 영향 없음).
+				maxOutputTokens: 2000 + reasoningHeadroom(promptModel),
+				providerOptions: buildProviderOptions(promptModel, { noThinking: true })
+			});
+		let result: Awaited<ReturnType<typeof callSituation>> | null = null;
+		let obj: { base?: unknown; scene?: unknown; characters?: unknown } = {};
+		for (let attempt = 1; attempt <= SITUATION_CENSOR_ATTEMPTS; attempt++) {
+			try {
+				result = await callSituation();
+			} catch (e) {
+				if (!isCensoredSituationError(e)) throw e;
+				llmError = describeError(e);
+				console.warn(`[chat/image] 상황 프롬프트 검열 감지(에러) — ${attempt}/${SITUATION_CENSOR_ATTEMPTS} (model=${promptModel}):`, llmError);
+				result = null;
+				continue;
+			}
+			obj = (result.object ?? {}) as { base?: unknown; scene?: unknown; characters?: unknown };
+			if (isCensoredSituationResult(result.finishReason, obj)) {
+				llmError = `censored result (finishReason=${String(result.finishReason)}) ${JSON.stringify(obj).slice(0, 300)}`;
+				console.warn(`[chat/image] 상황 프롬프트 검열 감지(응답) — ${attempt}/${SITUATION_CENSOR_ATTEMPTS} (model=${promptModel}):`, llmError);
+				result = null;
+				continue;
+			}
+			break; // 통과
+		}
+		if (!result) {
+			finishReason = 'content-filter';
+			console.warn(`[chat/image] 상황 프롬프트 ${SITUATION_CENSOR_ATTEMPTS}회 모두 검열 차단 (model=${promptModel}) — NovelAI 요청 생략`);
+			return c.json(
+				{
+					error: 'censored',
+					message: `부적절한 내용으로 감지되어 ${SITUATION_CENSOR_ATTEMPTS}회 다시 시도했지만 이미지 생성에 실패했습니다. 표현을 바꾸거나 상황 프롬프트 모델을 바꿔 다시 시도해 주세요.`,
+					debug: makeDebug(null)
+				},
+				502
+			);
+		}
 		rawSituation = JSON.stringify(obj);
 		// base·각 인물 캡션을 필드별로 한글/잡음 제거(모델이 상태창을 베껴 넣어도 영어 태그만 남김).
 		baseScene = sanitizeSituation(str(obj.base));

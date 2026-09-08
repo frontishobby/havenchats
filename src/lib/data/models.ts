@@ -63,21 +63,27 @@ export const DEFAULT_ASSIST_MODEL_ID = 'zai/glm-5.3-flash';
 
 /**
  * 실시간 이미지 상황 프롬프트(generateObject 구조화 출력)에 허용하는 모델.
- * 조건: ① 구조화 출력이 안정적 ② 노골적 성행위 장면도 거부하지 않음 ③ 빠르고 저렴.
- * Gemini Flash 계열은 safetySettings BLOCK_NONE 을 줘도 노골적 장면을 content-filter 로
- * 빈 응답 처리해 제외(2026-09 실측 0/4). DeepSeek V4 Flash 는 거부는 안 하지만 30~45s 지연·
+ * 조건: ① 구조화 출력이 안정적 ② 빠르고 저렴 ③ 노골적 장면 거부가 드물 것.
+ * Gemini 3.8 Flash 는 safetySettings BLOCK_NONE 을 줘도 노골적 장면을 content-filter 로 빈 응답 처리하는
+ * 경우가 있어(2026-09 실측) 한동안 제외했다가, /api/chat/image/prepare 에 **검열 감지 + 최대 3회 재시도**
+ * (isCensoredSituation — 채팅의 isCensoredTurn 과 같은 판정)를 넣으면서 기본 모델로 복귀(2026-09-09).
+ * 3회 모두 막히면 'censored' 에러로 실패를 알린다. DeepSeek V4 Flash 는 거부는 안 하지만 30~45s 지연·
  * length 실패가 잦아 제외. 채팅 모델 목록(MODELS)과 별개 목록이므로 getModel 로 조회하지 말고
  * findImagePromptModel 을 쓴다.
  */
 export const IMAGE_PROMPT_MODELS: ModelOption[] = [
+	// $0.75 / $3.75 — 구조화 출력·장면 이해 가장 정확. 검열 시 재시도(위 주석)
+	{ id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true },
 	// $0.15 / $0.50 — 2~3s, char/user 분리·인원수 태그 정확(실측 4/4)
 	{ id: 'zai/glm-5.3-flash', label: 'GLM 5.3 Flash', icon: '/models/zai.avif', contextLimit: 1_000_000, reasoning: true },
 	// $0.30 / $1.20 — 2~3s(실측 4/4)
 	{ id: 'minimax/minimax-m3', label: 'MiniMax M3', icon: '/models/minimax.avif', contextLimit: 512_000, reasoning: true }
 ];
 export const IMAGE_PROMPT_MODEL_IDS: Set<string> = new Set(IMAGE_PROMPT_MODELS.map((m) => m.id));
-/** 이미지 상황 프롬프트 기본 모델 — GLM 5.3 Flash. */
-export const DEFAULT_IMAGE_PROMPT_MODEL_ID = 'zai/glm-5.3-flash';
+/** 이미지 상황 프롬프트 기본 모델 — Gemini 3.8 Flash(2026-09-09, 검열 재시도 도입과 함께). */
+export const DEFAULT_IMAGE_PROMPT_MODEL_ID = 'google/gemini-3.8-flash';
+/** 캐릭터 썸네일 상황 프롬프트 기본 모델 — 검열 재시도가 없는 경로라 GLM 5.3 Flash 유지. */
+export const DEFAULT_THUMBNAIL_PROMPT_MODEL_ID = 'zai/glm-5.3-flash';
 
 export function findImagePromptModel(id: string): ModelOption | undefined {
 	return IMAGE_PROMPT_MODELS.find((m) => m.id === id);

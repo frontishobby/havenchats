@@ -30,7 +30,7 @@ import { buildProviderOptions, reasoningHeadroom } from '$lib/backend/chatAssemb
 import {
 	ASSIST_MODEL_IDS,
 	DEFAULT_ASSIST_MODEL_ID,
-	DEFAULT_IMAGE_PROMPT_MODEL_ID,
+	DEFAULT_THUMBNAIL_PROMPT_MODEL_ID,
 	IMAGE_PROMPT_MODEL_IDS
 } from '$lib/data/models';
 import { containsMinorTerms } from '$lib/backend/minorSafety';
@@ -519,11 +519,11 @@ const MAX_CHAR_CAPTION_CHARS = 500;
 /** 썸네일 인물 상한(모델별 상한은 buildGeneratePayload 가 다시 적용). 카드 썸네일이라 소수 인원만. */
 const MAX_THUMB_CHARACTERS = 6;
 
-/** 상황 프롬프트 모델 검증 — 구조화 출력 안정 + NSFW 비거부 목록(채팅 이미지와 동일). */
+/** 상황 프롬프트 모델 검증 — 허용목록은 채팅 이미지와 동일(IMAGE_PROMPT_MODELS), 기본은 GLM(검열 재시도 없는 경로). */
 function pickPromptModel(requested?: string): string {
 	return requested && IMAGE_PROMPT_MODEL_IDS.has(requested)
 		? requested
-		: DEFAULT_IMAGE_PROMPT_MODEL_ID;
+		: DEFAULT_THUMBNAIL_PROMPT_MODEL_ID;
 }
 
 const THUMB_SYSTEM = [
