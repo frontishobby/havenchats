@@ -1,4 +1,5 @@
 <script module lang="ts">
+	import { scrollLock } from '$lib/scrollLock';
 	/** 부모(CharacterForm)와 주고받는 드래프트 타입. previewUrl 은 모달 내부 전용. */
 	export interface SceneAxisDraft {
 		label: string;
@@ -186,7 +187,7 @@
 
 {#if open}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div class="backdrop" onclick={onclose} role="presentation">
+	<div class="backdrop" use:scrollLock onclick={onclose} role="presentation">
 		<div
 			class="modal"
 			role="dialog"

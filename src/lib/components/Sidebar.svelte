@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { scrollLock } from '$lib/scrollLock';
 	import { tick } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import type { RecentChat } from '$lib/types';
@@ -124,6 +125,7 @@
 	<!-- 오버레이 -->
 	<div
 		class="overlay"
+		use:scrollLock
 		transition:fade={{ duration: 150 }}
 		onclick={onClose}
 		role="presentation"

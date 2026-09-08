@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { scrollLock } from '$lib/scrollLock';
 	import { invalidateAll } from '$app/navigation';
 	import { storageModal } from '$lib/state/storageModal.svelte';
 	import { sync, connectDrive, disconnectDrive, syncNow, resetToDrive, resolveConflict, remoteSummary, downloadAllImages, cancelSync, type RemoteSummary } from '$lib/local/sync.svelte';
@@ -184,7 +185,7 @@
 
 {#if storageModal.open}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div class="backdrop" onclick={close} role="presentation">
+	<div class="backdrop" use:scrollLock onclick={close} role="presentation">
 		<div class="modal" role="dialog" aria-modal="true" aria-label="저장소" tabindex="-1" onclick={(e) => e.stopPropagation()}>
 			<button class="close" onclick={close} aria-label="닫기">✕</button>
 			<h2>저장소</h2>

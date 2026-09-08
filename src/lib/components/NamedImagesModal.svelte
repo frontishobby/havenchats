@@ -1,4 +1,5 @@
 <script lang="ts" module>
+	import { scrollLock } from '$lib/scrollLock';
 	/** 플랫 네임드 이미지 편집용 드래프트 한 장. */
 	export interface NamedDraft {
 		id: string;
@@ -111,7 +112,7 @@
 
 {#if open}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div class="overlay" onclick={onclose} role="presentation">
+	<div class="overlay" use:scrollLock onclick={onclose} role="presentation">
 		<div
 			class="modal"
 			onclick={(e) => e.stopPropagation()}

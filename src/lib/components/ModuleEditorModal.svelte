@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { scrollLock } from '$lib/scrollLock';
 	import type { PromptModule } from '$lib/types';
 	import type { ModuleUpsertBody } from '$lib/api/modules';
 
@@ -82,7 +83,7 @@
 
 {#if open}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div class="backdrop" onclick={close} role="presentation">
+	<div class="backdrop" use:scrollLock onclick={close} role="presentation">
 		<div
 			class="modal"
 			role="dialog"

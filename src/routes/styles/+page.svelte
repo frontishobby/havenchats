@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { scrollLock } from '$lib/scrollLock';
 	import { invalidate } from '$app/navigation';
 	import StyleWorkshopModal from '$lib/components/StyleWorkshopModal.svelte';
 	import { resized } from '$lib/imageUrl';
@@ -97,7 +98,7 @@
 {#if selected}
 	{@const s = selected}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div class="backdrop" onclick={() => (selected = null)} role="presentation">
+	<div class="backdrop" use:scrollLock onclick={() => (selected = null)} role="presentation">
 		<div class="detail" role="dialog" aria-modal="true" aria-label={s.title} tabindex="-1" onclick={(e) => e.stopPropagation()}>
 			<button class="close" onclick={() => (selected = null)} aria-label="닫기">✕</button>
 			<div class="detail-thumb">

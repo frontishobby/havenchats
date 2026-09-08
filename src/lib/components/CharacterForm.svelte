@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { scrollLock } from '$lib/scrollLock';
 	import { untrack, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
@@ -374,7 +375,7 @@
 	function closeAssistSheet() {
 		if (isNarrow()) assistSheetOpen = false;
 	}
-	// 시트가 열린 동안 바디 스크롤 잠금. PC 폭으로 넓어지면(=sticky 열로 전환) 시트 상태 해제.
+	// PC 폭으로 넓어지면(=sticky 열로 전환) 시트 상태 해제. 바디 스크롤 잠금은 시트 백드롭의 use:scrollLock.
 	$effect(() => {
 		if (!assistSheetOpen) return;
 		const mq = window.matchMedia(WIDE_QUERY);
@@ -382,12 +383,7 @@
 			if (mq.matches) assistSheetOpen = false;
 		};
 		mq.addEventListener('change', onChange);
-		const prev = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
-		return () => {
-			mq.removeEventListener('change', onChange);
-			document.body.style.overflow = prev;
-		};
+		return () => mq.removeEventListener('change', onChange);
 	});
 
 	// AI 보조 패널 결과로 폼 필드를 채운다(create 모드 전용). 이미지·로어북 등은 건드리지 않는다.
@@ -966,6 +962,7 @@
 		<button
 			type="button"
 			class="sheet-backdrop"
+			use:scrollLock
 			onclick={() => (assistSheetOpen = false)}
 			aria-label="AI 도우미 닫기"
 		></button>

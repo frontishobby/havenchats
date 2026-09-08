@@ -1,4 +1,5 @@
 <script module lang="ts">
+	import { scrollLock } from '$lib/scrollLock';
 	import type { LoreEntry } from '$lib/types';
 	export type { LoreEntry };
 </script>
@@ -91,7 +92,7 @@
 
 {#if open}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div class="backdrop" onclick={onclose} role="presentation">
+	<div class="backdrop" use:scrollLock onclick={onclose} role="presentation">
 		<div
 			class="modal"
 			role="dialog"

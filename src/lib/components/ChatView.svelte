@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { scrollLock } from '$lib/scrollLock';
 	import { onMount, tick, untrack } from 'svelte';
 	import { invalidate, replaceState } from '$app/navigation';
 	import {
@@ -1729,7 +1730,7 @@
 
 	{#if showSettings}
 		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-		<div class="modal-backdrop" onclick={closeSettings} role="presentation">
+		<div class="modal-backdrop" use:scrollLock onclick={closeSettings} role="presentation">
 			<div
 				class="modal"
 				role="dialog"
@@ -1931,7 +1932,7 @@
 
 	{#if showFilterSettings}
 		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-		<div class="modal-backdrop" onclick={closeFilterSettings} role="presentation">
+		<div class="modal-backdrop" use:scrollLock onclick={closeFilterSettings} role="presentation">
 			<div
 				class="modal"
 				role="dialog"
@@ -2049,7 +2050,7 @@
 
 	{#if showModuleSettings}
 		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-		<div class="modal-backdrop" onclick={closeModuleSettings} role="presentation">
+		<div class="modal-backdrop" use:scrollLock onclick={closeModuleSettings} role="presentation">
 			<div
 				class="modal"
 				role="dialog"
