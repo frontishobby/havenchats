@@ -1095,7 +1095,7 @@
 		font-size: 0.95rem;
 	}
 	.pane {
-		padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
+		padding: 8px 6px calc(16px + env(safe-area-inset-bottom));
 	}
 	.pane.m-hidden {
 		display: none;

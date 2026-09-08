@@ -439,6 +439,15 @@
 		height: 100%;
 		object-fit: cover;
 	}
+	/* 모바일 바텀시트: 미리보기가 시트 가로를 거의 채우도록 상한 해제 + 패널 여백 축소 */
+	@media (max-width: 1079px) {
+		.thumb {
+			padding: 12px;
+		}
+		.t-preview {
+			max-width: none;
+		}
+	}
 	.t-zoom-btn {
 		display: block;
 		width: 100%;
