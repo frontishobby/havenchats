@@ -1,15 +1,10 @@
 /**
- * 관리자 신원 판별 — 클라이언트/서버 공용 (env 의존 없음).
- *
- * 클라이언트 컴포넌트는 `$lib/server/*` 를 import 할 수 없으므로(빌드 차단),
- * 관리자 이메일 상수를 양쪽에서 쓰려면 server 밖에 있어야 한다.
- * `$lib/server/auth` 는 이 모듈을 re-export 하므로 서버 코드의 import 경로는 그대로 유지된다.
+ * 관리자 판별 — 정적(1인) 런타임에선 유일한 유저가 곧 관리자다.
+ * 호출부(디버그 패널·charx import 등 예전 관리자 전용 기능)는 그대로 두고 항상 허용한다.
  */
-
-/** 관리자 이메일(단일 소스). */
-export const ADMIN_EMAIL = 'owner@example.com';
-
-/** 관리자 여부. (대소문자·공백 무시) */
-export function isAdmin(email: string | null | undefined): boolean {
-	return !!email && email.trim().toLowerCase() === ADMIN_EMAIL;
+export function isAdmin(_email?: string | null | undefined): boolean {
+	return true;
 }
+
+/** 예전 관리자 게이트 — 1인 런타임에선 no-op. */
+export function requireAdmin(_email?: string | null | undefined): void {}
