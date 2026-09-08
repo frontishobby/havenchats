@@ -21,6 +21,7 @@
 	} from '$lib/api/chat';
 	import { resized } from '$lib/imageUrl';
 	import { imgSrc } from '$lib/imageBase';
+	import { imgRetry } from '$lib/imgRetry';
 	import NsfwBadge from '$lib/components/NsfwBadge.svelte';
 	import CharacterDetailModal from '$lib/components/CharacterDetailModal.svelte';
 	import {
@@ -2452,7 +2453,7 @@
 							{/if}
 						{/await}
 					{:else}
-						<img class="scene-img" src={scene.url} alt={scene.alt} title={scene.alt} loading="lazy" />
+						<img class="scene-img" src={scene.url} alt={scene.alt} title={scene.alt} loading="lazy" use:imgRetry />
 					{/if}
 				{:else if looksLikeSceneToken(line)}
 					<!-- 알 수 없거나 스트리밍 중 미완성 토큰 → 숨김(원문 노출 방지) -->
@@ -2568,6 +2569,7 @@
 											src={imgSrc(m.content)}
 											alt="생성된 장면 이미지"
 											loading="lazy"
+											use:imgRetry
 										/>
 									{/if}
 									{#if !m.pending && m.content}
@@ -2578,7 +2580,7 @@
 											alt="생성된 장면 이미지"
 											loading="lazy"
 											onload={(e) => onFinalSceneLoad(e.currentTarget as HTMLImageElement, m)}
-											onerror={() => clearScenePreview(m)}
+											use:imgRetry={{ onFail: () => clearScenePreview(m) }}
 										/>
 									{/if}
 									{#if m.pending}
