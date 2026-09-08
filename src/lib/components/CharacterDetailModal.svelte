@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import NsfwBadge from './NsfwBadge.svelte';
 	import { hasScenes, looksLikeSceneToken } from '$lib/imageCodes';
 	import { resized } from '$lib/imageUrl';
@@ -70,6 +70,29 @@
 	function viewAssets() {
 		if (!character) return;
 		goto(`/characters/${character.id}/assets`);
+	}
+
+	function edit() {
+		if (!character) return;
+		goto(`/characters/${character.id}/edit`);
+	}
+
+	let deleting = $state(false);
+	async function remove() {
+		if (!character || deleting) return;
+		if (!confirm(`'${character.name}' 캐릭터를 삭제할까요? 이 캐릭터의 채팅 기록과 이미지도 함께 지워지며 되돌릴 수 없습니다.`)) return;
+		deleting = true;
+		try {
+			const res = await fetch(`/api/characters/${character.id}`, { method: 'DELETE' });
+			if (!res.ok) {
+				alert('삭제에 실패했어요.');
+				return;
+			}
+			onclose();
+			await invalidateAll();
+		} finally {
+			deleting = false;
+		}
 	}
 </script>
 
@@ -165,10 +188,16 @@
 				</div>
 			{/if}
 
-			<div class="actions">
+			<div class="manage">
+				<button class="mini" onclick={edit}>✎ 수정</button>
 				{#if hasAssets}
-					<button class="assets" onclick={viewAssets}>🖼 에셋 미리보기</button>
+					<button class="mini" onclick={viewAssets}>🖼 에셋 미리보기</button>
 				{/if}
+				<button class="mini danger" onclick={remove} disabled={deleting}>
+					{deleting ? '삭제 중…' : '🗑 삭제'}
+				</button>
+			</div>
+			<div class="actions">
 				<button class="start" onclick={start} disabled={starting}>
 					{starting ? '시작하는 중…' : '채팅 시작하기'}
 				</button>
@@ -431,20 +460,33 @@
 		display: flex;
 		gap: 10px;
 	}
-	.assets {
+	.manage {
 		flex-shrink: 0;
-		padding: 13px 16px;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		background: var(--bg-elev);
-		color: var(--text);
-		font-weight: 600;
-		font-size: 0.9rem;
-		white-space: nowrap;
-		transition: border-color 0.15s ease;
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
 	}
-	.assets:hover {
+	.mini {
+		padding: 8px 12px;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		background: var(--bg-elev);
+		color: var(--text-dim);
+		font-weight: 600;
+		font-size: 0.8rem;
+		white-space: nowrap;
+		transition: border-color 0.15s ease, color 0.15s ease;
+	}
+	.mini:hover:not(:disabled) {
 		border-color: var(--accent);
+		color: var(--text);
+	}
+	.mini.danger:hover:not(:disabled) {
+		border-color: #ff7b7b;
+		color: #ff7b7b;
+	}
+	.mini:disabled {
+		opacity: 0.55;
 	}
 	.start {
 		flex: 1;
@@ -534,10 +576,7 @@
 			background: var(--bg-card);
 			border-top: 1px solid var(--border);
 		}
-		.assets {
-			padding: 12px 13px;
-			font-size: 0.86rem;
-		}
+
 		.start {
 			padding: 12px;
 			font-size: 0.92rem;
