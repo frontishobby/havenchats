@@ -45,6 +45,7 @@
 - **그리드 코드 폭 가변**: 축 값 26개 초과면 코드 두 글자(AA~ZZ, 최대 676), 조합 상한 6,000, `ImageAxis.fallback`(없는 조합이면 그 축을 기본값으로 재시도 — 인물×상황 희소 세트용). 대량 업로드는 `POST /api/characters/:id/scenes/bulk` + `scripts/scenes-bulk.mjs`(파일명 `키_키.webp` → combo, `HAVEN_COOKIE` 필요).
 - **`{{나}}` 플레이스홀더**: 제작자 프롬프트·오프닝의 `{{나}}` → 유저 이름(없으면 '나')으로 치환.
 - **NSFW 주의**: 메인스트림 모델(OpenAI/Anthropic/Google)은 성인물 거부. NSFW엔 허용 모델 필요. 미성년자 묘사 등 불법 콘텐츠 차단 가드레일은 system 프롬프트에 항상 포함.
+- **모바일 UI 공통**(2026-09-11): 모달은 640px 이하에서 바텀시트 — 상단 `.sheet-handle`(app.css 전역) + `use:swipeClose`(`src/lib/swipeClose.ts`, 아래로 쓸어 닫기·시트 스크롤 맨 위에서만) — 사이드바는 왼쪽 쓸기 + Esc. 채팅 메시지 액션(삭제·재생성·되돌리기)은 터치 기기에서 40px·마지막 메시지 또는 탭한 문단(`.touch-open`)에만 노출. 상단바 칩은 `.chip-full/.chip-short` 두 문구(모바일 축약, 잘림 금지). 면책 문구는 채팅 설정 시트 끝. 캐릭터 만들기 진입점 = 검색창 옆 ＋ 버튼 + 유저 메뉴.
 - **검증은 `npm run check`/build로**. UI 변경마다 Playwright 띄우지 말 것 (사용자 선호).
 
 

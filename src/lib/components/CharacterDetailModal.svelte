@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { scrollLock } from '$lib/scrollLock';
+	import { swipeClose } from '$lib/swipeClose';
 	import { goto, invalidateAll } from '$app/navigation';
 	import NsfwBadge from './NsfwBadge.svelte';
 	import { hasScenes, looksLikeSceneToken } from '$lib/imageCodes';
@@ -104,6 +105,7 @@
 	<div class="backdrop" use:scrollLock onclick={onclose} role="presentation">
 		<div
 			class="modal"
+			use:swipeClose={{ dir: 'down', onClose: onclose }}
 			role="dialog"
 			aria-modal="true"
 			aria-label={`${character.name} 정보`}

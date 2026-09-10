@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { scrollLock } from '$lib/scrollLock';
+	import { swipeClose } from '$lib/swipeClose';
 	import { onMount, tick, untrack } from 'svelte';
 	import { invalidate, replaceState } from '$app/navigation';
 	import {
@@ -371,6 +372,23 @@
 	let textarea = $state<HTMLTextAreaElement | null>(null);
 	// 터치(모바일) 기기 여부 — 이 경우 Enter 는 전송하지 않고 개행(기본 동작) 시킨다.
 	let isTouch = $state(false);
+	// 좁은 화면(≤640px) — 입력창 placeholder 를 짧은 문구로(긴 문구는 두 줄로 넘쳐 잘린다).
+	let narrow = $state(false);
+	$effect(() => {
+		const mq = window.matchMedia('(max-width: 640px)');
+		const apply = () => (narrow = mq.matches);
+		apply();
+		mq.addEventListener('change', apply);
+		return () => mq.removeEventListener('change', apply);
+	});
+	// 터치 기기에서 탭으로 액션 버튼을 연 문단(마지막 메시지는 항상 열림). 같은 문단 재탭·다른 문단 탭으로 닫힘.
+	let touchOpenId = $state<string | null>(null);
+	function onParaTap(e: MouseEvent, id: string) {
+		if (!isTouch) return;
+		// 버튼·링크·이미지 확대 등 자체 동작이 있는 요소는 건드리지 않는다.
+		if (e.target instanceof Element && e.target.closest('button, a, input, textarea')) return;
+		touchOpenId = touchOpenId === id ? null : id;
+	}
 
 	// ── 채팅 설정 ──
 	let showSettings = $state(false);
@@ -1734,12 +1752,14 @@
 		<div class="modal-backdrop" use:scrollLock onclick={closeSettings} role="presentation">
 			<div
 				class="modal"
+				use:swipeClose={{ dir: 'down', onClose: closeSettings }}
 				role="dialog"
 				aria-modal="true"
 				aria-label="채팅 설정"
 				tabindex="-1"
 				onclick={(e) => e.stopPropagation()}
 			>
+				<div class="sheet-handle" aria-hidden="true"></div>
 				<div class="modal-head">
 					<h2>채팅 설정</h2>
 					<button class="modal-close" onclick={closeSettings} aria-label="닫기">✕</button>
@@ -1927,6 +1947,8 @@
 						<p class="summary-empty">아직 요약이 없어요. 대화가 길어지면 자동으로 생성됩니다.</p>
 					{/if}
 				</div>
+				<!-- 면책 문구 — 입력창 아래 상시 노출 대신 설정 시트 끝에(세로 공간 확보). -->
+				<p class="disclaimer">AI가 생성한 이야기/이미지이며 실제 인물과 무관합니다.</p>
 			</div>
 		</div>
 	{/if}
@@ -1936,12 +1958,14 @@
 		<div class="modal-backdrop" use:scrollLock onclick={closeFilterSettings} role="presentation">
 			<div
 				class="modal"
+				use:swipeClose={{ dir: 'down', onClose: closeFilterSettings }}
 				role="dialog"
 				aria-modal="true"
 				aria-label="입력 필터"
 				tabindex="-1"
 				onclick={(e) => e.stopPropagation()}
 			>
+				<div class="sheet-handle" aria-hidden="true"></div>
 				<div class="modal-head">
 					<h2>입력 필터</h2>
 					<button class="modal-close" onclick={closeFilterSettings} aria-label="닫기">✕</button>
@@ -2054,12 +2078,14 @@
 		<div class="modal-backdrop" use:scrollLock onclick={closeModuleSettings} role="presentation">
 			<div
 				class="modal"
+				use:swipeClose={{ dir: 'down', onClose: closeModuleSettings }}
 				role="dialog"
 				aria-modal="true"
 				aria-label="모듈"
 				tabindex="-1"
 				onclick={(e) => e.stopPropagation()}
 			>
+				<div class="sheet-handle" aria-hidden="true"></div>
 				<div class="modal-head">
 					<h2>모듈</h2>
 					<button class="modal-close" onclick={closeModuleSettings} aria-label="닫기">✕</button>
@@ -2126,12 +2152,14 @@
 		<div class="modal-backdrop" onclick={closeImageSettings} role="presentation">
 			<div
 				class="modal"
+				use:swipeClose={{ dir: 'down', onClose: closeImageSettings }}
 				role="dialog"
 				aria-modal="true"
 				aria-label="실시간 이미지"
 				tabindex="-1"
 				onclick={(e) => e.stopPropagation()}
 			>
+				<div class="sheet-handle" aria-hidden="true"></div>
 				<div class="modal-head">
 					<h2>실시간 이미지</h2>
 					<button class="modal-close" onclick={closeImageSettings} aria-label="닫기">✕</button>
@@ -2484,7 +2512,16 @@
 		<article class="novel">
 			{#each messages as m (m.clientKey ?? m.id)}
 				{#if m.content || m.errorReason || m.role === 'image_generation' || (streaming && m === lastMessage)}
-					<div class="para {m.role}" data-mid={m.id}>
+					<!-- 터치 기기: 액션 버튼(삭제·재생성·되돌리기)은 마지막 메시지에만 상시 노출하고,
+					     다른 문단은 탭해서 열고 닫는다(.touch-open). 마우스에선 hover 노출이라 클래스는 무해. -->
+					<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+					<div
+						class="para {m.role}"
+						class:touch-open={m === lastMessage || touchOpenId === m.id}
+						data-mid={m.id}
+						role="presentation"
+						onclick={(e) => onParaTap(e, m.id)}
+					>
 						{#if !(streaming && m === lastMessage) && !m.pending}
 							{#if m.cost != null && Number.isFinite(m.cost) && m.cost > 0}
 								<span class="msg-cost" title={m.role === 'user' ? '입력 필터 변환 비용' : '이 응답 생성 비용'}>{formatCost(m.cost)}</span>
@@ -2687,9 +2724,13 @@
 					if (sendError) sendError = null;
 				}}
 				onkeydown={onKeydown}
-				placeholder={filterActive
-					? '행동이나 대사를 입력하세요… (필터로 변환 후 전송)'
-					: '행동이나 대사를 입력하세요… (비워두고 전송하면 이어가기)'}
+				placeholder={narrow
+					? filterActive
+						? '입력하면 필터로 변환해 전송'
+						: '행동이나 대사를 입력…'
+					: filterActive
+						? '행동이나 대사를 입력하세요… (필터로 변환 후 전송)'
+						: '행동이나 대사를 입력하세요… (비워두고 전송하면 이어가기)'}
 				maxlength={MAX_USER_MSG_CHARS}
 				rows="1"
 			></textarea>
@@ -2730,7 +2771,6 @@
 		{#if sendError}
 			<p class="send-error">{sendError}</p>
 		{/if}
-		<p class="disclaimer">AI가 생성한 이야기/이미지이며 실제 인물과 무관합니다.</p>
 	</div>
 </div>
 	{#if debug}
@@ -3510,10 +3550,47 @@
 		opacity: 0.4;
 		cursor: default;
 	}
-	/* 터치 기기(hover 없음)에선 항상 옅게 노출해 접근 가능하게. */
+	/* 터치 기기(hover 없음): 28px 는 오터치가 잦아 40px 로 키우고, 마지막 메시지 또는 탭해서 연
+	   문단(.touch-open)에만 노출한다(늘 반투명으로 겹쳐 보이던 것 정리). 위치는 문단 아래 여백 쪽으로. */
 	@media (hover: none) {
+		.msg-del,
+		.msg-regen,
+		.msg-retry {
+			width: 40px;
+			height: 40px;
+			bottom: -14px;
+			opacity: 0;
+			pointer-events: none;
+			font-size: 1.25rem;
+		}
 		.msg-del {
-			opacity: 0.55;
+			right: -4px;
+		}
+		.msg-regen,
+		.msg-retry {
+			right: 42px;
+		}
+		.para.image_generation .msg-retry {
+			right: 88px;
+		}
+		.msg-regen svg,
+		.msg-retry svg {
+			width: 18px;
+			height: 18px;
+		}
+		.para.touch-open .msg-del,
+		.para.touch-open .msg-regen,
+		.para.touch-open .msg-retry {
+			opacity: 0.92;
+			pointer-events: auto;
+		}
+		.para.touch-open .msg-del:disabled,
+		.para.touch-open .msg-regen:disabled,
+		.para.touch-open .msg-retry:disabled {
+			opacity: 0.4;
+		}
+		.para.touch-open .msg-cost {
+			opacity: 0.8;
 		}
 	}
 	/* 이미지 재생성(🔄)·마지막 턴 되돌리기(↻) 버튼 — 삭제 버튼 좌측. msg-del 과 동일한 노출 규칙.
@@ -3569,12 +3646,6 @@
 	@keyframes msg-regen-spin {
 		to {
 			transform: rotate(360deg);
-		}
-	}
-	@media (hover: none) {
-		.msg-regen,
-		.msg-retry {
-			opacity: 0.55;
 		}
 	}
 	/* 장면 이미지 */
@@ -3868,7 +3939,7 @@
 		text-align: center;
 		font-size: 0.72rem;
 		color: var(--text-faint);
-		margin: 8px 0 0;
+		margin: 18px 0 0;
 	}
 	.send-error {
 		text-align: center;

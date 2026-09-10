@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { scrollLock } from '$lib/scrollLock';
+	import { swipeClose } from '$lib/swipeClose';
 	import { tick } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import type { RecentChat } from '$lib/types';
@@ -121,6 +122,15 @@
 	}
 </script>
 
+<!-- Esc 로 닫기(다른 모달과 동일). 삭제 확인 중이면 확인만 취소. -->
+<svelte:window
+	onkeydown={(e) => {
+		if (!open || e.key !== 'Escape') return;
+		if (confirmId) confirmId = null;
+		else onClose();
+	}}
+/>
+
 {#if open}
 	<!-- 오버레이 -->
 	<div
@@ -131,7 +141,12 @@
 		role="presentation"
 	></div>
 
-	<aside class="sidebar" transition:fly={{ x: -320, duration: 200 }}>
+	<!-- 터치: 드로어를 왼쪽으로 쓸어 닫기 -->
+	<aside
+		class="sidebar"
+		transition:fly={{ x: -320, duration: 200 }}
+		use:swipeClose={{ dir: 'left', onClose }}
+	>
 		<header class="head">
 			<span class="title">최근 채팅</span>
 			<button class="close" onclick={onClose} aria-label="닫기">✕</button>

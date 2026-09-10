@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { scrollLock } from '$lib/scrollLock';
+	import { swipeClose } from '$lib/swipeClose';
 	import { invalidateAll } from '$app/navigation';
 	import { profileModal } from '$lib/state/profileModal.svelte';
 	import { privacyMode, setHideHistory } from '$lib/state/privacyMode.svelte';
@@ -64,6 +65,7 @@
 	<div class="backdrop" use:scrollLock onclick={close} role="presentation">
 		<div
 			class="modal"
+			use:swipeClose={{ dir: 'down', onClose: close }}
 			role="dialog"
 			aria-modal="true"
 			aria-label="프로필 설정"
@@ -74,6 +76,7 @@
 				<button class="close" onclick={close} aria-label="닫기">✕</button>
 			{/if}
 
+			<div class="sheet-handle" aria-hidden="true"></div>
 			<div class="head">
 				<h2>{dismissable ? '프로필 수정' : '프로필 설정'}</h2>
 				<p class="sub">대화에서 '나'를 어떻게 부르고 어떤 사람으로 둘지 정해요. 전부 선택이라 비워도 돼요.</p>

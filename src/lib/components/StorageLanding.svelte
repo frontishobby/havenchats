@@ -90,7 +90,7 @@
 				<button class="choice" onclick={onDrive} disabled={busy || sync.clientIdMissing}>
 					<strong>OneDrive 에 저장</strong>
 					<span>
-						Google 계정의 앱 전용 폴더에 저장하고 다른 기기와 동기화해요.
+						Microsoft 계정의 OneDrive 앱 전용 폴더(Apps/Haven)에 저장하고 다른 기기와 동기화해요.
 						{#if sync.clientIdMissing}(클라이언트 ID 미설정){/if}
 					</span>
 				</button>

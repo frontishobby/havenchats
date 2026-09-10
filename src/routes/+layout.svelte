@@ -59,9 +59,11 @@
 		return res.ok;
 	}
 
-	// 최초 로그인(프로필 미완성) 시 프로필 설정 모달 자동 노출
+	// 최초 실행(프로필 미완성) 시 프로필 설정 모달 자동 노출.
+	// 저장소 랜딩(StorageLanding, sync.ready=false)이 떠 있는 동안엔 겹치지 않게 미룬다 —
+	// 저장소를 고르고 나면(ready) 그때 연다. OneDrive 에서 받아온 프로필이 있으면 안 뜬다.
 	$effect(() => {
-		if (me?.user && !me.user.profileComplete) profileModal.open = true;
+		if (me?.user && !me.user.profileComplete && sync.ready) profileModal.open = true;
 	});
 
 	// 브라우저 기록 숨김(로컬 옵션): 켜져 있으면 어떤 페이지든 탭 제목을 "Haven" 으로 강제.
@@ -135,21 +137,39 @@
 					onclick={() => (storageModal.open = true)}
 					title={sync.error ?? 'OneDrive 동기화 상태'}
 				>
-					{sync.status === 'syncing'
-						? '⟳ 동기화 중'
-						: sync.status === 'needs-auth'
-							? sync.pending > 0
-								? `⚠ 로그인 · 대기 ${sync.pending}`
-								: '⚠ OneDrive 로그인'
-							: sync.status === 'conflict'
-								? '⚠ 충돌 · 선택 필요'
-							: sync.status === 'error'
-								? '⚠ 동기화 오류'
-								: sync.pending > 0
-									? `☁ 대기 ${sync.pending}`
-									: sync.otherActive
-										? `☁ ${sync.writer?.deviceName ?? '다른 기기'} 사용 중`
-										: '☁ 동기화됨'}
+					<!-- 데스크톱 전체 문구 / 모바일 축약 문구(같은 상태, 폭만 다름 — 잘려서 '⚠ 로그…' 가 되지 않게). -->
+					<span class="chip-full">
+						{sync.status === 'syncing'
+							? '⟳ 동기화 중'
+							: sync.status === 'needs-auth'
+								? sync.pending > 0
+									? `⚠ 로그인 · 대기 ${sync.pending}`
+									: '⚠ OneDrive 로그인'
+								: sync.status === 'conflict'
+									? '⚠ 충돌 · 선택 필요'
+								: sync.status === 'error'
+									? '⚠ 동기화 오류'
+									: sync.pending > 0
+										? `☁ 대기 ${sync.pending}`
+										: sync.otherActive
+											? `☁ ${sync.writer?.deviceName ?? '다른 기기'} 사용 중`
+											: '☁ 동기화됨'}
+					</span>
+					<span class="chip-short">
+						{sync.status === 'syncing'
+							? '⟳'
+							: sync.status === 'needs-auth'
+								? sync.pending > 0
+									? `⚠ 로그인 ${sync.pending}`
+									: '⚠ 로그인'
+								: sync.status === 'conflict'
+									? '⚠ 충돌'
+								: sync.status === 'error'
+									? '⚠ 오류'
+									: sync.pending > 0
+										? `☁ ${sync.pending}`
+										: '☁'}
+					</span>
 				</button>
 			{/if}
 			{#if creditsInvalid}
@@ -158,7 +178,8 @@
 					onclick={openApiKeys}
 					title="저장된 Vercel AI Gateway 키가 거부됐습니다(401). API 키 관리에서 다시 등록하세요."
 				>
-					⚠ Gateway 키 재등록
+					<span class="chip-full">⚠ Gateway 키 재등록</span>
+					<span class="chip-short">⚠ 키</span>
 				</button>
 			{:else if creditsOk}
 				<button
@@ -197,6 +218,10 @@
 					</button>
 					{#if menuOpen}
 						<div class="menu" role="menu">
+							<a class="menu-item" role="menuitem" href="/create" onclick={() => (menuOpen = false)}>
+								캐릭터 만들기
+							</a>
+							<div class="menu-sep"></div>
 							<button class="menu-item" role="menuitem" onclick={openProfileSettings}>
 								프로필 설정
 							</button>
@@ -397,6 +422,9 @@
 	.mobile-only {
 		display: none;
 	}
+	.chip-short {
+		display: none;
+	}
 	.menu-sep {
 		height: 1px;
 		margin: 6px 4px;
@@ -530,8 +558,17 @@
 		}
 		.sync-chip,
 		.credits-badge {
-			font-size: 0.68rem;
-			padding: 4px 8px;
+			font-size: 0.7rem;
+			padding: 5px 9px;
+			min-height: 28px;
+			overflow: visible;
+			text-overflow: clip;
+		}
+		.chip-full {
+			display: none;
+		}
+		.chip-short {
+			display: inline;
 		}
 		nav {
 			gap: 6px;

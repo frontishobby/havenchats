@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { scrollLock } from '$lib/scrollLock';
+	import { swipeClose } from '$lib/swipeClose';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
 	import { clearNovelaiToken } from '$lib/novelaiClient';
 
@@ -168,6 +169,7 @@
 	<div class="backdrop" use:scrollLock onclick={close} role="presentation">
 		<div
 			class="modal"
+			use:swipeClose={{ dir: 'down', onClose: close }}
 			role="dialog"
 			aria-modal="true"
 			aria-label="API 키 관리"
@@ -176,6 +178,7 @@
 		>
 			<button class="close" onclick={close} aria-label="닫기">✕</button>
 
+			<div class="sheet-handle" aria-hidden="true"></div>
 			<div class="head">
 				<h2>API 키 관리</h2>
 				<p class="sub">채팅에는 Vercel AI Gateway 키가, 실시간 이미지 생성에는 NovelAI 키가 필요해요.</p>

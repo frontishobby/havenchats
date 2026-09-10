@@ -38,6 +38,9 @@
 			placeholder="캐릭터 이름, 설명으로 검색…"
 			bind:value={query}
 		/>
+		<a class="create-btn" href="/create" aria-label="캐릭터 만들기" title="캐릭터 만들기">
+			<span class="plus">＋</span><span class="create-label">만들기</span>
+		</a>
 	</div>
 
 </section>
@@ -65,8 +68,34 @@
 	}
 	.search {
 		position: relative;
-		max-width: 520px;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		max-width: 600px;
 		margin: 0 auto 20px;
+	}
+	/* 캐릭터 만들기 진입점 — 검색창 오른쪽 알약 버튼(유저 메뉴에도 같은 항목). */
+	.create-btn {
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		min-height: 44px;
+		padding: 0 16px 0 12px;
+		border-radius: 999px;
+		background: var(--accent);
+		color: #fff;
+		font-size: 0.9rem;
+		font-weight: 700;
+		white-space: nowrap;
+		transition: background 0.15s ease;
+	}
+	.create-btn:hover {
+		background: var(--accent-hover);
+	}
+	.plus {
+		font-size: 1.05rem;
+		line-height: 1;
 	}
 	.search-icon {
 		position: absolute;
@@ -77,6 +106,8 @@
 		opacity: 0.6;
 	}
 	.search input {
+		flex: 1;
+		min-width: 0;
 		width: 100%;
 		background: var(--bg-card);
 		border: 1px solid var(--border);
@@ -117,6 +148,21 @@
 		}
 		.search input {
 			padding: 10px 14px 10px 38px;
+		}
+		.search {
+			gap: 8px;
+		}
+		.create-btn {
+			min-height: 42px;
+			width: 42px;
+			padding: 0;
+			justify-content: center;
+		}
+		.create-label {
+			display: none;
+		}
+		.plus {
+			font-size: 1.25rem;
 		}
 		.grid-wrap {
 			padding: 8px 12px 48px;

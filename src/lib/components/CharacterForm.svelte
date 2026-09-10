@@ -1023,7 +1023,8 @@
 	.create {
 		flex: 0 1 640px;
 		max-width: 640px;
-		padding: 28px 20px 80px;
+		/* 하단 여백: 모바일 AI 도우미 FAB(우하단 고정, ≈62px+safe-area)가 등록 버튼·마지막 입력을 가리지 않게. */
+		padding: 28px 20px calc(120px + env(safe-area-inset-bottom));
 	}
 	/* ── AI 도우미: 모바일 = 바텀시트(기본), PC = 우측 sticky 열 ─────────────── */
 	.assist-col {
@@ -1132,6 +1133,9 @@
 	}
 	@media (min-width: 1080px) {
 		/* PC: 폼 옆 sticky 열. 시트 전용 요소(탭 헤더·FAB·백드롭)는 숨기고 두 패널을 모두 펼친다. */
+		.create {
+			padding-bottom: 80px;
+		}
 		.assist-col {
 			position: sticky;
 			top: 20px;
