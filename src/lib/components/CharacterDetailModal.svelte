@@ -538,8 +538,9 @@
 			top: 10px;
 			right: 10px;
 		}
+		/* 정사각 썸네일을 자르지 않고 전부 보여준다(시트 전체가 스크롤되므로 아래 내용은 밀려도 됨) */
 		.thumb {
-			max-height: 46dvh;
+			max-height: none;
 			border-radius: 18px 18px 0 0;
 		}
 		.hero {
