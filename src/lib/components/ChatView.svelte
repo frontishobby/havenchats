@@ -3550,49 +3550,6 @@
 		opacity: 0.4;
 		cursor: default;
 	}
-	/* 터치 기기(hover 없음): 28px 는 오터치가 잦아 40px 로 키우고, 마지막 메시지 또는 탭해서 연
-	   문단(.touch-open)에만 노출한다(늘 반투명으로 겹쳐 보이던 것 정리). 위치는 문단 아래 여백 쪽으로. */
-	@media (hover: none) {
-		.msg-del,
-		.msg-regen,
-		.msg-retry {
-			width: 40px;
-			height: 40px;
-			bottom: -14px;
-			opacity: 0;
-			pointer-events: none;
-			font-size: 1.25rem;
-		}
-		.msg-del {
-			right: -4px;
-		}
-		.msg-regen,
-		.msg-retry {
-			right: 42px;
-		}
-		.para.image_generation .msg-retry {
-			right: 88px;
-		}
-		.msg-regen svg,
-		.msg-retry svg {
-			width: 18px;
-			height: 18px;
-		}
-		.para.touch-open .msg-del,
-		.para.touch-open .msg-regen,
-		.para.touch-open .msg-retry {
-			opacity: 0.92;
-			pointer-events: auto;
-		}
-		.para.touch-open .msg-del:disabled,
-		.para.touch-open .msg-regen:disabled,
-		.para.touch-open .msg-retry:disabled {
-			opacity: 0.4;
-		}
-		.para.touch-open .msg-cost {
-			opacity: 0.8;
-		}
-	}
 	/* 이미지 재생성(🔄)·마지막 턴 되돌리기(↻) 버튼 — 삭제 버튼 좌측. msg-del 과 동일한 노출 규칙.
 	   이미지 문단에 둘 다 있으면 되돌리기를 한 칸 더 왼쪽으로. */
 	.para.image_generation .msg-retry {
@@ -3646,6 +3603,55 @@
 	@keyframes msg-regen-spin {
 		to {
 			transform: rotate(360deg);
+		}
+	}
+	/* 터치 기기(hover 없음): 28px 는 오터치가 잦아 40px 로 키우고, 마지막 메시지 또는 탭해서 연
+	   문단(.touch-open)에만 노출한다(늘 반투명으로 겹쳐 보이던 것 정리). 위치는 문단 아래 여백 쪽으로.
+	   ⚠ 이 블록은 반드시 위 일반 규칙(.msg-regen right:26px 등)보다 **뒤**에 있어야 한다 — 특이도가 같아
+	   앞에 두면 일반 규칙이 이겨 40px 버튼 셋이 -4/26/46px 에 겹친다(2026-09-10 모바일 실사용). */
+	@media (hover: none) {
+		.msg-del,
+		.msg-regen,
+		.msg-retry {
+			width: 40px;
+			height: 40px;
+			bottom: -14px;
+			opacity: 0;
+			pointer-events: none;
+			font-size: 1.25rem;
+		}
+		.msg-del {
+			right: -4px;
+		}
+		.msg-regen,
+		.msg-retry {
+			right: 42px;
+		}
+		.para.image_generation .msg-retry {
+			right: 88px;
+		}
+		/* 이미지 문단: 버튼 행(40px, bottom -14px)이 그림 하단에 걸치지 않게 아래 여백 확보. */
+		.para.image_generation.touch-open {
+			padding-bottom: 18px;
+		}
+		.msg-regen svg,
+		.msg-retry svg {
+			width: 18px;
+			height: 18px;
+		}
+		.para.touch-open .msg-del,
+		.para.touch-open .msg-regen,
+		.para.touch-open .msg-retry {
+			opacity: 0.92;
+			pointer-events: auto;
+		}
+		.para.touch-open .msg-del:disabled,
+		.para.touch-open .msg-regen:disabled,
+		.para.touch-open .msg-retry:disabled {
+			opacity: 0.4;
+		}
+		.para.touch-open .msg-cost {
+			opacity: 0.8;
 		}
 	}
 	/* 장면 이미지 */
