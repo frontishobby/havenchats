@@ -295,14 +295,24 @@
 			{/if}
 
 			<!-- 1) 그림체 깎기(자유 장면 미리보기) -->
+			{#snippet genButton()}
+				<button class="primary" onclick={generate} disabled={generating || !style.trim()}>
+					{previewUrl ? '다시 생성' : '장면 생성'}
+				</button>
+			{/snippet}
+
 			<div class="body">
-				<div class="preview" style:aspect-ratio={previewRatio}>
-					{#if previewUrl}
-						<img src={previewUrl} alt="미리보기" />
-					{:else}
-						<div class="ph">그림체·상황을 적고 <b>장면 생성</b>을 눌러보세요</div>
-					{/if}
-					{#if generating}<div class="overlay">생성 중…</div>{/if}
+				<div class="preview-col">
+					<div class="preview" style:aspect-ratio={previewRatio}>
+						{#if previewUrl}
+							<img src={previewUrl} alt="미리보기" />
+						{:else}
+							<div class="ph">그림체·상황을 적고 <b>장면 생성</b>을 눌러보세요</div>
+						{/if}
+						{#if generating}<div class="overlay">생성 중…</div>{/if}
+					</div>
+					<!-- 모바일: 결과물 바로 아래 생성 버튼(입력칸까지 스크롤 왕복 방지) -->
+					<div class="actions mobile-only">{@render genButton()}</div>
 				</div>
 
 				<div class="controls">
@@ -362,11 +372,7 @@
 							<button class="res" class:active={resolution === r} onclick={() => (resolution = r)}>{r}</button>
 						{/each}
 					</div>
-					<div class="actions">
-						<button class="primary" onclick={generate} disabled={generating || !style.trim()}>
-							{previewUrl ? '다시 생성' : '장면 생성'}
-						</button>
-					</div>
+					<div class="actions desktop-only">{@render genButton()}</div>
 					<p class="hint">
 						그림체는 모든 이미지에 적용될 스타일 태그예요. 퀄리티·네거티브는 비워두면 모델에 맞춰 자동 적용됩니다.
 						저장하면 <b>{naiModelInfo.label}</b> 그림체로 표시되고, 채팅·썸네일도 이 모델로 생성돼요.
@@ -491,6 +497,7 @@
 	@media (max-width: 620px) {
 		.body {
 			flex-direction: column;
+			align-items: stretch; /* 세로 배치에선 입력 열이 전체 폭을 써야 한다 */
 		}
 	}
 	.preview {
@@ -504,12 +511,33 @@
 		display: grid;
 		place-items: center;
 	}
+	.preview-col {
+		display: flex;
+		flex-direction: column;
+		flex: 0 0 300px;
+	}
+	.preview-col .preview {
+		flex: none;
+	}
+	.mobile-only {
+		display: none;
+	}
 	@media (max-width: 620px) {
-		.preview {
+		.preview-col {
 			flex: none;
 			width: 100%;
 			max-width: 300px;
 			margin: 0 auto;
+		}
+		.preview {
+			width: 100%;
+		}
+		.mobile-only {
+			display: flex;
+			margin-top: 10px;
+		}
+		.desktop-only {
+			display: none;
 		}
 	}
 	.preview img {
