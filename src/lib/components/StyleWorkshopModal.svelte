@@ -42,6 +42,9 @@
 	let quality = $state('');
 	let extrasOpen = $state(false);
 	let resolution = $state<Res>('832x1216');
+	// 마지막으로 생성된 미리보기의 해상도 — 미리보기 박스 비율은 이 값을 따른다(선택만 바꿔도 이미지가 잘리지 않게).
+	let previewRes = $state<Res>('832x1216');
+	const previewRatio = $derived(previewRes.replace('x', ' / '));
 	// 이 그림체를 깎는 NovelAI 모델. 저장 시 그림체에 박혀 채팅·썸네일도 같은 모델로 생성된다.
 	let naiModel = $state(DEFAULT_NAI_MODEL);
 	const naiModelInfo = $derived(getNaiModel(naiModel));
@@ -188,6 +191,7 @@
 				(blob) => {
 					revoke(previewUrl);
 					previewUrl = URL.createObjectURL(blob);
+					previewRes = resolution;
 				}
 			);
 		} finally {
@@ -292,7 +296,7 @@
 
 			<!-- 1) 그림체 깎기(자유 장면 미리보기) -->
 			<div class="body">
-				<div class="preview">
+				<div class="preview" style:aspect-ratio={previewRatio}>
 					{#if previewUrl}
 						<img src={previewUrl} alt="미리보기" />
 					{:else}
@@ -481,6 +485,7 @@
 	}
 	.body {
 		display: flex;
+		align-items: flex-start; /* stretch 면 미리보기가 입력 열 높이로 늘어나 aspect-ratio 가 깨지고 이미지가 잘린다 */
 		gap: 18px;
 	}
 	@media (max-width: 620px) {
@@ -491,7 +496,7 @@
 	.preview {
 		position: relative;
 		flex: 0 0 300px;
-		aspect-ratio: 832 / 1216;
+		aspect-ratio: 832 / 1216; /* 기본값 — 실제 비율은 마지막 생성 해상도(style:aspect-ratio) */
 		border-radius: var(--radius);
 		overflow: hidden;
 		background: var(--bg-elev);
@@ -510,7 +515,7 @@
 	.preview img {
 		width: 100%;
 		height: 100%;
-		object-fit: cover;
+		object-fit: contain;
 	}
 	.ph {
 		padding: 0 18px;
