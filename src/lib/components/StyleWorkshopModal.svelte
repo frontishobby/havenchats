@@ -525,9 +525,7 @@
 	@media (max-width: 620px) {
 		.preview-col {
 			flex: none;
-			width: 100%;
-			max-width: 300px;
-			margin: 0 auto;
+			width: 100%; /* 세로 화면이라 결과물은 좌우 꽉 채운다 */
 		}
 		.preview {
 			width: 100%;
