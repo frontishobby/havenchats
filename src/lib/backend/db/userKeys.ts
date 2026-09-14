@@ -4,7 +4,7 @@
  * provider: 'novelai'(이미지 생성), 'gateway'(Vercel AI Gateway — 챗/상황프롬프트 LLM).
  */
 
-export type KeyProvider = 'novelai' | 'gateway';
+export type KeyProvider = 'novelai' | 'gateway' | 'bridge';
 
 /** 등록 시점 검증 스냅샷(NovelAI: { tier, active, isOpus }). UI 표시·재검증 생략용. */
 export type StoredKeyMeta = Record<string, unknown>;

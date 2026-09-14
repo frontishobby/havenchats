@@ -59,6 +59,71 @@ keysRouter.delete('/gateway', async (c) => {
 });
 
 // ── NovelAI ───────────────────────────────────────────────────
+/**
+ * 구독 브릿지(homebox 의 bridge/haven-bridge.mjs) 베이스 URL. 키가 아니라 URL 을 ciphertext 칸에 그대로 둔다.
+ * 등록 시 `<url>/v1/models` 를 브라우저가 직접 호출해 닿는지 확인(테일넷·CORS 포함 검증).
+ */
+const BRIDGE_PROVIDER = 'bridge';
+
+export function normalizeBridgeUrl(raw: string): string | null {
+	let u: URL;
+	try {
+		u = new URL(raw.trim());
+	} catch {
+		return null;
+	}
+	if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+	return u.origin + u.pathname.replace(/\/+$/, '');
+}
+
+keysRouter.get('/bridge', async (c) => {
+	const user = requireUser(c);
+	const db = c.env.DB;
+	if (!db) return c.json({ error: 'db unavailable' }, 500);
+
+	const status = await getKeyStatus(db, user.id, BRIDGE_PROVIDER);
+	const url = status.registered ? await getDecryptedKey(db, user.id, BRIDGE_PROVIDER) : null;
+	return c.json({ registered: status.registered, updatedAt: status.updatedAt, url });
+});
+
+keysRouter.post('/bridge', async (c) => {
+	const user = requireUser(c);
+	const db = c.env.DB;
+	if (!db) return c.json({ error: 'db unavailable' }, 500);
+
+	const body = (await c.req.json().catch(() => null)) as { url?: unknown } | null;
+	const url = typeof body?.url === 'string' ? normalizeBridgeUrl(body.url) : null;
+	if (!url) return c.json({ error: 'invalid_url', message: 'http(s):// 로 시작하는 브릿지 주소를 입력해 주세요.' }, 400);
+
+	try {
+		const ctl = new AbortController();
+		const timer = setTimeout(() => ctl.abort(), 8000);
+		const res = await fetch(`${url}/v1/models`, { signal: ctl.signal });
+		clearTimeout(timer);
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		const data = (await res.json()) as { data?: unknown[] };
+		if (!Array.isArray(data.data)) throw new Error('not a bridge');
+	} catch (e) {
+		const why = e instanceof Error ? e.message : String(e);
+		return c.json(
+			{ error: 'unreachable', message: `브릿지에 연결할 수 없어요(${why}). Tailscale 연결과 주소를 확인해 주세요.` },
+			400
+		);
+	}
+
+	await setKey(db, user.id, BRIDGE_PROVIDER, url, { verifiedAt: Date.now() });
+	return c.json({ registered: true, url });
+});
+
+keysRouter.delete('/bridge', async (c) => {
+	const user = requireUser(c);
+	const db = c.env.DB;
+	if (!db) return c.json({ error: 'db unavailable' }, 500);
+
+	await deleteKey(db, user.id, BRIDGE_PROVIDER);
+	return c.json({ registered: false });
+});
+
 const NOVELAI_PROVIDER = 'novelai';
 
 interface NovelaiKeyMeta {

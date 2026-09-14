@@ -1,0 +1,16 @@
+[Unit]
+Description=Haven Claude Code subscription bridge
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/node %h/haven-bridge/haven-bridge.mjs
+WorkingDirectory=%h/haven-bridge
+Environment=PORT=8787
+Environment=HOST=127.0.0.1
+Environment=CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

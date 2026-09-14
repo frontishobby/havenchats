@@ -17,7 +17,7 @@ import { buildLoreBlock } from '$lib/lorebook';
 import { buildImageCatalog } from '$lib/imageCodes';
 import { fillCharName, personalize } from '$lib/placeholders';
 import { estimateTokens } from '$lib/backend/db/chats';
-import { MODEL_IDS, DEFAULT_MODEL_ID, getContextLimit, isReasoningModel } from '$lib/data/models';
+import { MODEL_IDS, DEFAULT_MODEL_ID, getContextLimit, isReasoningModel, isBridgeModel } from '$lib/data/models';
 import type { ChatDebugSnapshot } from '$lib/chatDebug';
 
 export type { ChatDebugSnapshot } from '$lib/chatDebug';
@@ -162,6 +162,8 @@ export function buildProviderOptions(
 ): ProviderOptions {
 	// noThinking: 단순 변환(상황 프롬프트 등)에선 thinking 을 꺼서 지연·빈응답을 줄인다.
 	const noThink = opts?.noThinking === true;
+	// 구독 브릿지(OpenAI 호환)는 게이트웨이 옵션이 의미 없고 thinking 은 브릿지가 끈다.
+	if (isBridgeModel(modelId)) return {};
 	const out: ProviderOptions = { gateway: { caching: 'auto' } };
 	if (modelId.startsWith('google/')) {
 		// Gemini 는 Vertex AI·AI Studio 두 공급자에 모두 있다. AI Gateway 는 일시적 503/500
