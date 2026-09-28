@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { scrollLock } from '$lib/scrollLock';
 	import { apiKeyModal } from '$lib/state/apiKeyModal.svelte';
-	import { base64ToBlob, blobToWebp } from '$lib/imagePreview';
+	import { base64ToBlob, blobToBase64, blobToWebp } from '$lib/imagePreview';
 	import { NAI_MODELS, DEFAULT_NAI_MODEL, getNaiModel } from '$lib/naiModels';
 	import type { ArtStyle } from '$lib/types';
 
@@ -31,7 +31,7 @@
 		thumbBlob = null;
 	});
 
-	const RESOLUTIONS = ['832x1216', '1024x1024'] as const;
+	const RESOLUTIONS = ['832x1216', '1024x1024', '1216x832'] as const;
 	type Res = (typeof RESOLUTIONS)[number];
 
 	// 그림체(저장될 스타일 프롬프트) · 상황(테스트용)
@@ -45,6 +45,7 @@
 	// 마지막으로 생성된 미리보기의 해상도 — 미리보기 박스 비율은 이 값을 따른다(선택만 바꿔도 이미지가 잘리지 않게).
 	let previewRes = $state<Res>('832x1216');
 	const previewRatio = $derived(previewRes.replace('x', ' / '));
+	const previewWide = $derived(previewRes === '1216x832');
 	// 이 그림체를 깎는 NovelAI 모델. 저장 시 그림체에 박혀 채팅·썸네일도 같은 모델로 생성된다.
 	let naiModel = $state(DEFAULT_NAI_MODEL);
 	const naiModelInfo = $derived(getNaiModel(naiModel));
@@ -73,7 +74,10 @@
 
 	// 장면 미리보기(자유 생성)
 	let previewUrl = $state<string | null>(null);
+	// 마지막 생성의 최종 원본(PNG) — 짤줍(2배 업스케일 후 다운로드)의 입력. 중간 프레임은 담지 않는다.
+	let previewBlob = $state<Blob | null>(null);
 	let generating = $state(false);
+	let saving = $state(false);
 	let error = $state<string | null>(null);
 	let noKey = $state(false);
 
@@ -90,6 +94,7 @@
 		revoke(previewUrl);
 		revoke(thumbUrl);
 		previewUrl = null;
+		previewBlob = null;
 		thumbUrl = null;
 		thumbBlob = null;
 		error = null;
@@ -185,8 +190,9 @@
 	async function generate() {
 		if (generating || !style.trim()) return;
 		generating = true;
+		previewBlob = null;
 		try {
-			await streamGenerate(
+			previewBlob = await streamGenerate(
 				{ style, situation, resolution, model: naiModel, negative, quality },
 				(blob) => {
 					revoke(previewUrl);
@@ -196,6 +202,44 @@
 			);
 		} finally {
 			generating = false;
+		}
+	}
+
+	/** 짤줍: 마지막 결과 원본을 NovelAI 2배 업스케일해 PNG 로 내려받는다(캐릭터 상세 이미지와 같은 업스케일 경로). */
+	async function saveUpscaled() {
+		if (saving || !previewBlob) return;
+		saving = true;
+		error = null;
+		noKey = false;
+		try {
+			const bmp = await createImageBitmap(previewBlob);
+			const w = bmp.width;
+			const h = bmp.height;
+			bmp.close?.();
+			const res = await fetch('/api/characters/thumbnail/upscale', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ image: await blobToBase64(previewBlob), width: w, height: h })
+			});
+			if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) {
+				const d = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+				if (d.error === 'no_key') noKey = true;
+				throw new Error(d.message ?? '업스케일에 실패했어요.');
+			}
+			const out = await res.blob();
+			const ext = out.type.includes('png') ? 'png' : out.type.includes('jpeg') ? 'jpg' : 'webp';
+			const url = URL.createObjectURL(out);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `haven-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}.${ext}`;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+		} catch (e) {
+			error = e instanceof Error ? e.message : '업스케일에 실패했어요.';
+		} finally {
+			saving = false;
 		}
 	}
 
@@ -300,9 +344,16 @@
 					{previewUrl ? '다시 생성' : '장면 생성'}
 				</button>
 			{/snippet}
+			{#snippet saveButton()}
+				{#if previewBlob && !generating}
+					<button class="ghost save" onclick={saveUpscaled} disabled={saving} title="2배 업스케일 후 다운로드">
+						{saving ? '업스케일 중…' : '짤줍'}
+					</button>
+				{/if}
+			{/snippet}
 
 			<div class="body">
-				<div class="preview-col">
+				<div class="preview-col" class:wide={previewWide}>
 					<div class="preview" style:aspect-ratio={previewRatio}>
 						{#if previewUrl}
 							<img src={previewUrl} alt="미리보기" />
@@ -310,9 +361,11 @@
 							<div class="ph">그림체·상황을 적고 <b>장면 생성</b>을 눌러보세요</div>
 						{/if}
 						{#if generating}<div class="overlay">생성 중…</div>{/if}
+						{#if saving}<div class="overlay">업스케일 중…</div>{/if}
 					</div>
+					{#if previewBlob && !generating}<div class="actions desktop-only">{@render saveButton()}</div>{/if}
 					<!-- 모바일: 결과물 바로 아래 생성 버튼(입력칸까지 스크롤 왕복 방지) -->
-					<div class="actions mobile-only">{@render genButton()}</div>
+					<div class="actions mobile-only">{@render saveButton()}{@render genButton()}</div>
 				</div>
 
 				<div class="controls">
@@ -516,6 +569,9 @@
 		flex-direction: column;
 		flex: 0 0 300px;
 	}
+	.preview-col.wide {
+		flex-basis: 380px; /* 가로 결과물은 조금 넓게 */
+	}
 	.preview-col .preview {
 		flex: none;
 	}
@@ -630,6 +686,7 @@
 	}
 	.res-row {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 8px;
 		margin-top: 10px;
 	}
