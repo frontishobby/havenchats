@@ -4,15 +4,19 @@
 	import { base64ToBlob, blobToBase64, blobToWebp } from '$lib/imagePreview';
 	import { NAI_MODELS, DEFAULT_NAI_MODEL, getNaiModel } from '$lib/naiModels';
 	import type { ArtStyle } from '$lib/types';
+	import type { NaiStyleImport } from '$lib/naiPngMeta';
 
 	let {
 		open = $bindable(),
 		edit = null,
+		imported = null,
 		onPublished
 	}: {
 		open: boolean;
 		/** 수정 대상 그림체(본인 소유). 있으면 필드를 채워 열고 저장 시 PATCH. null 이면 새로 만들기. */
 		edit?: ArtStyle | null;
+		/** NovelAI PNG 에서 읽은 값(새로 만들기). 있으면 필드·미리보기·썸네일을 그 이미지로 채워 연다. */
+		imported?: { data: NaiStyleImport; file: File } | null;
 		onPublished?: () => void;
 	} = $props();
 	const isEdit = $derived(!!edit);
@@ -33,6 +37,37 @@
 
 	const RESOLUTIONS = ['832x1216', '1024x1024', '1216x832'] as const;
 	type Res = (typeof RESOLUTIONS)[number];
+
+	// PNG 가져오기로 열릴 때: 프롬프트·네거티브·퀄리티·모델·상황(인물 캡션)·제목·메모를 채우고,
+	// 원본 이미지를 미리보기와 썸네일로 쓴다(바로 저장 가능, '썸네일 다시'로 표준 장면 교체).
+	$effect(() => {
+		if (!open || !imported || edit) return;
+		const { data, file } = imported;
+		style = data.prompt;
+		quality = data.quality;
+		negative = data.negative;
+		extrasOpen = !!(data.quality || data.negative);
+		naiModel = data.model;
+		situation = data.situation;
+		title = data.title;
+		memo = data.memo;
+		const res = `${data.width}x${data.height}`;
+		if ((RESOLUTIONS as readonly string[]).includes(res)) resolution = previewRes = res as Res;
+		previewUrl = URL.createObjectURL(file);
+		previewBlob = file;
+		thumbUrl = URL.createObjectURL(file);
+		thumbBlob = file;
+		thumbExt = 'png';
+		fromPng = true;
+		blobToWebp(file)
+			.then((w) => {
+				if (thumbBlob !== file) return; // 그새 썸네일을 다시 뽑았으면 무시
+				thumbBlob = w;
+				thumbExt = 'webp';
+			})
+			.catch((e) => console.warn('[workshop] 가져온 썸네일 webp 변환 실패 — PNG 업로드:', String(e)));
+	});
+	let fromPng = $state(false);
 
 	// 그림체(저장될 스타일 프롬프트) · 상황(테스트용)
 	let style = $state('');
@@ -102,6 +137,7 @@
 		title = '';
 		memo = '';
 		publishing = false;
+		fromPng = false;
 	}
 	function revoke(u: string | null) {
 		if (u && u.startsWith('blob:')) URL.revokeObjectURL(u);
@@ -338,6 +374,13 @@
 				</div>
 			{/if}
 
+			{#if fromPng}
+				<div class="notice info">
+					PNG 의 NovelAI 생성 정보를 불러왔어요. 인원수·인물 캡션은 <b>상황(테스트)</b>으로, 퀄리티 태그는
+					<b>퀄리티</b>로 옮겼고, 썸네일은 원본 이미지예요.
+				</div>
+			{/if}
+
 			<!-- 1) 그림체 깎기(자유 장면 미리보기) -->
 			{#snippet genButton()}
 				<button class="primary" onclick={generate} disabled={generating || !style.trim()}>
@@ -406,7 +449,7 @@
 						<textarea
 							id="ws-quality"
 							rows="2"
-							maxlength="1500"
+							maxlength="3000"
 							bind:value={quality}
 							placeholder="예: 1.3::very aesthetic, masterpiece::, no text, -1::multiple views::"
 						></textarea>
@@ -414,7 +457,7 @@
 						<textarea
 							id="ws-negative"
 							rows="2"
-							maxlength="1500"
+							maxlength="3000"
 							bind:value={negative}
 							placeholder="예: lowres, bad anatomy, bad hands, text, watermark"
 						></textarea>
@@ -452,7 +495,13 @@
 					</div>
 					<div class="thumb-side">
 						<span class="fl">썸네일</span>
-						<p class="hint">{isEdit ? '새로 만들지 않으면 기존 썸네일을 유지해요.' : '마음에 들 때까지 다시 눌러 고르세요.'}</p>
+						<p class="hint">
+							{isEdit
+								? '새로 만들지 않으면 기존 썸네일을 유지해요.'
+								: fromPng
+									? '가져온 원본을 쓰고 있어요. 표준 장면으로 바꾸려면 다시 생성하세요.'
+									: '마음에 들 때까지 다시 눌러 고르세요.'}
+						</p>
 						<button class="ghost sm" onclick={generateThumb} disabled={thumbGenerating || !style.trim()}>
 							{thumbUrl ? '썸네일 다시' : '썸네일 생성'}
 						</button>
@@ -533,6 +582,9 @@
 		background: color-mix(in srgb, var(--nsfw, #f59e0b) 14%, var(--bg));
 		font-size: 0.82rem;
 		color: var(--text-dim);
+	}
+	.notice.info {
+		background: color-mix(in srgb, var(--accent) 12%, var(--bg));
 	}
 	.link {
 		background: none;

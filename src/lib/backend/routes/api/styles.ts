@@ -42,9 +42,9 @@ import type {
 
 const MAX_TITLE = 60;
 const MAX_MEMO = 500;
-const MAX_PROMPT = 1500;
+const MAX_PROMPT = 3000;
 /** 선택 네거티브/퀄리티 프롬프트 상한(그림체 프롬프트와 동일). */
-const MAX_EXTRA_PROMPT = 1500;
+const MAX_EXTRA_PROMPT = 3000;
 const MAX_THUMB_BYTES = 4 * 1024 * 1024;
 const EXT_BY_TYPE: Record<string, string> = {
 	'image/webp': 'webp',
@@ -52,7 +52,7 @@ const EXT_BY_TYPE: Record<string, string> = {
 	'image/jpeg': 'jpg'
 };
 
-const MAX_STYLE_CHARS = 1500;
+const MAX_STYLE_CHARS = 3000;
 const MAX_SITU_CHARS = 1000;
 const THUMB_RESOLUTION: ResolutionKey = '832x1216';
 
