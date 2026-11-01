@@ -234,6 +234,9 @@
 							<a class="menu-item" role="menuitem" href="/import" onclick={() => (menuOpen = false)}>
 								charx 가져오기
 							</a>
+							<a class="menu-item" role="menuitem" href="/havenx" onclick={() => (menuOpen = false)}>
+								havenx 가져오기
+							</a>
 							<!-- 모바일: 상단바에서 숨긴 허브 링크를 메뉴 안으로 -->
 							<div class="menu-sep mobile-only"></div>
 							<a class="menu-item mobile-only" role="menuitem" href="/styles" onclick={() => (menuOpen = false)}>

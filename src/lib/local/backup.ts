@@ -21,7 +21,43 @@ export interface BackupProgress {
 	total: number;
 }
 
-type Sink = { write(chunk: Uint8Array): Promise<void>; close(): Promise<void> };
+export type Sink = { write(chunk: Uint8Array): Promise<void>; close(): Promise<void> };
+
+/**
+ * 내려받을 파일의 쓰기 대상. 브라우저가 지원하면 저장 대화상자(디스크로 스트리밍),
+ * 아니면(사파리 등) 메모리에 모았다가 finalize 에서 Blob 다운로드. 사용자 제스처 직후에 불러야 한다.
+ */
+export async function openSaveSink(
+	name: string,
+	mime: string,
+	ext: string
+): Promise<{ sink: Sink; finalize: () => Promise<void> }> {
+	if (window.showSaveFilePicker) {
+		const handle = await window.showSaveFilePicker({
+			suggestedName: name,
+			types: [{ description: ext.slice(1), accept: { [mime]: [ext] } }]
+		});
+		const w = (await handle.createWritable()).getWriter();
+		return { sink: { write: (c) => w.write(c), close: () => w.close() }, finalize: async () => {} };
+	}
+	const parts: Uint8Array[] = [];
+	return {
+		sink: {
+			write: async (c) => {
+				parts.push(c);
+			},
+			close: async () => {}
+		},
+		finalize: async () => {
+			const blob = new Blob(parts as BlobPart[], { type: mime });
+			const a = document.createElement('a');
+			a.href = URL.createObjectURL(blob);
+			a.download = name;
+			a.click();
+			setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+		}
+	};
+}
 
 declare global {
 	interface Window {
@@ -37,37 +73,12 @@ declare global {
  * 아니면 Blob 다운로드. 반환: 쓴 바이트 수.
  */
 export async function exportBackup(onProgress?: (p: BackupProgress) => void): Promise<number> {
+	const name = `haven-backup-${new Date().toISOString().slice(0, 10)}.zip`;
+	// 저장 대화상자는 사용자 제스처 직후여야 하므로 가장 먼저 연다.
+	const { sink, finalize } = await openSaveSink(name, 'application/zip', '.zip');
 	const rt = getLocalRuntime();
 	await rt.flush();
 	const keys = await objKeys();
-	const name = `haven-backup-${new Date().toISOString().slice(0, 10)}.zip`;
-
-	let sink: Sink;
-	let finalize: () => Promise<void> = async () => {};
-	if (window.showSaveFilePicker) {
-		const handle = await window.showSaveFilePicker({
-			suggestedName: name,
-			types: [{ description: 'zip', accept: { 'application/zip': ['.zip'] } }]
-		});
-		const w = (await handle.createWritable()).getWriter();
-		sink = { write: (c) => w.write(c), close: () => w.close() };
-	} else {
-		const parts: Uint8Array[] = [];
-		sink = {
-			write: async (c) => {
-				parts.push(c);
-			},
-			close: async () => {}
-		};
-		finalize = async () => {
-			const blob = new Blob(parts as BlobPart[], { type: 'application/zip' });
-			const a = document.createElement('a');
-			a.href = URL.createObjectURL(blob);
-			a.download = name;
-			a.click();
-			setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-		};
-	}
 
 	let written = 0;
 	let pendingWrite: Promise<void> = Promise.resolve();
@@ -196,7 +207,7 @@ function concat(parts: Uint8Array[]): Uint8Array {
 	return out;
 }
 
-function guessType(key: string): string {
+export function guessType(key: string): string {
 	const ext = key.split('.').pop()?.toLowerCase();
 	if (ext === 'png') return 'image/png';
 	if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';

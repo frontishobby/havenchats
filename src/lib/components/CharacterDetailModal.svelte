@@ -23,6 +23,9 @@
 			pickOpen = false;
 			imgFailed = false;
 			starting = false;
+			exportOpen = false;
+			sessionCount = null;
+			exportMsg = '';
 		}
 	});
 
@@ -77,6 +80,46 @@
 	function edit() {
 		if (!character) return;
 		goto(`/characters/${character.id}/edit`);
+	}
+
+	// .havenx 내보내기 — 캐릭터 + 에셋(+선택: 대화 기록)을 파일 하나로.
+	let exportOpen = $state(false);
+	let exportSessions = $state(false);
+	let sessionCount = $state<number | null>(null);
+	let exporting = $state(false);
+	let exportMsg = $state('');
+	async function toggleExport() {
+		if (!character) return;
+		exportOpen = !exportOpen;
+		exportMsg = '';
+		if (exportOpen && sessionCount === null) {
+			const { countSessions } = await import('$lib/local/havenx');
+			sessionCount = await countSessions(character.id).catch(() => 0);
+		}
+	}
+	async function runExport() {
+		if (!character || exporting) return;
+		exporting = true;
+		exportMsg = '준비 중…';
+		try {
+			const { exportHavenx } = await import('$lib/local/havenx');
+			const r = await exportHavenx(character.id, { includeSessions: exportSessions }, (p) => {
+				exportMsg = `${p.phase} ${p.done}/${p.total}`;
+			});
+			const mb = (r.bytes / 1024 / 1024).toFixed(1);
+			exportMsg = r.missing
+				? `완료 (${mb}MB) — 원본을 못 찾은 이미지 ${r.missing}개는 빠졌어요.`
+				: `완료 (${mb}MB)`;
+		} catch (e) {
+			exportMsg =
+				e instanceof DOMException && e.name === 'AbortError'
+					? ''
+					: e instanceof Error
+						? e.message
+						: '내보내기에 실패했어요.';
+		} finally {
+			exporting = false;
+		}
 	}
 
 	let deleting = $state(false);
@@ -191,9 +234,26 @@
 				</div>
 			{/if}
 
-			<button class="delete-link" onclick={remove} disabled={deleting}>
-				{deleting ? '삭제 중…' : '이 캐릭터 삭제'}
-			</button>
+			<div class="link-row">
+				<button class="text-link" onclick={toggleExport} aria-expanded={exportOpen}>
+					havenx 내보내기
+				</button>
+				<button class="text-link danger" onclick={remove} disabled={deleting}>
+					{deleting ? '삭제 중…' : '이 캐릭터 삭제'}
+				</button>
+			</div>
+			{#if exportOpen}
+				<div class="export-box">
+					<label class="export-opt">
+						<input type="checkbox" bind:checked={exportSessions} disabled={exporting || !sessionCount} />
+						대화 기록 포함{sessionCount !== null ? ` (${sessionCount}개)` : ''}
+					</label>
+					<button class="secondary small" onclick={runExport} disabled={exporting}>
+						{exporting ? '내보내는 중…' : '⇩ .havenx 저장'}
+					</button>
+					{#if exportMsg}<p class="export-msg">{exportMsg}</p>{/if}
+				</div>
+			{/if}
 			<div class="actions">
 				<button class="secondary" onclick={edit} title="캐릭터 수정">✎ 수정</button>
 				{#if hasAssets}
@@ -476,10 +536,45 @@
 	.secondary:hover {
 		border-color: var(--accent);
 	}
-	.delete-link {
+	.link-row {
 		flex-shrink: 0;
-		align-self: flex-end;
+		display: flex;
+		justify-content: flex-end;
+		gap: 14px;
 		margin: -6px 0 6px;
+	}
+	.export-box {
+		flex-shrink: 0;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px 12px;
+		margin: 0 0 10px;
+		padding: 10px 12px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--bg-elev);
+		font-size: 0.84rem;
+	}
+	.export-opt {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		color: var(--text-dim);
+	}
+	.secondary.small {
+		padding: 8px 12px;
+		font-size: 0.84rem;
+	}
+	.export-msg {
+		flex-basis: 100%;
+		margin: 0;
+		text-align: right;
+		color: var(--text-dim);
+		font-size: 0.78rem;
+	}
+	.text-link {
 		padding: 2px;
 		border: none;
 		background: none;
@@ -489,10 +584,13 @@
 		text-underline-offset: 3px;
 		cursor: pointer;
 	}
-	.delete-link:hover:not(:disabled) {
+	.text-link:hover:not(:disabled) {
+		color: var(--text);
+	}
+	.text-link.danger:hover:not(:disabled) {
 		color: #ff7b7b;
 	}
-	.delete-link:disabled {
+	.text-link:disabled {
 		opacity: 0.55;
 	}
 	.start {
