@@ -14,28 +14,28 @@ export interface ModelOption {
 }
 
 // contextLimit = Vercel AI Gateway 표시 max context(input+output 합산 총 컨텍스트).
-// 순서 = 가격 내림차순(게이트웨이 표준 단가, input/output $ per 1M tokens, 2026-09 기준).
+// 순서 = 가격 내림차순(게이트웨이 표준 단가, input/output $ per 1M tokens, 2026-11 기준).
 export const MODELS: ModelOption[] = [
 	// $5 / $25 — Opus 4.6. RP 커뮤니티(아카라이브 AI채팅챈·레딧 프리셋 제작자 티어표) 합의로 Claude 중 RP 최고 +
-	// 최신 세대 중 검열 최약. Opus 4.8·5 는 하드검열 강화·창의성 저하 평이라 목록에서 제외(2026-09-07).
+	// 최신 세대 중 검열 최약. Opus 4.8·5·5.5 는 하드검열 강화·창의성 저하 평이라 목록에서 제외(2026-09-07).
 	// 게이트웨이 라우팅은 buildProviderOptions 에서 anthropic 직결 고정(Bedrock 경유는 정책 위반 차단이 엄격).
 	{ id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6', icon: '/models/claude.avif', contextLimit: 1_000_000 },
-	// $3 / $15 — Moonshot 플래그십. 창작 글쓰기 벤치 Opus 5 다음(2026-09). 1M 컨텍스트·캐시 입력 90% 할인
-	{ id: 'moonshotai/kimi-k3', label: 'Kimi K3', icon: '/models/moonshotai.avif', contextLimit: 1_000_000, reasoning: true },
-	// $2 / $10 — GPT-5.6 시리즈 플래그십
+	// $4 / $20 — GPT-5.6 시리즈 플래그십(2026-11 기준 후속 없음)
 	{ id: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol', icon: '/models/openai.avif', contextLimit: 1_050_000, reasoning: true },
+	// $2 / $10 — Moonshot 플래그십 K3.1 Pro(2026-10-23, K3 후속). 공급자는 moonshotai 단독
+	{ id: 'moonshotai/kimi-k3.1-pro', label: 'Kimi K3.1 Pro', icon: '/models/moonshotai.avif', contextLimit: 1_048_576, reasoning: true },
 	// $0.75 / $3.75
 	{ id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true },
-	// $0.66 / $1.98
+	// $0.66 / $1.98 (피크 시간대 2배)
 	{ id: 'deepseek/deepseek-v4-pro-0813', label: 'DeepSeek V4 Pro', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true },
-	// $0.15 / $0.50
-	{ id: 'zai/glm-5.3-flash', label: 'GLM 5.3 Flash', icon: '/models/zai.avif', contextLimit: 1_000_000, reasoning: true },
-	// $0.076 / $0.153
-	{ id: 'deepseek/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash', icon: '/models/deepseek.avif', contextLimit: 1_000_000, reasoning: true }
+	// $0.30 / $1.20 — V4.1 Flash 1017(2026-10-17). V4 Flash 0731($0.076/$0.153)에서 교체(2026-11-01)
+	{ id: 'deepseek/deepseek-v4.1-flash-1017', label: 'DeepSeek V4.1 Flash', icon: '/models/deepseek.avif', contextLimit: 1_048_576, reasoning: true },
+	// $0.15 / $0.50 (glm-5.3-flashx 는 같은 세대 고속 서빙 옵션이라 후속 아님)
+	{ id: 'zai/glm-5.3-flash', label: 'GLM 5.3 Flash', icon: '/models/zai.avif', contextLimit: 1_000_000, reasoning: true }
 ];
 
-/** 채팅 기본 모델 — 가장 저렴한 DeepSeek V4 Flash(목록 순서와 무관하게 고정). */
-export const DEFAULT_MODEL_ID = 'deepseek/deepseek-v4-flash-0731';
+/** 채팅 기본 모델 — DeepSeek V4.1 Flash(목록 순서와 무관하게 고정). */
+export const DEFAULT_MODEL_ID = 'deepseek/deepseek-v4.1-flash-1017';
 
 /**
  * 캐릭터 제작 보조(assist)에 허용하는 모델 — 구조화 출력(streamObject)이 안정적인 것만.
@@ -43,7 +43,7 @@ export const DEFAULT_MODEL_ID = 'deepseek/deepseek-v4-flash-0731';
  * content-filter 로 빈 응답 처리하는 경우가 있음.)
  * DeepSeek V4 Pro 는 NSFW 설정을 거부하지 않는 상위 모델로 추가(2026-09-07 실측: NSFW 러프 입력 4/4 정상 JSON,
  * 30~35s, thinking 끔·스키마는 시스템 주입 호환 모드). Opus·Sol 은 NSFW 설정 입력을 거부하는 경우가 있어
- * 검열 회피용 대안. DeepSeek V4 Flash 는 length 실패가 잦아 제외.
+ * 검열 회피용 대안. DeepSeek V4(.1) Flash 는 length 실패가 잦아 제외(V4 시절 실측).
  * MODELS(채팅 목록)의 부분집합이므로 getModel 로 조회 가능.
  */
 const ASSIST_MODEL_ID_LIST = [
@@ -76,8 +76,8 @@ export const IMAGE_PROMPT_MODELS: ModelOption[] = [
 	{ id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', icon: '/models/gemini.avif', contextLimit: 1_000_000, reasoning: true },
 	// $0.15 / $0.50 — 2~3s, char/user 분리·인원수 태그 정확(실측 4/4)
 	{ id: 'zai/glm-5.3-flash', label: 'GLM 5.3 Flash', icon: '/models/zai.avif', contextLimit: 1_000_000, reasoning: true },
-	// $0.30 / $1.20 — 2~3s(실측 4/4)
-	{ id: 'minimax/minimax-m3', label: 'MiniMax M3', icon: '/models/minimax.avif', contextLimit: 512_000, reasoning: true }
+	// $0.15 / $0.60 — M3.1 Flash(2026-10-19). M3($0.30/$1.20, 2~3s 실측 4/4)에서 교체(2026-11-01)
+	{ id: 'minimax/minimax-m3.1-flash', label: 'MiniMax M3.1 Flash', icon: '/models/minimax.avif', contextLimit: 1_048_576, reasoning: true }
 ];
 export const IMAGE_PROMPT_MODEL_IDS: Set<string> = new Set(IMAGE_PROMPT_MODELS.map((m) => m.id));
 /** 이미지 상황 프롬프트 기본 모델 — Gemini 3.8 Flash(2026-09-09, 검열 재시도 도입과 함께). */
