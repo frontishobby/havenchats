@@ -43,14 +43,16 @@
 
 	function onPick(e: Event) {
 		const input = e.target as HTMLInputElement;
-		addFiles(input.files);
+		// FileList 는 live — value 를 비우면 같이 비워지므로 먼저 배열로 복사(addFiles 는 await 뒤에 읽음).
+		const files = Array.from(input.files ?? []);
 		input.value = '';
+		addFiles(files);
 	}
 
 	function onDrop(e: DragEvent) {
 		e.preventDefault();
 		dragOver = false;
-		addFiles(e.dataTransfer?.files);
+		addFiles(Array.from(e.dataTransfer?.files ?? []));
 	}
 
 	function remove(i: number) {
