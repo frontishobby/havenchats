@@ -5,6 +5,7 @@
 	import NsfwBadge from './NsfwBadge.svelte';
 	import { hasScenes, looksLikeSceneToken } from '$lib/imageCodes';
 	import { resized } from '$lib/imageUrl';
+	import { imgRetry } from '$lib/imgRetry';
 	import type { Character } from '$lib/types';
 
 	let { character, onclose }: { character: Character | null; onclose: () => void } = $props();
@@ -12,6 +13,15 @@
 	let selected = $state(0);
 	let pickOpen = $state(false);
 	let imgFailed = $state(false);
+	// 상세용 고해상도(charfull/)가 끝내 안 뜨면(이 기기에 없고 OneDrive 지연 다운로드도 실패) 카드 썸네일로 대체.
+	let fullFailed = $state(false);
+	let heroSrc = $derived(
+		(!fullFailed && character?.fullImageUrl) || character?.avatarUrl || ''
+	);
+	function onHeroFail() {
+		if (!fullFailed && character?.fullImageUrl && character.avatarUrl) fullFailed = true;
+		else imgFailed = true;
+	}
 	let starting = $state(false);
 
 	// 캐릭터가 바뀌면 선택/상태 초기화
@@ -22,6 +32,7 @@
 			selected = 0;
 			pickOpen = false;
 			imgFailed = false;
+			fullFailed = false;
 			starting = false;
 			exportOpen = false;
 			sessionCount = null;
@@ -163,9 +174,9 @@
 						<span class="thumb-fallback">{character.name.charAt(0)}</span>
 					{:else}
 						<img
-							src={character.fullImageUrl ?? character.avatarUrl}
+							src={heroSrc}
 							alt={character.name}
-							onerror={() => (imgFailed = true)}
+							use:imgRetry={{ onFail: onHeroFail }}
 						/>
 					{/if}
 					<div class="hero-overlay">
