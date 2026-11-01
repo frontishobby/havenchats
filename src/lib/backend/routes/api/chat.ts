@@ -913,7 +913,7 @@ chatRouter.post('/vars', async (c) => {
  */
 
 const MAX_ASSISTANT_CHARS = 6000;
-const MAX_STYLE_CHARS = 1000;
+const MAX_STYLE_CHARS = 3000;
 /** 외형 레퍼런스로 넣을 캐릭터 description 최대 길이(자). 토큰·지연 보호용. */
 const MAX_DESC_CHARS = 6000;
 /** 최근 대화 블록: 메시지 개수·메시지당 길이 상한(토큰·지연 보호용). */

@@ -511,7 +511,7 @@ function normalizeAssistDraft(
 // ── POST /api/characters/thumbnail — 썸네일 생성(스트리밍) ─────
 const THUMB_RESOLUTION: ResolutionKey = '1024x1024';
 const MAX_DESC_CHARS = 6000;
-const MAX_STYLE_CHARS = 1500;
+const MAX_STYLE_CHARS = 3000;
 const MAX_DIRECTION_CHARS = 1000;
 const MAX_BASE_CHARS = 600;
 const MAX_SCENE_CHARS = 400;

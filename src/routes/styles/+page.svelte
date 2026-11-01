@@ -5,6 +5,7 @@
 	import { resized } from '$lib/imageUrl';
 	import type { ArtStyle } from '$lib/types';
 	import { getNaiModel } from '$lib/naiModels';
+	import { importNaiPng, type NaiStyleImport } from '$lib/naiPngMeta';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -14,9 +15,49 @@
 
 	let workshopOpen = $state(false);
 	let editing = $state<ArtStyle | null>(null); // 워크숍 수정 대상
+	let imported = $state<{ data: NaiStyleImport; file: File } | null>(null); // PNG 가져오기 결과
 	$effect(() => {
-		if (!workshopOpen) editing = null;
+		if (!workshopOpen) {
+			editing = null;
+			imported = null;
+		}
 	});
+
+	// NovelAI PNG(메타 청크 또는 스텔스 알파 메타) → 워크숍을 채워 연다. 버튼 또는 페이지에 끌어다 놓기.
+	let fileInput = $state<HTMLInputElement | null>(null);
+	let importing = $state(false);
+	let dragOver = $state(false);
+	async function importPng(file: File | null | undefined) {
+		if (!file || importing) return;
+		if (file.type && file.type !== 'image/png') {
+			alert('NovelAI 에서 받은 PNG 파일만 읽을 수 있어요.');
+			return;
+		}
+		importing = true;
+		try {
+			const data = await importNaiPng(file);
+			editing = null;
+			selected = null;
+			imported = { data, file };
+			workshopOpen = true;
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'PNG 를 읽지 못했어요.');
+		} finally {
+			importing = false;
+			if (fileInput) fileInput.value = '';
+		}
+	}
+	function onDragOver(e: DragEvent) {
+		if (workshopOpen || !e.dataTransfer?.types.includes('Files')) return;
+		e.preventDefault();
+		dragOver = true;
+	}
+	function onDrop(e: DragEvent) {
+		if (workshopOpen || !e.dataTransfer?.files.length) return;
+		e.preventDefault();
+		dragOver = false;
+		importPng(e.dataTransfer.files[0]);
+	}
 	let selected = $state<ArtStyle | null>(null);
 	let busy = $state<string | null>(null);
 	let promptOpen = $state(false);
@@ -62,13 +103,31 @@
 <svelte:head><title>그림체 — Haven</title></svelte:head>
 <svelte:window onkeydown={onKey} />
 
-<div class="hub">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="hub" class:drag={dragOver} ondragover={onDragOver} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
 	<header class="hub-head">
 		<div>
 			<h1>그림체</h1>
 			<p>화풍 프롬프트를 깎아 저장하면 채팅 이미지 생성·캐릭터 썸네일에서 고를 수 있어요.</p>
 		</div>
-		<button class="craft-btn" onclick={openWorkshop}>✦ 그림체 깎기</button>
+		<div class="head-actions">
+			<button
+				class="import-btn"
+				onclick={() => fileInput?.click()}
+				disabled={importing}
+				title="NovelAI 로 생성한 PNG 의 프롬프트·네거티브·모델을 읽어 그림체로 만들어요(끌어다 놓아도 돼요)"
+			>
+				{importing ? '읽는 중…' : 'PNG 가져오기'}
+			</button>
+			<button class="craft-btn" onclick={openWorkshop}>✦ 그림체 깎기</button>
+		</div>
+		<input
+			bind:this={fileInput}
+			type="file"
+			accept="image/png"
+			hidden
+			onchange={(e) => importPng(e.currentTarget.files?.[0])}
+		/>
 	</header>
 
 	{#if list.length === 0}
@@ -138,7 +197,7 @@
 	</div>
 {/if}
 
-<StyleWorkshopModal bind:open={workshopOpen} edit={editing} {onPublished} />
+<StyleWorkshopModal bind:open={workshopOpen} edit={editing} {imported} {onPublished} />
 
 <style>
 	.hub {
@@ -162,6 +221,31 @@
 		margin: 0;
 		font-size: 0.85rem;
 		color: var(--text-dim);
+	}
+	.hub.drag {
+		outline: 2px dashed var(--accent);
+		outline-offset: -8px;
+		border-radius: var(--radius);
+	}
+	.head-actions {
+		flex-shrink: 0;
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+	.import-btn {
+		padding: 10px 16px;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		background: transparent;
+		color: var(--text-dim);
+		font-weight: 700;
+		font-size: 0.88rem;
+	}
+	.import-btn:hover:not(:disabled) {
+		color: var(--text);
+		border-color: var(--text-dim);
 	}
 	.craft-btn {
 		flex-shrink: 0;
