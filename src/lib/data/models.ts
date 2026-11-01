@@ -16,10 +16,6 @@ export interface ModelOption {
 // contextLimit = Vercel AI Gateway 표시 max context(input+output 합산 총 컨텍스트).
 // 순서 = 가격 내림차순(게이트웨이 표준 단가, input/output $ per 1M tokens, 2026-09 기준).
 export const MODELS: ModelOption[] = [
-	// 구독 — homebox 브릿지(bridge/haven-bridge.mjs)가 Claude Code CLI(`claude -p`, 구독 OAuth)를 OpenAI 호환으로
-	// 노출. 비용 0(구독 한도에서 차감), 캐시·멀티턴은 브릿지의 --resume 이 담당. API 키 관리에서 브릿지 URL 등록 필요.
-	// id 의 `bridge/` 뒤가 CLI --model 값. contextLimit 은 Claude Code 기본 200k.
-	{ id: 'bridge/claude-opus-4-6', label: 'Opus 4.6 Subscription', icon: '/models/claude.avif', contextLimit: 200_000 },
 	// $5 / $25 — Opus 4.6. RP 커뮤니티(아카라이브 AI채팅챈·레딧 프리셋 제작자 티어표) 합의로 Claude 중 RP 최고 +
 	// 최신 세대 중 검열 최약. Opus 4.8·5 는 하드검열 강화·창의성 저하 평이라 목록에서 제외(2026-09-07).
 	// 게이트웨이 라우팅은 buildProviderOptions 에서 anthropic 직결 고정(Bedrock 경유는 정책 위반 차단이 엄격).
@@ -95,16 +91,6 @@ export function findImagePromptModel(id: string): ModelOption | undefined {
 
 /** 알 수 없는 모델의 보수적 기본 컨텍스트 상한. */
 const FALLBACK_CONTEXT_LIMIT = 128_000;
-
-/** 구독 브릿지 경유 모델(`bridge/<cli model>`) — Vercel AI Gateway 대신 homebox 브릿지로 호출. */
-export const BRIDGE_MODEL_PREFIX = 'bridge/';
-export function isBridgeModel(id: string): boolean {
-	return id.startsWith(BRIDGE_MODEL_PREFIX);
-}
-/** 브릿지에 보낼 CLI 모델명(`bridge/claude-opus-4-6` → `claude-opus-4-6`). */
-export function bridgeModelName(id: string): string {
-	return id.slice(BRIDGE_MODEL_PREFIX.length);
-}
 
 /** 서버 검증용 허용 모델 ID 집합 (임의 모델 주입 방지) */
 export const MODEL_IDS: Set<string> = new Set(MODELS.map((m) => m.id));

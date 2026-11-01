@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
-import { streamText, generateText, generateObject, type LanguageModel } from 'ai';
-import { createGateway } from '@ai-sdk/gateway';
-import { resolveChatModel } from '$lib/backend/llm';
+import { streamText, generateText, generateObject } from 'ai';
+import { createGateway, type GatewayProvider } from '@ai-sdk/gateway';
 import { getWaitUntil } from '$lib/backend/waitUntil';
 import { findCharacter } from '$lib/backend/characters';
 import {
@@ -127,6 +126,15 @@ chatRouter.post('/', async (c) => {
 		return c.json({ error: 'db unavailable' }, 500);
 	}
 
+	// 챗은 유저 본인 Vercel AI Gateway 키로 호출(BYO). 키 없으면 차단(예외 없음).
+	const gatewayKey = await getDecryptedKey(db, user.id, 'gateway');
+	if (!gatewayKey) {
+		return c.json(
+			{ error: 'no_gateway_key', message: 'API 키 관리에서 Vercel AI Gateway 키를 먼저 등록해 주세요.' },
+			400
+		);
+	}
+
 	const body = (await c.req.json()) as ChatRequestBody;
 	const character = await findCharacter(db, body.characterId);
 	if (!character) {
@@ -160,9 +168,6 @@ chatRouter.post('/', async (c) => {
 	const userName = (user.personaName && user.personaName.trim()) || user.name;
 	const userPersona = user.persona;
 	const modelId = pickModel(body.model);
-	// 챗은 유저 본인 키로 호출(BYO): Vercel AI Gateway 키 또는(bridge/ 모델) 구독 브릿지 URL. 없으면 차단.
-	const llm = await resolveChatModel(db, user.id, modelId);
-	if (!llm.ok) return c.json({ error: llm.error, message: llm.message }, 400);
 	const maxSentences = clampSentences(body.maxSentences);
 	const userActs = clampUserActs(body.userActs);
 	// 클라가 보낸 메시지 id 가 있으면 DB PK 로 사용(라이브 메시지 삭제 동기화). 없으면 서버 생성.
@@ -260,6 +265,8 @@ chatRouter.post('/', async (c) => {
 			})
 		: null;
 
+	const gateway = createGateway({ apiKey: gatewayKey });
+
 	// 응답 종료 후 처리(영속화·요약)를 워커 생존 보장 하에 실행.
 	const after = getWaitUntil();
 
@@ -284,9 +291,7 @@ chatRouter.post('/', async (c) => {
 	let streamError: unknown = null;
 
 	const result = streamText({
-		model: llm.model,
-		// 구독 브릿지가 Haven 세션 단위로 CLI 세션을 이어가도록(--resume → 캐시 유지) 세션 id 를 헤더로 보낸다.
-		headers: { 'x-haven-session': session.id },
+		model: gateway(modelId),
 		// system = [제작자 프롬프트 + 상대 정보 + 가드레일] (고정 prefix)
 		//          + (요약 있으면) "지금까지의 이야기" 블록. 요약 갱신 때만 변함 → 대부분 캐시 hit.
 		// Gemini 는 XML 프레이밍으로 system 을 첫 user 메시지에 접어 보내므로 undefined(chatAssembly 참고).
@@ -340,7 +345,7 @@ chatRouter.post('/', async (c) => {
 			after(
 				persistAndMaybeSummarize(
 					db,
-					llm.model,
+					gateway,
 					modelId,
 					session!,
 					window,
@@ -525,7 +530,7 @@ function safeJson(value: unknown): string {
  */
 async function persistAndMaybeSummarize(
 	db: D1Database,
-	model: LanguageModel,
+	gateway: GatewayProvider,
 	modelId: string,
 	session: ChatSession,
 	windowBefore: Array<StoredMessage & { tokenEst: number }>,
@@ -550,7 +555,7 @@ async function persistAndMaybeSummarize(
 	const liveCount = windowBefore.length + 1;
 	const liveTokens = windowBefore.reduce((s, m) => s + m.tokenEst, 0) + estimateTokens(reply);
 	if (liveCount > KEEP_RECENT && liveTokens > WINDOW_TOKEN_BUDGET) {
-		await summarizeSession(db, model, modelId, session, assistantSeq);
+		await summarizeSession(db, gateway, modelId, session, assistantSeq);
 	}
 }
 
@@ -561,7 +566,7 @@ async function persistAndMaybeSummarize(
  */
 async function summarizeSession(
 	db: D1Database,
-	model: LanguageModel,
+	gateway: GatewayProvider,
 	modelId: string,
 	session: ChatSession,
 	latestSeq: number
@@ -579,7 +584,7 @@ async function summarizeSession(
 	const prior = session.summary ? `[기존 요약]\n${session.summary}\n\n` : '';
 
 	const { text } = await generateText({
-		model,
+		model: gateway(modelId),
 		system: SUMMARY_SYSTEM,
 		prompt: `${prior}[추가 대화]\n${transcript}`,
 		temperature: 0.3,
@@ -1758,6 +1763,14 @@ chatRouter.post('/rewrite', async (c) => {
 	const db = c.env.DB;
 	if (!db) return c.json({ error: 'db unavailable' }, 500);
 
+	const gatewayKey = await getDecryptedKey(db, user.id, 'gateway');
+	if (!gatewayKey) {
+		return c.json(
+			{ error: 'no_gateway_key', message: 'API 키 관리에서 Vercel AI Gateway 키를 먼저 등록해 주세요.' },
+			400
+		);
+	}
+
 	const body = (await c.req.json()) as RewriteRequestBody;
 	const text = (body.text ?? '').trim();
 	const filter = (body.filter ?? '').trim().slice(0, MAX_FILTER_CHARS);
@@ -1774,8 +1787,6 @@ chatRouter.post('/rewrite', async (c) => {
 
 	const userLabel = (user.personaName && user.personaName.trim()) || user.name || '나';
 	const modelId = pickModel(body.model);
-	const llm = await resolveChatModel(db, user.id, modelId);
-	if (!llm.ok) return c.json({ error: llm.error, message: llm.message }, 400);
 
 	// 맥락: 세션이 있으면 live window 의 꼬리(최근 N 개) + 요약, 없으면 오프닝만.
 	let summary: string | null = null;
@@ -1799,9 +1810,11 @@ chatRouter.post('/rewrite', async (c) => {
 		summary,
 		recent
 	});
+	const gateway = createGateway({ apiKey: gatewayKey });
+
 	try {
 		const result = await generateText({
-			model: llm.model,
+			model: gateway(modelId),
 			system,
 			messages: [{ role: 'user', content: `다음 입력문을 변환 지시에 맞게 다시 써라. 변환된 본문만 출력.\n\n<입력문>\n${text}\n</입력문>` }],
 			providerOptions: buildProviderOptions(modelId, { noThinking: true }),

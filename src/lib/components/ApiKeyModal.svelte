@@ -20,59 +20,6 @@
 	let saved = $state(false);
 	let initialized = $state(false);
 
-	// Claude 구독 브릿지(homebox, `Opus 4.6 Subscription` 모델 전용) 주소 상태
-	let bStatus = $state<{ registered: boolean; updatedAt: number | null; url: string | null } | null>(null);
-	let bUrlInput = $state('');
-	let bSaving = $state(false);
-	let bDeleting = $state(false);
-	let bError = $state('');
-	let bSaved = $state(false);
-
-	async function bSave() {
-		const url = bUrlInput.trim();
-		if (!url || bSaving) return;
-		bSaving = true;
-		bError = '';
-		bSaved = false;
-		try {
-			const res = await fetch('/api/keys/bridge', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ url })
-			});
-			const d = (await res.json().catch(() => ({}))) as { message?: string };
-			if (res.ok) {
-				bUrlInput = '';
-				bSaved = true;
-				await loadStatus();
-			} else {
-				bError = d.message ?? '등록에 실패했습니다.';
-			}
-		} catch (e) {
-			bError = e instanceof Error ? e.message : '등록에 실패했습니다.';
-		} finally {
-			bSaving = false;
-		}
-	}
-
-	async function bRemove() {
-		if (bDeleting) return;
-		if (!confirm('등록된 브릿지 주소를 삭제할까요? Opus 4.6 Subscription 모델을 쓸 수 없게 돼요.')) return;
-		bDeleting = true;
-		bError = '';
-		try {
-			const res = await fetch('/api/keys/bridge', { method: 'DELETE' });
-			if (res.ok) {
-				bSaved = false;
-				await loadStatus();
-			}
-		} catch (e) {
-			console.error(e);
-		} finally {
-			bDeleting = false;
-		}
-	}
-
 	// Vercel AI Gateway 키(챗 필수) 상태
 	let gStatus = $state<{ registered: boolean; updatedAt: number | null } | null>(null);
 	let gKeyInput = $state('');
@@ -85,14 +32,12 @@
 		loading = true;
 		error = '';
 		try {
-			const [n, g, b] = await Promise.all([
+			const [n, g] = await Promise.all([
 				fetch('/api/keys/novelai'),
-				fetch('/api/keys/gateway'),
-				fetch('/api/keys/bridge')
+				fetch('/api/keys/gateway')
 			]);
 			if (n.ok) status = (await n.json()) as KeyStatus;
 			if (g.ok) gStatus = (await g.json()) as { registered: boolean; updatedAt: number | null };
-			if (b.ok) bStatus = (await b.json()) as { registered: boolean; updatedAt: number | null; url: string | null };
 		} catch (e) {
 			console.error(e);
 		} finally {
@@ -155,9 +100,6 @@
 			gKeyInput = '';
 			gSaved = false;
 			gError = '';
-			bUrlInput = '';
-			bSaved = false;
-			bError = '';
 			loadStatus();
 		} else if (!apiKeyModal.open && initialized) {
 			initialized = false;
@@ -255,7 +197,7 @@
 				</div>
 
 				<p class="hint">
-					채팅(AI 응답)에 사용할 키예요. <strong>필수</strong> — 없으면 채팅을 사용할 수 없어요(구독 브릿지 모델만 예외). 키는
+					채팅(AI 응답)에 사용할 키예요. <strong>필수</strong> — 없으면 채팅을 사용할 수 없어요. 키는
 					<a href="https://vercel.com/dashboard/ai-gateway/api-keys" target="_blank" rel="noreferrer noopener">Vercel AI Gateway</a>
 					대시보드에서 발급해요. 이 기기의 로컬 DB(Drive 동기화 시 내 appData)에 저장됩니다.
 				</p>
@@ -284,52 +226,6 @@
 					{/if}
 					<button class="save" onclick={gSave} disabled={!gKeyInput.trim() || gSaving}>
 						{gSaving ? '확인 중…' : gStatus?.registered ? '교체' : '등록'}
-					</button>
-				</div>
-			</div>
-
-			<div class="provider-sep"></div>
-
-			<div class="provider">
-				<div class="provider-head">
-					<strong>Claude 구독 브릿지</strong>
-					{#if loading}
-						<span class="badge pending">확인 중…</span>
-					{:else if bStatus?.registered}
-						<span class="badge ok">연결됨</span>
-					{:else}
-						<span class="badge none">미등록</span>
-					{/if}
-				</div>
-
-				<p class="hint">
-					<strong>Opus 4.6 Subscription</strong> 모델 전용. 내 머신(homebox)에서 Claude Code 구독으로 도는 브릿지 주소예요.
-					Tailscale 로 같은 테일넷에 있어야 닿아요. 예: <code>https://bridge.example.ts.net</code>
-					{#if bStatus?.url}<br />현재: <code>{bStatus.url}</code>{/if}
-				</p>
-
-				<div class="field">
-					<label for="bridge-url">{bStatus?.registered ? '주소 교체' : '주소 등록'}</label>
-					<input
-						id="bridge-url"
-						type="url"
-						placeholder="https://bridge.example.ts.net"
-						autocomplete="off"
-						bind:value={bUrlInput}
-					/>
-				</div>
-
-				{#if bError}<p class="error">{bError}</p>{/if}
-				{#if bSaved}<p class="ok-msg">연결을 확인하고 저장했습니다.</p>{/if}
-
-				<div class="actions">
-					{#if bStatus?.registered}
-						<button class="del" onclick={bRemove} disabled={bDeleting}>
-							{bDeleting ? '삭제 중…' : '삭제'}
-						</button>
-					{/if}
-					<button class="save" onclick={bSave} disabled={!bUrlInput.trim() || bSaving}>
-						{bSaving ? '확인 중…' : bStatus?.registered ? '교체' : '등록'}
 					</button>
 				</div>
 			</div>
