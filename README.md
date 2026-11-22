@@ -2,7 +2,7 @@
 
 캐릭터 AI 채팅 서비스 — **소설 모드** 롤플레이, 성인(NSFW) 포함. 유저가 AI 캐릭터를 골라 1:1로 대화하고 직접 캐릭터를 만들어 공개한다.
 
-- **Prod**: https://havenchats.com
+- **Prod**: https://havenchats.duckdns.org
 - 제품/도메인 상세 설계: [`CLAUDE.md`](./CLAUDE.md), [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
 
 > 정적 SPA(SvelteKit, Svelte 5 runes) + 백엔드 단일 Cloudflare Worker(Hono). LLM은 Vercel AI SDK v6(AI Gateway). 앱·데이터(D1·R2) 모두 **Cloudflare** 한 곳에서 돈다.

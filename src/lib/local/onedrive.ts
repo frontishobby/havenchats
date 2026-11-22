@@ -12,7 +12,7 @@
  *  - 작성 기기 표시: DB 파일의 `description` 에 JSON `{deviceId, deviceName}` (OneDrive 개인용은 파일 description 쓰기 가능).
  *
  * Entra(Azure) 앱 등록: 지원 계정 유형 = 개인 Microsoft 계정(또는 모든 계정 + 개인), 플랫폼 = **단일 페이지 애플리케이션**,
- * 리디렉트 URI = `https://havenchats.com/auth.html`, `https://havenchats.com/`, `http://localhost:5173/auth.html`,
+ * 리디렉트 URI = `https://havenchats.duckdns.org/auth.html`, `https://havenchats.duckdns.org/`, `http://localhost:5173/auth.html`,
  * `http://localhost:5173/`. 클라이언트 시크릿 없음. API 권한 Files.ReadWrite.AppFolder(위임) 은 첫 로그인 때 동의.
  */
 import { env } from '$env/dynamic/public';

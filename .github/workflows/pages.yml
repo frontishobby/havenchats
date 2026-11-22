@@ -1,5 +1,5 @@
 # GitHub Pages 배포 — main 푸시마다 정적 SPA(build/)를 올린다. 서버 코드 없음.
-# 레포 Settings › Pages › Source = "GitHub Actions". 커스텀 도메인은 Settings › Pages 에 havenchats.com (DNS 는 Cloudflare).
+# 레포 Settings › Pages › Source = "GitHub Actions". 커스텀 도메인은 Settings › Pages 에 havenchats.duckdns.org (DNS 는 DuckDNS).
 name: Deploy to GitHub Pages
 
 on:

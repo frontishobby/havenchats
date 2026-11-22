@@ -5,14 +5,14 @@
 **브라우저 안에서** sql.js(SQLite WASM) + IndexedDB 위에서 그대로 돈다. 저장소는 이 기기(IndexedDB) 또는 **OneDrive 앱 폴더 동기화**(2026-09-09 Google Drive 에서 이전 — Google 은 웹 클라이언트 토큰 갱신에 client_secret 이 필요해 서버 없인 1시간마다 로그인 팝업).
 로그인·계정 없음: `users` 테이블의 유일한 행이 '나'. 다른 Microsoft 계정으로 OneDrive 를 연결하면 그 계정의 데이터가 따로 생긴다.
 
-- **Prod**: https://havenchats.com — **GitHub Pages**(`.github/workflows/pages.yml`, main 푸시 시 빌드·배포). DNS 는 Cloudflare 에 그대로(CNAME → `frontishobby.github.io`, DNS only)
+- **Prod**: https://havenchats.duckdns.org — **GitHub Pages**(`.github/workflows/pages.yml`, main 푸시 시 빌드·배포). DNS 는 DuckDNS(`havenchats.duckdns.org` → GitHub Pages)
 - 과거 설계(Worker/D1/R2 시절): `docs/ARCHITECTURE.md` (도메인 로직 설명은 유효)
 
 ## 스택
 
 | 영역 | 선택 |
 |---|---|
-| 호스팅 | **GitHub Pages**(비공개 레포, Pro). `build/` 정적 파일. 딥링크는 `404.html`(= index.html 복사본)로 SPA 진입, `static/.nojekyll`(Jekyll 이 `_app/` 무시 방지), `static/CNAME`. https 오리진 필요(Google OAuth) |
+| 호스팅 | **GitHub Pages**(공개 레포 `frontishobby/havenchats`). `build/` 정적 파일. 딥링크는 `404.html`(= index.html 복사본)로 SPA 진입, `static/.nojekyll`(Jekyll 이 `_app/` 무시 방지), `static/CNAME`. https 오리진 필요(Google OAuth) |
 | 프론트 | SvelteKit 정적 SPA(`adapter-static`, `ssr=false`), Svelte 5 |
 | '백엔드' | **Hono 앱을 브라우저에서 실행**(`src/lib/local/app.ts`). `app.html` 의 fetch 래퍼가 같은 오리진 `/api/*`·`/img/*` 를 `window.__havenFetch` 로 보내고, `<img src="/img/…">` 는 서비스워커(`static/img-sw.js`)가 IndexedDB 에서 응답 |
 | DB | **sql.js(SQLite WASM) 인메모리 + D1 호환 shim**(`src/lib/local/d1.ts`). 스냅샷(`db.export()`)을 IndexedDB `haven-meta.kv.db` 에 디바운스 저장. 스키마는 `migrations/*.sql` 을 그대로 적용(`_migrations` 테이블로 추적) |
@@ -122,7 +122,7 @@ wrangler.jsonc        # assets-only 배포 설정
 ## 환경 변수
 
 서버가 없으므로 **공개 값만** 있고 빌드 시 인라인된다(`.env`, gitignore / `.env.example` 참고).
-- `PUBLIC_MS_CLIENT_ID`(선택) — Entra 앱(클라이언트) ID(비밀 아님). 비우면 `src/lib/local/onedrive.ts` 의 기본값. **Entra 앱 등록**: 지원 계정 = 개인 Microsoft 계정(또는 모든 계정+개인), 플랫폼 **단일 페이지 애플리케이션**, 리디렉트 URI `https://havenchats.com/auth.html`·`https://havenchats.com/`·`http://localhost:5173/auth.html`·`http://localhost:5173/`. 시크릿·API 권한 사전 부여 불필요(`Files.ReadWrite.AppFolder` 는 첫 로그인 때 동의).
+- `PUBLIC_MS_CLIENT_ID`(선택) — Entra 앱(클라이언트) ID(비밀 아님). 비우면 `src/lib/local/onedrive.ts` 의 기본값. **Entra 앱 등록**: 지원 계정 = 개인 Microsoft 계정(또는 모든 계정+개인), 플랫폼 **단일 페이지 애플리케이션**, 리디렉트 URI `https://havenchats.duckdns.org/auth.html`·`https://havenchats.duckdns.org/`·`http://localhost:5173/auth.html`·`http://localhost:5173/`. 시크릿·API 권한 사전 부여 불필요(`Files.ReadWrite.AppFolder` 는 첫 로그인 때 동의).
 - `AI_GATEWAY_API_KEY`(선택) — 재현 스크립트(tsx)용. 앱은 유저가 등록한 키(로컬 DB)를 쓴다.
 - NovelAI·Gateway 키는 앱 '프로필 › API 키 관리'에서 등록 → 로컬 DB `user_keys` 평문(OneDrive 스냅샷에도 포함됨 — 앱 폴더는 본인 계정만 접근).
 
@@ -142,8 +142,8 @@ node scripts/export-legacy.mjs haven-d1.sql --out haven-legacy-backup.zip   # �
 
 ## 인프라
 
-- **GitHub Pages**(레포 `frontishobby/havenchats.com`, Settings › Pages › Source = GitHub Actions, 커스텀 도메인 `havenchats.com`). 워크플로 `.github/workflows/pages.yml`: `npm ci` → `npm run build` → `upload-pages-artifact(build)` → `deploy-pages`.
-- **Cloudflare 는 DNS 만**: `havenchats.com` CNAME → `frontishobby.github.io`(DNS only/회색 구름 — GitHub 가 인증서 발급). Worker `havenchats`·D1 `haven`·R2 `haven-images`(계정 `frontishobby`)는 이전 검증 후 삭제 대상, wrangler 는 레포에서 제거됨. 구 무료 계정 `HavenChats` 리소스도 삭제 대상.
+- **GitHub Pages**(레포 `frontishobby/havenchats`(공개), Settings › Pages › Source = GitHub Actions, 커스텀 도메인 `havenchats.duckdns.org`). 워크플로 `.github/workflows/pages.yml`: `npm ci` → `npm run build` → `upload-pages-artifact(build)` → `deploy-pages`.
+- **DNS 는 DuckDNS**: `havenchats.duckdns.org` → GitHub Pages(GitHub 가 인증서 발급). 구 Cloudflare 리소스: Worker `havenchats`·D1 `haven`·R2 `haven-images`(계정 `frontishobby`)는 이전 검증 후 삭제 대상, wrangler 는 레포에서 제거됨. 구 무료 계정 `HavenChats` 리소스도 삭제 대상.
 - **OneDrive**: 유저 Microsoft 계정의 앱 폴더 `Apps/Haven`(무료 5GB). 파일 = `haven.sqlite` + 이미지(키 경로 그대로). 유저가 OneDrive 에서 직접 볼 수 있음.
 - **Entra 앱 등록**(SPA, 개인 계정 Default Directory): 클라이언트 ID `c7d9aef7-36f1-4e6a-8ebc-b3c2eafa1b88`(코드 기본값). 리디렉트 URI 에 prod·localhost 의 `/auth.html` 과 `/` 등록. 구 Google OAuth 클라이언트(`965110096401-…`)·Drive appData 의 옛 파일은 삭제 대상.
 
